@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "properties": {
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "direction": {"type": "string", "enum": ["publishes", "consumes"]},
+          "channel": {"type": "string", "description": "Topic/queue/exchange name."},
+          "shape": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {"type": "string"},
+                "type_desc": {"type": "string"}
+              },
+              "required": ["field", "type_desc"],
+              "additionalProperties": false
+            }
+          },
+          "description": {"type": "string", "description": "Why/when this message is emitted or handled."}
+        },
+        "required": ["direction", "channel", "shape", "description"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["messages"],
+  "additionalProperties": false
+}

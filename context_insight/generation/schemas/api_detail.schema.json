@@ -1,0 +1,64 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "One line: what this API does."
+    },
+    "description": {
+      "type": "string",
+      "description": "What the API does, in business terms, and what it returns."
+    },
+    "response_shape": {
+      "type": "array",
+      "description": "Fields of the response payload.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {"type": "string"},
+          "type_desc": {"type": "string", "description": "e.g. 'string, order id' or 'number, total in cents'"}
+        },
+        "required": ["field", "type_desc"],
+        "additionalProperties": false
+      }
+    },
+    "calls": {
+      "type": "array",
+      "description": "Other services, queues or topics this API calls or publishes to while handling a request.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "to_service_name": {"type": "string", "description": "Best-effort name of the target service/queue."},
+          "call_kind": {"type": "string", "enum": ["http", "grpc", "queue_publish", "queue_consume"]},
+          "reason": {"type": "string", "description": "WHY this call happens, in business terms."},
+          "data_needed": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Specific fields/data this API needs from (or sends to) the target."
+          },
+          "purpose_kind": {
+            "type": "string",
+            "enum": ["validation", "data_fetch", "enrichment", "notification", "other"]
+          }
+        },
+        "required": ["to_service_name", "call_kind", "reason", "data_needed", "purpose_kind"],
+        "additionalProperties": false
+      }
+    },
+    "validations": {
+      "type": "array",
+      "description": "Input validation and authorization rules enforced by this API.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {"type": "string", "enum": ["input_validation", "authorization"]},
+          "description": {"type": "string"}
+        },
+        "required": ["kind", "description"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["summary", "description", "response_shape", "calls", "validations"],
+  "additionalProperties": false
+}

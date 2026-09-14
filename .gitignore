@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+context_insight.egg-info/
+
+# generated artifacts, not source
+*.db
+/docs/
+verify/sample_project.db
+.context_insight/

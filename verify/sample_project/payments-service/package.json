@@ -1,0 +1,10 @@
+{
+  "name": "payments-service",
+  "version": "1.0.0",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "express": "^4.18.0",
+    "typeorm": "^0.3.0",
+    "kafkajs": "^2.2.0"
+  }
+}

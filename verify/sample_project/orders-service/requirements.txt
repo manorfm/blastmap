@@ -1,0 +1,4 @@
+fastapi
+requests
+sqlalchemy
+kafka-python

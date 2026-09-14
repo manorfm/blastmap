@@ -1,0 +1,5 @@
+#!/bin/sh
+# Auto version bump on commit, based on Conventional Commits (feat/fix/BREAKING CHANGE).
+# Installed by scripts/install-hooks.sh — reinstall after a fresh clone with:
+#   sh scripts/install-hooks.sh
+exec python3 "$(git rev-parse --show-toplevel)/scripts/bump_version.py" "$1" "$2"

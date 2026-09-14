@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "properties": {
+    "short_desc": {
+      "type": "string",
+      "description": "One sentence, plain language, what this service is for."
+    },
+    "long_desc": {
+      "type": "string",
+      "description": "A short paragraph: responsibilities, tech stack, role in the architecture."
+    }
+  },
+  "required": ["short_desc", "long_desc"],
+  "additionalProperties": false
+}

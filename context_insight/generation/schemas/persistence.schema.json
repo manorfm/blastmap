@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "properties": {
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "description": "Table/collection/entity name."},
+          "kind": {"type": "string", "enum": ["sql_table", "document", "cache", "other"]},
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {"type": "string"},
+                "type_desc": {"type": "string"}
+              },
+              "required": ["field", "type_desc"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["name", "kind", "fields"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["entities"],
+  "additionalProperties": false
+}
