@@ -36,7 +36,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         """Full picture of one microservice: description, why it calls other services/queues
         (with the business reason and data needed), its APIs as one-liners, and what it
         persists/publishes by name only (use describe_persistence/describe_messages for the
-        full field-level schema)."""
+        full field-level schema). Includes freshness (indexed commit vs. the repository's
+        current commit, and whether that means this knowledge may be stale)."""
         with closing(_conn()) as conn:
             return queries.describe_service(conn, service)
 
@@ -103,11 +104,15 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         vendors/SaaS reachable from the relevant services — you may need to touch that
         integration too) and unmapped_internal_hint (dependencies that look like internal
         services of this same system but haven't been indexed yet — index them for a
-        fuller picture). This is a task-specific inference, not a verified fact — treat
-        it as a starting point, not ground truth. Pass hint_services if you already
-        suspect specific services, to anchor the search. The response includes a
-        run_id — pass it to record_change_surface_feedback once you know whether the
-        findings were actually right, to improve future confidence for this service."""
+        fuller picture). unknowns lists every gap in the answer explicitly (status,
+        reason, suggestion) instead of silently omitting it, and freshness reports,
+        per relevant service, whether its indexed knowledge might be stale (its indexed
+        commit vs. the repository's current commit). This is a task-specific inference,
+        not a verified fact — treat it as a starting point, not ground truth. Pass
+        hint_services if you already suspect specific services, to anchor the search.
+        The response includes a run_id — pass it to record_change_surface_feedback once
+        you know whether the findings were actually right, to improve future confidence
+        for this service."""
         with closing(_conn()) as conn:
             return queries.find_change_surface(conn, resolved_backend, task, hint_services)
 

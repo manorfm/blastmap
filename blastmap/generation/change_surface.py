@@ -21,6 +21,7 @@ from blastmap.db.repositories import persistence as persistence_repo
 from blastmap.db.repositories import service_calls as service_calls_repo
 from blastmap.db.repositories import services as services_repo
 from blastmap.generation.backend_base import LLMBackend
+from blastmap.generation.freshness import compute_freshness
 from blastmap.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 from blastmap.generation.retrieval import CandidateRetrieval, KeywordGraphRetrieval
 
@@ -42,6 +43,8 @@ class ChangeSurfaceBuilder:
     flow: list[dict] = field(default_factory=list)
     external_integrations: list[dict] = field(default_factory=list)
     unmapped_internal_hint: list[dict] = field(default_factory=list)
+    freshness: dict[str, dict] = field(default_factory=dict)
+    unknowns: list[dict] = field(default_factory=list)
     note: str | None = None
 
     def with_findings(self, primary: list[dict], secondary: list[dict], no_change_hint: list[dict]) -> "ChangeSurfaceBuilder":
@@ -62,6 +65,14 @@ class ChangeSurfaceBuilder:
         self.unmapped_internal_hint = items
         return self
 
+    def with_freshness(self, freshness: dict[str, dict]) -> "ChangeSurfaceBuilder":
+        self.freshness = freshness
+        return self
+
+    def with_unknowns(self, items: list[dict]) -> "ChangeSurfaceBuilder":
+        self.unknowns = items
+        return self
+
     def with_note(self, note: str) -> "ChangeSurfaceBuilder":
         self.note = note
         return self
@@ -74,6 +85,8 @@ class ChangeSurfaceBuilder:
             "flow": self.flow,
             "external_integrations": self.external_integrations,
             "unmapped_internal_hint": self.unmapped_internal_hint,
+            "freshness": self.freshness,
+            "unknowns": self.unknowns,
         }
         if self.note is not None:
             result["note"] = self.note
@@ -196,6 +209,33 @@ def _derive_dependency_hints(conn: sqlite3.Connection, service_names: set[str], 
     return out
 
 
+def _compute_freshness_for(conn: sqlite3.Connection, service_names: set[str]) -> dict[str, dict]:
+    freshness: dict[str, dict] = {}
+    for name in service_names:
+        row = services_repo.get_service_by_name(conn, name)
+        if row is None:
+            continue
+        freshness[name] = compute_freshness(row["updated_at"], row["last_commit"], row["root_path"])
+    return freshness
+
+
+def _derive_unknowns_from_unmapped(unmapped_internal_hint: list[dict]) -> list[dict]:
+    """Every unmapped_internal_hint finding is, by definition, a gap in the System
+    Knowledge Model: a dependency that looks internal but was never indexed. Restate
+    each one as an explicit unknowns entry so an agent can branch on `status ==
+    "unknown"` directly instead of having to infer that meaning from the bucket name.
+    """
+    return [
+        {
+            "status": "unknown",
+            "service": hint["service"],
+            "reason": f"{hint['service']} looks internal but has not been indexed yet",
+            "suggestion": f"index the {hint['service']} repository for a fuller picture",
+        }
+        for hint in unmapped_internal_hint
+    ]
+
+
 def analyze_change_surface(
     conn: sqlite3.Connection,
     task: str,
@@ -208,7 +248,8 @@ def analyze_change_surface(
     candidates = retrieval.candidates(conn, task, hint_services, max_candidates)
     if not candidates:
         note = "no indexed service matched this task; pass hint_services or index more of the system"
-        return ChangeSurfaceBuilder().with_note(note).build()
+        unknown = {"status": "unknown", "reason": note, "suggestion": "pass hint_services or index more of the system"}
+        return ChangeSurfaceBuilder().with_note(note).with_unknowns([unknown]).build()
 
     candidates_block, evidence_by_service = _build_context(conn, candidates)
     prompt = _render_prompt(task, candidates_block)
@@ -225,12 +266,15 @@ def analyze_change_surface(
     no_change = _filter_known(conn, result.get("no_change", []), known, evidence_by_service)
 
     relevant = {f["service"] for f in primary} | {f["service"] for f in secondary}
+    unmapped_internal_hint = _derive_dependency_hints(conn, relevant, service_calls_repo.list_unmapped_internal_calls)
     response = (
         ChangeSurfaceBuilder()
         .with_findings(primary, secondary, no_change)
         .with_flow(_derive_flow(conn, relevant))
         .with_external_integrations(_derive_dependency_hints(conn, relevant, service_calls_repo.list_external_integration_calls))
-        .with_unmapped_internal_hint(_derive_dependency_hints(conn, relevant, service_calls_repo.list_unmapped_internal_calls))
+        .with_unmapped_internal_hint(unmapped_internal_hint)
+        .with_freshness(_compute_freshness_for(conn, relevant))
+        .with_unknowns(_derive_unknowns_from_unmapped(unmapped_internal_hint))
         .build()
     )
     response["run_id"] = change_surface_repo.record_change_surface_run(conn, task, backend.name, response)

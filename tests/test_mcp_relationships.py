@@ -13,6 +13,7 @@ from blastmap.db.repositories import apis as apis_repo
 from blastmap.db.repositories import messages as messages_repo
 from blastmap.db.repositories import service_calls as service_calls_repo
 from blastmap.db.repositories import services as services_repo
+from blastmap.mcp import queries
 
 from tests.mcp_test_helpers import content_json, server_params
 
@@ -86,3 +87,17 @@ async def test_get_relationships_returns_outbound_inbound_and_message_links(tmp_
                 await session.call_tool("get_relationships", {"service": "does-not-exist"})
             )
             assert "error" in unknown
+
+
+def test_get_relationships_marks_provenance_llm_vs_deterministic(tmp_path: Path):
+    db_path = tmp_path / "fixture2.db"
+    _build_fixture_db(db_path)
+    conn = open_db(db_path)
+
+    result = queries.get_relationships(conn, "checkout-service")
+
+    http_edge = next(r for r in result["relationships"] if r["type"] == "HTTP")
+    assert http_edge["provenance"] == {"source": "llm"}  # carries an LLM-assessed confidence
+
+    message_link = next(r for r in result["relationships"] if r["type"] == "MESSAGE_LINK")
+    assert message_link["provenance"] == {"source": "deterministic"}  # pure channel-name match

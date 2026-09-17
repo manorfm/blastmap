@@ -13,6 +13,8 @@ def test_build_emits_empty_lists_by_default():
         "flow": [],
         "external_integrations": [],
         "unmapped_internal_hint": [],
+        "freshness": {},
+        "unknowns": [],
     }
 
 
@@ -45,9 +47,11 @@ def test_builder_methods_are_chainable():
         .with_flow([{"from": "a", "to": "b", "type": "HTTP"}])
         .with_external_integrations([{"service": "Stripe API"}])
         .with_unmapped_internal_hint([{"service": "fraud-service"}])
+        .with_freshness({"a": {"stale": False}})
         .build()
     )
 
     assert result["flow"] == [{"from": "a", "to": "b", "type": "HTTP"}]
     assert result["external_integrations"] == [{"service": "Stripe API"}]
     assert result["unmapped_internal_hint"] == [{"service": "fraud-service"}]
+    assert result["freshness"] == {"a": {"stale": False}}

@@ -15,6 +15,8 @@ from blastmap.db.repositories import service_calls as service_calls_repo
 from blastmap.db.repositories import services as services_repo
 from blastmap.generation import change_surface
 from blastmap.generation.backend_base import LLMBackend
+from blastmap.generation.freshness import compute_freshness
+from blastmap.generation.provenance import infer_provenance
 
 
 def _fmt_call(c: sqlite3.Row) -> dict:
@@ -57,6 +59,7 @@ def describe_service(conn: sqlite3.Connection, service: str) -> dict:
         "messages": [
             {"direction": m["direction"], "channel": m["channel"], "description": m["description"]} for m in messages
         ],
+        "freshness": compute_freshness(row["updated_at"], row["last_commit"], row["root_path"]),
     }
 
 
@@ -132,6 +135,7 @@ def _fmt_relationship_call(c: sqlite3.Row, *, direction: str, other_key: str, ot
         "confidence": c["confidence"],
         "target_kind": c["target_kind"],
         "evidence": json.loads(c["evidence_json"] or "[]"),
+        "provenance": infer_provenance(c["confidence"]),
     }
 
 
@@ -146,6 +150,7 @@ def _fmt_message_link(link: sqlite3.Row) -> dict:
         "reason": None,
         "confidence": None,
         "evidence": [],
+        "provenance": infer_provenance(None),
     }
 
 

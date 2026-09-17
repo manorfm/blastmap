@@ -112,6 +112,9 @@ def test_no_matching_service_short_circuits_without_calling_backend(tmp_path: Pa
     assert result["primary"] == []
     assert backend.calls == 0
     assert "note" in result
+    assert len(result["unknowns"]) == 1
+    assert result["unknowns"][0]["status"] == "unknown"
+    assert "suggestion" in result["unknowns"][0]
 
 
 def test_hallucinated_service_is_filtered_and_evidence_confidence_attached(tmp_path: Path):
@@ -176,6 +179,12 @@ def test_external_and_unmapped_internal_buckets_are_populated(tmp_path: Path):
     assert unmapped == {"shipping-service"}  # only surfaced because order-service is secondary
     shipping_finding = next(f for f in result["unmapped_internal_hint"] if f["service"] == "shipping-service")
     assert shipping_finding["via_service"] == "order-service"
+
+    unknown_names = {u["service"] for u in result["unknowns"]}
+    assert unknown_names == {"shipping-service"}
+    shipping_unknown = next(u for u in result["unknowns"] if u["service"] == "shipping-service")
+    assert shipping_unknown["status"] == "unknown"
+    assert "suggestion" in shipping_unknown
 
 
 def test_analyze_change_surface_persists_a_run_and_returns_its_id(tmp_path: Path):
