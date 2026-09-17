@@ -56,3 +56,9 @@ def list_services(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         ORDER BY s.name
         """
     ).fetchall()
+
+
+def list_services_for_repository(conn: sqlite3.Connection, repository_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM services WHERE repository_id = ? ORDER BY name", (repository_id,)
+    ).fetchall()

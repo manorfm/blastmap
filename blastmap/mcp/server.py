@@ -130,6 +130,18 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         with closing(_conn()) as conn:
             return queries.record_change_surface_feedback(conn, run_id, service, outcome)
 
+    @mcp.tool()
+    def verify_change_surface(run_id: int, repository: str, since_commit: str) -> dict:
+        """Ground-truth check: compare a past find_change_surface run's predicted
+        services against what the given repository's commits actually changed
+        (git diff) since since_commit. Read-only — it does not itself record
+        feedback; call record_change_surface_feedback for that. Returns predicted,
+        actual, true_positives, false_positives, false_negatives, precision and
+        recall. repository is the name shown by list_services'/index's
+        --repository-name, not a service name."""
+        with closing(_conn()) as conn:
+            return queries.verify_change_surface(conn, run_id, repository, since_commit)
+
     return mcp
 
 

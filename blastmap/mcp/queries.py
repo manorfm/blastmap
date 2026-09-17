@@ -17,6 +17,7 @@ from blastmap.generation import change_surface
 from blastmap.generation.backend_base import LLMBackend
 from blastmap.generation.freshness import compute_freshness
 from blastmap.generation.provenance import infer_provenance
+from blastmap.generation.verification import verify_change_surface as _verify_change_surface
 
 
 def _fmt_call(c: sqlite3.Row) -> dict:
@@ -263,3 +264,11 @@ def record_change_surface_feedback(conn: sqlite3.Connection, run_id: int, servic
         return {"error": f"service {service!r} was not part of run {run_id}"}
     change_surface_repo.record_change_surface_feedback(conn, run_id, service, outcome)
     return {"ok": True}
+
+
+def verify_change_surface(conn: sqlite3.Connection, run_id: int, repository: str, since_commit: str) -> dict:
+    """Read-only comparison of a past find_change_surface run against what a
+    repository's commits actually changed since a given commit (git ground truth).
+    Never records feedback itself — call record_change_surface_feedback separately
+    if you want this comparison to influence future confidence."""
+    return _verify_change_surface(conn, run_id, repository, since_commit, record_feedback=False)

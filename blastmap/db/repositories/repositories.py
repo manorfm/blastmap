@@ -24,3 +24,7 @@ def ensure_repository(conn: sqlite3.Connection, name: str, root_path: str) -> in
 
 def list_repositories(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM repositories ORDER BY name").fetchall()
+
+
+def get_repository_by_name(conn: sqlite3.Connection, name: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM repositories WHERE name = ?", (name,)).fetchone()

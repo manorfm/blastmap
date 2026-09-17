@@ -130,6 +130,24 @@ CREATE INDEX IF NOT EXISTS idx_change_surface_findings_run ON change_surface_fin
 CREATE INDEX IF NOT EXISTS idx_change_surface_findings_service ON change_surface_findings(service);
 CREATE INDEX IF NOT EXISTS idx_change_surface_feedback_service ON change_surface_feedback(service);
 
+-- Git ground-truth verification of a past find_change_surface run: what was
+-- predicted (from change_surface_findings) vs. what actually changed according to
+-- `git diff` against a repository, since a given commit. See generation/verification.py.
+CREATE TABLE IF NOT EXISTS change_surface_verifications (
+    id                    INTEGER PRIMARY KEY,
+    run_id                INTEGER NOT NULL REFERENCES change_surface_runs(id) ON DELETE CASCADE,
+    repository            TEXT NOT NULL,
+    since_commit          TEXT NOT NULL,
+    precision             REAL,
+    recall                REAL,
+    true_positives_json   TEXT NOT NULL,
+    false_positives_json  TEXT NOT NULL,
+    false_negatives_json  TEXT NOT NULL,
+    verified_at           TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_surface_verifications_run ON change_surface_verifications(run_id);
+
 CREATE TABLE IF NOT EXISTS index_runs (
     id            INTEGER PRIMARY KEY,
     service_id    INTEGER REFERENCES services(id) ON DELETE SET NULL,

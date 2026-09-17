@@ -122,6 +122,29 @@ def test_status_command_global(tmp_path: Path, capsys):
     assert "services indexed: 3" in capsys.readouterr().out
 
 
+def test_status_command_global_shows_recent_verifications(tmp_path: Path, capsys):
+    from blastmap.db.repositories import change_surface as change_surface_repo
+    from blastmap.db.repositories import verification as verification_repo
+
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    run_id = change_surface_repo.record_change_surface_run(
+        conn, "task", "claude",
+        {"primary": [], "secondary": [], "no_change_hint": [], "external_integrations": [], "unmapped_internal_hint": []},
+    )
+    verification_repo.record_verification(
+        conn, run_id, repository="checkout-repo", since_commit="abc123",
+        precision=0.5, recall=1.0, true_positives=["a"], false_positives=["b"], false_negatives=[],
+    )
+
+    exit_code = cli._cmd_status(_parse(["status", "--db", str(db_path)]))
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "checkout-repo" in out
+    assert "precision=0.5" in out
+
+
 def test_export_command_writes_markdown(tmp_path: Path, capsys):
     db_path = tmp_path / "test.db"
     cli._cmd_index(_parse(["index", str(SAMPLE_ROOT), "--db", str(db_path)]))
@@ -141,3 +164,42 @@ def test_main_dispatches_to_list_command(tmp_path: Path, capsys):
     exit_code = cli.main(["list", "--db", str(db_path)])
 
     assert exit_code == 0
+
+
+def test_verify_command_reports_precision_and_recall(tmp_path: Path, capsys):
+    import subprocess
+
+    from blastmap.db.repositories import change_surface as change_surface_repo
+    from blastmap.db.repositories import repositories as repositories_repo
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo_root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo_root, check=True)
+    (repo_root / "checkout-service").mkdir()
+    (repo_root / "checkout-service" / "main.py").write_text("1")
+    subprocess.run(["git", "add", "."], cwd=repo_root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "first"], cwd=repo_root, check=True)
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    repo_id = repositories_repo.ensure_repository(conn, "checkout-repo", str(repo_root))
+    services_repo.ensure_service(conn, "checkout-service", str(repo_root / "checkout-service"), "python", repository_id=repo_id)
+    run_id = change_surface_repo.record_change_surface_run(
+        conn, "task", "claude",
+        {"primary": [{"service": "checkout-service", "reason": "r", "confidence": 0.9, "evidence": []}],
+         "secondary": [], "no_change_hint": [], "external_integrations": [], "unmapped_internal_hint": []},
+    )
+
+    exit_code = cli.main([
+        "verify", str(run_id), "--repository", "checkout-repo", "--since", commit, "--db", str(db_path),
+    ])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "precision" in out
+    assert "recall" in out

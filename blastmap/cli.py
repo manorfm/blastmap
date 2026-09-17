@@ -10,9 +10,11 @@ from blastmap.db.connection import DEFAULT_DB_PATH, open_db
 from blastmap.db.repositories import index_runs as index_runs_repo
 from blastmap.db.repositories import indexed_files as indexed_files_repo
 from blastmap.db.repositories import services as services_repo
+from blastmap.db.repositories import verification as verification_repo
 from blastmap.export.markdown import export_markdown
 from blastmap.generation.backend_base import GenerationError
 from blastmap.generation.orchestrator import DiscoveryError, index_path, index_service
+from blastmap.generation.verification import verify_change_surface
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
@@ -96,6 +98,14 @@ def _cmd_status(args: argparse.Namespace) -> int:
                 f"  run#{run['id']} service={name} status={run['status']} backend={run['backend']} "
                 f"files_changed={run['files_changed']} llm_calls={run['llm_calls']}"
             )
+        verifications = verification_repo.latest_verifications(conn, limit=5)
+        if verifications:
+            print("recent change surface verifications:")
+            for v in verifications:
+                print(
+                    f"  run#{v['run_id']} repository={v['repository']} since={v['since_commit']} "
+                    f"precision={v['precision']} recall={v['recall']}"
+                )
     return 0
 
 
@@ -103,6 +113,24 @@ def _cmd_export(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     written = export_markdown(conn, Path(args.out), service_filter=args.service)
     print(f"wrote {len(written)} files under {args.out}")
+    return 0
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    result = verify_change_surface(conn, args.run_id, args.repository, args.since, record_feedback=args.record_feedback)
+    if "error" in result:
+        print(f"error: {result['error']}", file=sys.stderr)
+        return 1
+    print(f"predicted: {result['predicted']}")
+    print(f"actual:    {result['actual']}")
+    print(f"true_positives:  {result['true_positives']}")
+    print(f"false_positives: {result['false_positives']}")
+    print(f"false_negatives: {result['false_negatives']}")
+    print(f"precision: {result['precision']}")
+    print(f"recall:    {result['recall']}")
+    if args.record_feedback:
+        print("feedback recorded for true/false positives")
     return 0
 
 
@@ -155,6 +183,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.add_argument("--service", default=None)
     p_export.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     p_export.set_defaults(func=_cmd_export)
+
+    p_verify = sub.add_parser(
+        "verify", help="Compare a past find_change_surface run against what a repository's commits actually changed"
+    )
+    p_verify.add_argument("run_id", type=int)
+    p_verify.add_argument("--repository", required=True, help="Repository name, as shown by `blastmap list`/`--repository-name` at index time")
+    p_verify.add_argument("--since", required=True, help="Commit the run was made against; actual changes are `git diff --since..HEAD`")
+    p_verify.add_argument("--record-feedback", action="store_true", help="Auto-record confirmed/rejected feedback for the predicted services")
+    p_verify.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    p_verify.set_defaults(func=_cmd_verify)
 
     p_serve = sub.add_parser("serve", help="Run the MCP server (stdio)")
     p_serve.add_argument("--transport", choices=["stdio"], default="stdio")
