@@ -23,6 +23,7 @@ from blastmap.db.repositories import services as services_repo
 from blastmap.generation.backend_base import LLMBackend
 from blastmap.generation.freshness import compute_freshness
 from blastmap.generation.llm_harness import generate_with_retry, load_prompt, load_schema
+from blastmap.generation.next_queries import NextQueryRecommender
 from blastmap.generation.retrieval import CandidateRetrieval, KeywordGraphRetrieval
 
 MAX_CANDIDATES = 10
@@ -45,6 +46,7 @@ class ChangeSurfaceBuilder:
     unmapped_internal_hint: list[dict] = field(default_factory=list)
     freshness: dict[str, dict] = field(default_factory=dict)
     unknowns: list[dict] = field(default_factory=list)
+    recommended_next_queries: list[dict] = field(default_factory=list)
     note: str | None = None
 
     def with_findings(self, primary: list[dict], secondary: list[dict], no_change_hint: list[dict]) -> "ChangeSurfaceBuilder":
@@ -73,6 +75,10 @@ class ChangeSurfaceBuilder:
         self.unknowns = items
         return self
 
+    def with_recommended_next_queries(self, items: list[dict]) -> "ChangeSurfaceBuilder":
+        self.recommended_next_queries = items
+        return self
+
     def with_note(self, note: str) -> "ChangeSurfaceBuilder":
         self.note = note
         return self
@@ -87,6 +93,7 @@ class ChangeSurfaceBuilder:
             "unmapped_internal_hint": self.unmapped_internal_hint,
             "freshness": self.freshness,
             "unknowns": self.unknowns,
+            "recommended_next_queries": self.recommended_next_queries,
         }
         if self.note is not None:
             result["note"] = self.note
@@ -265,8 +272,11 @@ def analyze_change_surface(
     secondary = _filter_known(conn, result.get("secondary", []), known, evidence_by_service)
     no_change = _filter_known(conn, result.get("no_change", []), known, evidence_by_service)
 
-    relevant = {f["service"] for f in primary} | {f["service"] for f in secondary}
+    primary_names = [f["service"] for f in primary]
+    secondary_names = [f["service"] for f in secondary]
+    relevant = set(primary_names) | set(secondary_names)
     unmapped_internal_hint = _derive_dependency_hints(conn, relevant, service_calls_repo.list_unmapped_internal_calls)
+    next_queries = NextQueryRecommender().recommend(conn, primary_names, secondary_names, unmapped_internal_hint)
     response = (
         ChangeSurfaceBuilder()
         .with_findings(primary, secondary, no_change)
@@ -275,6 +285,7 @@ def analyze_change_surface(
         .with_unmapped_internal_hint(unmapped_internal_hint)
         .with_freshness(_compute_freshness_for(conn, relevant))
         .with_unknowns(_derive_unknowns_from_unmapped(unmapped_internal_hint))
+        .with_recommended_next_queries(next_queries)
         .build()
     )
     response["run_id"] = change_surface_repo.record_change_surface_run(conn, task, backend.name, response)

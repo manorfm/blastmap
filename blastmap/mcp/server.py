@@ -107,7 +107,10 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         fuller picture). unknowns lists every gap in the answer explicitly (status,
         reason, suggestion) instead of silently omitting it, and freshness reports,
         per relevant service, whether its indexed knowledge might be stale (its indexed
-        commit vs. the repository's current commit). This is a task-specific inference,
+        commit vs. the repository's current commit). recommended_next_queries is a
+        ranked list of {tool, arguments, reason} — the highest-value MCP tool calls to
+        make next given what's already known, computed for free with no extra LLM
+        cost; prefer it over exploring blindly. This is a task-specific inference,
         not a verified fact — treat it as a starting point, not ground truth. Pass
         hint_services if you already suspect specific services, to anchor the search.
         The response includes a run_id — pass it to record_change_surface_feedback once

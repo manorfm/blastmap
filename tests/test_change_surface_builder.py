@@ -15,6 +15,7 @@ def test_build_emits_empty_lists_by_default():
         "unmapped_internal_hint": [],
         "freshness": {},
         "unknowns": [],
+        "recommended_next_queries": [],
     }
 
 

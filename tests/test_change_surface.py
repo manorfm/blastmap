@@ -151,6 +151,8 @@ def test_hallucinated_service_is_filtered_and_evidence_confidence_attached(tmp_p
     flow_pairs = {(f["from"], f["to"]) for f in result["flow"]}
     assert ("checkout-service", "payments-service") in flow_pairs
 
+    assert any(r["tool"] == "describe_api" and r["arguments"]["service"] == "checkout-service" for r in result["recommended_next_queries"])
+
 
 def test_external_and_unmapped_internal_buckets_are_populated(tmp_path: Path):
     conn = _build_pix_fixture(tmp_path / "pix3.db")
