@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import blastmap
 from blastmap.cli_progress import RichProgressReporter
 from blastmap.config import resolve_backend
 from blastmap.db.connection import DEFAULT_DB_PATH, open_db
@@ -143,8 +144,30 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+_TOP_LEVEL_EPILOG = """\
+The blastmap workflow is index -> ask -> verify:
+
+  1. index   Point it at a repo (or several) so it builds a System Knowledge Model.
+  2. ask     Register it as an MCP server (`serve`) and have an agent call
+             find_change_surface with an engineering task/epic, before it opens
+             any file, to get the likely blast radius with evidence + confidence.
+  3. verify  Once the change ships, check whether the prediction was right
+             against the real git diff, closing the feedback loop.
+
+Examples:
+  blastmap index ~/code/my-monorepo --repository-name my-monorepo
+  blastmap serve --backend claude
+  blastmap verify 3 --repository my-monorepo --since a1b2c3d
+
+Run `blastmap <command> --help` for a runnable example of any single command.
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="blastmap")
+    parser = argparse.ArgumentParser(
+        prog="blastmap", epilog=_TOP_LEVEL_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--version", action="version", version=f"blastmap {blastmap.__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_backend_args(p: argparse.ArgumentParser) -> None:
@@ -154,7 +177,16 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--codex-api-key", action="store_true", help="Use CODEX_API_KEY billing instead of the ChatGPT subscription session")
         p.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
 
-    p_index = sub.add_parser("index", help="Index a monorepo root or a single service repo")
+    p_index = sub.add_parser(
+        "index", help="Index a monorepo root or a single service repo",
+        epilog=(
+            "examples:\n"
+            "  blastmap index ~/code/orders-service\n"
+            "  blastmap index ~/code/my-monorepo --repository-name my-monorepo\n"
+            "  blastmap index . --service custom-name --force\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_index.add_argument("path")
     p_index.add_argument("--service", default=None, help="Override the inferred service name (only valid for a single-service path)")
     p_index.add_argument("--repository-name", default=None, help="Explicit repository name; avoids collisions when indexing several repos into one shared DB")
@@ -162,7 +194,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_backend_args(p_index)
     p_index.set_defaults(func=_cmd_index)
 
-    p_update = sub.add_parser("update", help="Re-index one already-known service by name")
+    p_update = sub.add_parser(
+        "update", help="Re-index one already-known service by name",
+        epilog="example:\n  blastmap update orders-service\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_update.add_argument("service")
     p_update.add_argument("--force", action="store_true")
     add_backend_args(p_update)
@@ -172,12 +208,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     p_list.set_defaults(func=_cmd_list)
 
-    p_status = sub.add_parser("status", help="Show indexing status/history")
+    p_status = sub.add_parser(
+        "status", help="Show indexing status/history, and recent change surface verifications",
+        epilog="examples:\n  blastmap status\n  blastmap status orders-service\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_status.add_argument("service", nargs="?", default=None)
     p_status.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     p_status.set_defaults(func=_cmd_status)
 
-    p_export = sub.add_parser("export", help="Export the database to Markdown")
+    p_export = sub.add_parser(
+        "export", help="Export the database to Markdown",
+        epilog="example:\n  blastmap export md --out docs/\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_export.add_argument("format", choices=["md"])
     p_export.add_argument("--out", default="docs")
     p_export.add_argument("--service", default=None)
@@ -185,7 +229,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.set_defaults(func=_cmd_export)
 
     p_verify = sub.add_parser(
-        "verify", help="Compare a past find_change_surface run against what a repository's commits actually changed"
+        "verify", help="Compare a past find_change_surface run against what a repository's commits actually changed",
+        epilog=(
+            "example:\n"
+            "  blastmap verify 3 --repository my-monorepo --since a1b2c3d --record-feedback\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_verify.add_argument("run_id", type=int)
     p_verify.add_argument("--repository", required=True, help="Repository name, as shown by `blastmap list`/`--repository-name` at index time")
@@ -194,7 +243,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_verify.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     p_verify.set_defaults(func=_cmd_verify)
 
-    p_serve = sub.add_parser("serve", help="Run the MCP server (stdio)")
+    p_serve = sub.add_parser(
+        "serve", help="Run the MCP server (stdio)",
+        epilog=(
+            "example (register with an MCP client, e.g. Claude Code/Codex):\n"
+            "  blastmap serve --backend claude\n"
+            "  blastmap serve --db ~/.blastmap/blastmap.db --backend codex\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_serve.add_argument("--transport", choices=["stdio"], default="stdio")
     add_backend_args(p_serve)  # find_change_surface is the only tool that uses a backend
     p_serve.set_defaults(func=_cmd_serve)

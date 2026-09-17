@@ -157,6 +157,35 @@ def test_export_command_writes_markdown(tmp_path: Path, capsys):
     assert "wrote" in capsys.readouterr().out
 
 
+def test_help_leads_with_the_index_ask_verify_mental_model(capsys):
+    try:
+        cli.main(["--help"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "index" in out and "ask" in out.lower() and "verify" in out.lower()
+
+
+def test_index_help_includes_a_runnable_example(capsys):
+    try:
+        cli.main(["index", "--help"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "blastmap index" in out
+
+
+def test_version_flag_prints_the_installed_version(capsys):
+    import blastmap
+
+    try:
+        cli.main(["--version"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert blastmap.__version__ in out
+
+
 def test_main_dispatches_to_list_command(tmp_path: Path, capsys):
     db_path = tmp_path / "test.db"
     open_db(db_path)
