@@ -22,8 +22,13 @@ Return:
 - calls: any other service, queue or topic this endpoint calls or publishes to while
   handling a request, WHY it does so (business reason, e.g. "to charge the customer's
   card" or "to check current stock before confirming the order"), exactly what
-  data it needs from (or sends to) that target, and your own confidence (0-1) that
+  data it needs from (or sends to) that target, your own confidence (0-1) that
   this call and its reason are correctly attributed from the evidence above — lower it
   when the target name or business reason is only loosely implied rather than explicit
+  — and target_kind: "internal" if this looks like a call to another service of this
+  same system (bare service name, internal hostname/env var, RPC/service-discovery
+  client), "external" if it's a recognizable third-party vendor/SaaS (a vendor SDK
+  import, a public vendor API domain, vendor-specific auth), or "unknown" if the
+  evidence doesn't make it clear either way
 - validations: input validation and authorization rules this endpoint enforces
   (e.g. required auth header/role, field constraints)

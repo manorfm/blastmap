@@ -65,6 +65,7 @@ async def test_get_relationships_returns_outbound_inbound_and_message_links(tmp_
             assert outbound[0]["target_service"] == "payments-service"
             assert outbound[0]["reason"] == "authorize the payment for the order"
             assert outbound[0]["confidence"] == 0.9
+            assert outbound[0]["target_kind"] == "internal"  # reconciled to a real indexed service
             assert outbound[0]["evidence"]
 
             message_link = [r for r in checkout_rels["relationships"] if r["type"] == "MESSAGE_LINK"][0]

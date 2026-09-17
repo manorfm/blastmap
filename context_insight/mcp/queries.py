@@ -17,6 +17,7 @@ def _fmt_call(c: sqlite3.Row) -> dict:
         "reason": c["reason"],
         "data_needed": json.loads(c["data_needed"] or "[]"),
         "purpose_kind": c["purpose_kind"],
+        "target_kind": c["target_kind"],
     }
 
 
@@ -122,6 +123,7 @@ def _fmt_relationship_call(c: sqlite3.Row, *, direction: str, other_key: str, ot
         other_key: other_value,
         "reason": c["reason"],
         "confidence": c["confidence"],
+        "target_kind": c["target_kind"],
         "evidence": json.loads(c["evidence_json"] or "[]"),
     }
 

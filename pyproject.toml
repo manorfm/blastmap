@@ -1,6 +1,6 @@
 [project]
 name = "context-insight"
-version = "0.5.0"
+version = "1.0.0"
 description = "Tritura microsserviços em documentação semântica enxuta, servida a agentes via MCP."
 requires-python = ">=3.11"
 dependencies = [

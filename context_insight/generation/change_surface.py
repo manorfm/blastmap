@@ -152,6 +152,37 @@ def _derive_flow(conn: sqlite3.Connection, service_names: set[str]) -> list[dict
     return flow
 
 
+def _derive_dependency_hints(conn: sqlite3.Connection, service_names: set[str], lister) -> list[dict]:
+    """Shared shape for external_integrations/unmapped_internal_hint: both are just
+    'this relevant service's outbound calls of one target_kind', attributed back to
+    which service they came from. Computed purely from already-classified
+    service_calls rows — no extra LLM cost, no re-reading source.
+    """
+    out: list[dict] = []
+    for name in sorted(service_names):
+        row = repository.get_service_by_name(conn, name)
+        if row is None:
+            continue
+        for c in lister(conn, row["id"]):
+            out.append(
+                {
+                    "service": c["to_service_name"],
+                    "via_service": name,
+                    "reason": c["reason"],
+                    "confidence": c["confidence"],
+                    "evidence": json.loads(c["evidence_json"] or "[]"),
+                }
+            )
+    return out
+
+
+def _empty_result(note: str) -> dict:
+    return {
+        "primary": [], "secondary": [], "no_change_hint": [], "flow": [],
+        "external_integrations": [], "unmapped_internal_hint": [], "note": note,
+    }
+
+
 def analyze_change_surface(
     conn: sqlite3.Connection,
     task: str,
@@ -164,23 +195,11 @@ def analyze_change_surface(
         seeds |= set(hint_services)
 
     if not seeds:
-        return {
-            "primary": [],
-            "secondary": [],
-            "no_change_hint": [],
-            "flow": [],
-            "note": "no indexed service matched this task; pass hint_services or index more of the system",
-        }
+        return _empty_result("no indexed service matched this task; pass hint_services or index more of the system")
 
     candidates = _expand_candidates(conn, seeds, max_candidates)
     if not candidates:
-        return {
-            "primary": [],
-            "secondary": [],
-            "no_change_hint": [],
-            "flow": [],
-            "note": "matched services could not be resolved to indexed rows",
-        }
+        return _empty_result("matched services could not be resolved to indexed rows")
 
     candidates_block, evidence_by_service = _build_context(conn, candidates)
     prompt = _render_prompt(task, candidates_block)
@@ -189,19 +208,23 @@ def analyze_change_surface(
 
     result = generate_with_retry(backend, prompt, schema, Path.home() / ".context_insight", failures_dir, "change-surface")
     if result is None:
-        return {
-            "primary": [],
-            "secondary": [],
-            "no_change_hint": [],
-            "flow": [],
-            "note": "change surface synthesis failed; see ~/.context_insight/failures",
-        }
+        return _empty_result("change surface synthesis failed; see ~/.context_insight/failures")
 
     known = set(candidates)
     primary = _filter_known(result.get("primary", []), known, evidence_by_service)
     secondary = _filter_known(result.get("secondary", []), known, evidence_by_service)
     no_change = _filter_known(result.get("no_change", []), known, evidence_by_service)
 
-    flow = _derive_flow(conn, {f["service"] for f in primary} | {f["service"] for f in secondary})
+    relevant = {f["service"] for f in primary} | {f["service"] for f in secondary}
+    flow = _derive_flow(conn, relevant)
+    external_integrations = _derive_dependency_hints(conn, relevant, repository.list_external_integration_calls)
+    unmapped_internal_hint = _derive_dependency_hints(conn, relevant, repository.list_unmapped_internal_calls)
 
-    return {"primary": primary, "secondary": secondary, "no_change_hint": no_change, "flow": flow}
+    return {
+        "primary": primary,
+        "secondary": secondary,
+        "no_change_hint": no_change,
+        "flow": flow,
+        "external_integrations": external_integrations,
+        "unmapped_internal_hint": unmapped_internal_hint,
+    }

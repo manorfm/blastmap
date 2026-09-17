@@ -52,10 +52,32 @@ def _build_pix_fixture(db_path: Path):
     order_api_id = repository.upsert_api(conn, order_id, "POST", "/orders", "creates order", "desc", [], [])
     repository.replace_calls_for_api(
         conn, order_id, order_api_id,
+        [
+            {
+                "to_service_name": "payments-service", "call_kind": "http",
+                "reason": "check payment confirmation status", "data_needed": ["order_id"],
+                "purpose_kind": "data_fetch", "confidence": 0.7,
+            },
+            {
+                # Looks internal (shares the "-service" naming convention) but was
+                # never indexed — should surface as an unmapped_internal_hint.
+                "to_service_name": "shipping-service", "call_kind": "http",
+                "reason": "schedule delivery once the order is confirmed", "data_needed": ["order_id"],
+                "purpose_kind": "other", "confidence": 0.6, "target_kind": "unknown",
+            },
+        ],
+        [],
+    )
+    repository.reconcile_service_call_targets(conn)
+
+    payments_api_id = repository.upsert_api(conn, payments_id, "POST", "/charge", "charges a card", "desc", [], [])
+    repository.replace_calls_for_api(
+        conn, payments_id, payments_api_id,
         [{
-            "to_service_name": "payments-service", "call_kind": "http",
-            "reason": "check payment confirmation status", "data_needed": ["order_id"],
-            "purpose_kind": "data_fetch", "confidence": 0.7,
+            # A genuine external integration — should surface as external_integrations.
+            "to_service_name": "Stripe API", "call_kind": "http",
+            "reason": "charge the customer's card via the vendor gateway", "data_needed": ["amount", "pix_key"],
+            "purpose_kind": "data_fetch", "confidence": 0.85, "target_kind": "external",
         }],
         [],
     )
@@ -119,6 +141,35 @@ def test_hallucinated_service_is_filtered_and_evidence_confidence_attached(tmp_p
 
     flow_pairs = {(f["from"], f["to"]) for f in result["flow"]}
     assert ("checkout-service", "payments-service") in flow_pairs
+
+
+def test_external_and_unmapped_internal_buckets_are_populated(tmp_path: Path):
+    conn = _build_pix_fixture(tmp_path / "pix3.db")
+    backend = FakeBackend({
+        "primary": [
+            {"service": "checkout-service", "reason": "owns checkout entry point", "confidence": 0.95},
+            {"service": "payments-service", "reason": "owns payment method resolution", "confidence": 0.9},
+        ],
+        "secondary": [
+            {"service": "order-service", "reason": "consumes payment confirmation", "confidence": 0.4},
+        ],
+        "no_change": [
+            {"service": "notification-service", "reason": "unrelated to payments", "confidence": 0.8},
+        ],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
+
+    external = {f["service"] for f in result["external_integrations"]}
+    assert external == {"Stripe API"}  # only surfaced because payments-service is primary
+    stripe_finding = next(f for f in result["external_integrations"] if f["service"] == "Stripe API")
+    assert stripe_finding["via_service"] == "payments-service"
+    assert stripe_finding["confidence"] == 0.85
+
+    unmapped = {f["service"] for f in result["unmapped_internal_hint"]}
+    assert unmapped == {"shipping-service"}  # only surfaced because order-service is secondary
+    shipping_finding = next(f for f in result["unmapped_internal_hint"] if f["service"] == "shipping-service")
+    assert shipping_finding["via_service"] == "order-service"
 
 
 def test_hint_services_are_included_even_without_keyword_match(tmp_path: Path):

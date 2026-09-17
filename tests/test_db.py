@@ -76,6 +76,49 @@ def test_api_and_call_reconciliation(tmp_path: Path):
     assert row["to_service_id"] == payments_id
 
 
+def test_target_kind_is_persisted_and_ground_truth_overrides_llm_guess(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    checkout_id = repository.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
+    api_id = repository.upsert_api(conn, checkout_id, "POST", "/checkout", "s", "d", [], EVIDENCE)
+    repository.replace_calls_for_api(
+        conn, checkout_id, api_id,
+        [
+            {
+                "to_service_name": "Stripe API", "call_kind": "http", "reason": "charge card",
+                "data_needed": [], "purpose_kind": "data_fetch", "confidence": 0.9, "target_kind": "external",
+            },
+            {
+                # LLM couldn't tell from a bare name with no "-service"-style suffix,
+                # but this will actually resolve once "billing" is indexed below —
+                # ground truth must win even though the naming heuristic alone
+                # wouldn't have caught it.
+                "to_service_name": "billing", "call_kind": "http", "reason": "authorize payment",
+                "data_needed": [], "purpose_kind": "data_fetch", "confidence": 0.5, "target_kind": "unknown",
+            },
+            {
+                # LLM couldn't tell, and this service is never indexed — the naming
+                # heuristic should still recognize the shared "-service" suffix.
+                "to_service_name": "shipping-service", "call_kind": "http", "reason": "schedule delivery",
+                "data_needed": [], "purpose_kind": "other", "confidence": 0.3, "target_kind": "unknown",
+            },
+        ],
+        EVIDENCE,
+    )
+
+    calls_before = {c["to_service_name"]: c["target_kind"] for c in repository.list_calls_for_api(conn, api_id)}
+    assert calls_before["Stripe API"] == "external"
+    assert calls_before["billing"] == "unknown"  # not reconciled to a real service yet
+    assert calls_before["shipping-service"] == "internal"  # naming heuristic already applied
+
+    repository.ensure_service(conn, "billing", "/tmp/billing", "node-ts")
+    repository.reconcile_service_call_targets(conn)
+
+    calls_after = {c["to_service_name"]: c["target_kind"] for c in repository.list_calls_for_api(conn, api_id)}
+    assert calls_after["Stripe API"] == "external"  # untouched
+    assert calls_after["billing"] == "internal"  # ground truth: now resolved
+    assert calls_after["shipping-service"] == "internal"  # unchanged, still a heuristic guess
+
+
 def test_inbound_calls(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     checkout_id = repository.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")

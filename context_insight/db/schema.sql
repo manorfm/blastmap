@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS service_calls (
     data_needed     TEXT,
     purpose_kind    TEXT CHECK (purpose_kind IN ('validation', 'data_fetch', 'enrichment', 'notification', 'other')),
     confidence      REAL,
+    target_kind     TEXT CHECK (target_kind IN ('internal', 'external', 'unknown')) DEFAULT 'unknown',
     evidence_json   TEXT,
     updated_at      TEXT NOT NULL
 );

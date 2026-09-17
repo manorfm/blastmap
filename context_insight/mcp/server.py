@@ -88,9 +88,13 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         need code changes — WITHOUT reading any source file. Call this FIRST when handed
         an epic, before exploring the codebase. Returns primary/secondary/no_change_hint
         service lists plus a relevant call flow, each finding with a business reason,
-        confidence (0-1) and evidence (file/line). This is a task-specific inference, not
-        a verified fact — treat it as a starting point, not ground truth. Pass
-        hint_services if you already suspect specific services, to anchor the search."""
+        confidence (0-1) and evidence (file/line); also external_integrations (third-party
+        vendors/SaaS reachable from the relevant services — you may need to touch that
+        integration too) and unmapped_internal_hint (dependencies that look like internal
+        services of this same system but haven't been indexed yet — index them for a
+        fuller picture). This is a task-specific inference, not a verified fact — treat
+        it as a starting point, not ground truth. Pass hint_services if you already
+        suspect specific services, to anchor the search."""
         with closing(_conn()) as conn:
             return queries.find_change_surface(conn, resolved_backend, task, hint_services)
 

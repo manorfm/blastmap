@@ -114,20 +114,45 @@ conectado a quê" e "o que essa tarefa provavelmente afeta":
 redor de um serviço: chamadas que ele faz (outbound), chamadas que outros serviços
 fazem nele (inbound — "quem depende de mim", hoje só possível via este tool), e
 vínculos de fila/tópico inferidos por nome de canal compartilhado
-(`MESSAGE_LINK`). Cada aresta carrega `reason`, `confidence` (quando aplicável) e
-`evidence` (arquivo/linha):
+(`MESSAGE_LINK`). Cada aresta carrega `reason`, `confidence` (quando aplicável),
+`target_kind` (`internal`/`external`/`unknown` — ver seção seguinte) e `evidence`
+(arquivo/linha):
 ```json
 {
   "service": "payments-service",
   "relationships": [
     {"type": "HTTP", "direction": "inbound", "source_service": "checkout-service",
-     "reason": "authorize the payment for the order", "confidence": 0.9,
+     "reason": "authorize the payment for the order", "confidence": 0.9, "target_kind": "internal",
      "evidence": [{"file": "checkout.py", "start_line": 1, "end_line": 20}]},
+    {"type": "HTTP", "direction": "outbound", "target_service": "Stripe API",
+     "reason": "charge the customer's card via the vendor gateway", "confidence": 0.85, "target_kind": "external",
+     "evidence": []},
     {"type": "MESSAGE_LINK", "direction": "outbound", "channel": "payment_authorized",
      "target_service": "notification-service", "reason": null, "confidence": null, "evidence": []}
   ]
 }
 ```
+
+### Interno vs. externo (`target_kind`)
+
+Toda chamada (`service_calls`) carrega `target_kind`: `internal` (outro serviço deste
+mesmo sistema), `external` (uma integração de terceiro/vendor) ou `unknown`. A
+classificação usa dois sinais, nessa ordem de precedência:
+1. **Ground truth**: se o nome resolve pra um serviço já indexado (`to_service_id`),
+   é `internal`, ponto — sobrescreve qualquer palpite anterior.
+2. **LLM, no momento da geração**: a API já vê o código real (imports, cliente HTTP,
+   URL) e classifica com base nisso — sinal mais forte que qualquer heurística de
+   nome, porque enxerga o código de verdade.
+3. **Heurística determinística, só pra quem ficou `unknown`** (`discovery/integration_heuristics.py`,
+   sem LLM): lista curta de vendors conhecidos (Stripe, Twilio, AWS, ...) → `external`;
+   nome que segue o mesmo padrão de nomenclatura dos serviços já indexados (ex. sufixo
+   `-service`) → `internal` (não mapeado ainda).
+
+Essa distinção alimenta dois buckets novos em `find_change_surface`:
+- **`external_integrations`**: integrações de terceiro alcançáveis pelos serviços
+  `primary`/`secondary` — o agente pode precisar mexer nessa integração também.
+- **`unmapped_internal_hint`**: dependências que parecem internas mas ainda não foram
+  indexadas — sinal de "indexe mais do sistema pra ter o quadro completo".
 
 **`find_change_surface("Adicionar suporte a Pix no checkout")`** — a primeira tool que
 um agente deveria chamar ao receber um épico, antes de abrir qualquer arquivo. Usa
@@ -149,7 +174,11 @@ uma **inferência de tarefa**, não fato — sempre com `reason`, `confidence` e
   "no_change_hint": [
     {"service": "notification-service", "reason": "only reacts to payment_authorized events, unrelated to the payment method itself", "confidence": 0.8, "evidence": []}
   ],
-  "flow": [{"from": "checkout-service", "to": "payments-service", "type": "HTTP"}]
+  "flow": [{"from": "checkout-service", "to": "payments-service", "type": "HTTP"}],
+  "external_integrations": [
+    {"service": "Stripe API", "via_service": "payments-service", "reason": "charge the customer's card via the vendor gateway", "confidence": 0.85, "evidence": []}
+  ],
+  "unmapped_internal_hint": []
 }
 ```
 Aceita um `hint_services` opcional para ancorar a busca quando o agente já suspeita de
@@ -173,7 +202,9 @@ com uma `note` explicando — sem chamar o LLM.
 - **Evidência persistida**: `apis`, `service_calls`, `persistence_entities` e
   `messages` carregam `evidence_json` (arquivo + linha) — o mesmo trecho que o LLM viu
   ao gerar aquela informação, não uma linha inventada depois. `service_calls` também
-  carrega `confidence` (0-1, avaliada pelo próprio LLM).
+  carrega `confidence` (0-1, avaliada pelo próprio LLM) e `target_kind`
+  (`internal`/`external`/`unknown` — LLM com o código real como sinal primário,
+  heurística determinística de vendor/nomenclatura como fallback só para `unknown`).
 - **Servidor MCP** com 9 tools somente leitura: as 7 originais
   (`list_services`, `describe_service`, `list_apis`, `describe_api`,
   `describe_persistence`, `describe_messages`, `search`) mais duas novas de
@@ -219,6 +250,11 @@ com uma `note` explicando — sem chamar o LLM.
   (mesma limitação de `search`) e expande o grafo até 2 saltos — uma tarefa cujo
   vocabulário não aparece em nenhuma descrição/razão indexada, e sem `hint_services`,
   não encontra candidatos (retorna listas vazias com uma `note`, sem chamar o LLM).
+- A heurística determinística de `target_kind` (`discovery/integration_heuristics.py`)
+  tem uma lista curta e manual de vendors conhecidos — um vendor fora da lista cai em
+  `unknown` (nunca em `external` errado por engano; a lista foi feita pra evitar falso
+  positivo, não falso negativo). Ela só entra em jogo quando o LLM (que já viu o código
+  real) não conseguiu classificar — na prática cobre a minoria dos casos.
 
 ## Desenvolvimento
 

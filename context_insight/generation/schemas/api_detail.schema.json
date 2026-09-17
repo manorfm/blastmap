@@ -45,9 +45,14 @@
             "minimum": 0,
             "maximum": 1,
             "description": "Your confidence that this call and its reason are correctly attributed from the evidence, 0-1."
+          },
+          "target_kind": {
+            "type": "string",
+            "enum": ["internal", "external", "unknown"],
+            "description": "internal: another service of this same system/architecture (e.g. a bare service name, an internal hostname or env var like PAYMENTS_SERVICE_URL, a service-discovery/RPC client). external: a third-party vendor/SaaS (a vendor SDK import like stripe/twilio/boto3, a public vendor API domain, vendor-specific auth). unknown: can't tell from the evidence."
           }
         },
-        "required": ["to_service_name", "call_kind", "reason", "data_needed", "purpose_kind", "confidence"],
+        "required": ["to_service_name", "call_kind", "reason", "data_needed", "purpose_kind", "confidence", "target_kind"],
         "additionalProperties": false
       }
     },
