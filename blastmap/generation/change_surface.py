@@ -17,6 +17,7 @@ from pathlib import Path
 
 from blastmap.db.repositories import apis as apis_repo
 from blastmap.db.repositories import change_surface as change_surface_repo
+from blastmap.db.repositories import messages as messages_repo
 from blastmap.db.repositories import persistence as persistence_repo
 from blastmap.db.repositories import service_calls as service_calls_repo
 from blastmap.db.repositories import services as services_repo
@@ -44,6 +45,7 @@ class ChangeSurfaceBuilder:
     flow: list[dict] = field(default_factory=list)
     external_integrations: list[dict] = field(default_factory=list)
     unmapped_internal_hint: list[dict] = field(default_factory=list)
+    contracts_at_risk: list[dict] = field(default_factory=list)
     freshness: dict[str, dict] = field(default_factory=dict)
     unknowns: list[dict] = field(default_factory=list)
     recommended_next_queries: list[dict] = field(default_factory=list)
@@ -65,6 +67,10 @@ class ChangeSurfaceBuilder:
 
     def with_unmapped_internal_hint(self, items: list[dict]) -> "ChangeSurfaceBuilder":
         self.unmapped_internal_hint = items
+        return self
+
+    def with_contracts_at_risk(self, items: list[dict]) -> "ChangeSurfaceBuilder":
+        self.contracts_at_risk = items
         return self
 
     def with_freshness(self, freshness: dict[str, dict]) -> "ChangeSurfaceBuilder":
@@ -91,6 +97,7 @@ class ChangeSurfaceBuilder:
             "flow": self.flow,
             "external_integrations": self.external_integrations,
             "unmapped_internal_hint": self.unmapped_internal_hint,
+            "contracts_at_risk": self.contracts_at_risk,
             "freshness": self.freshness,
             "unknowns": self.unknowns,
             "recommended_next_queries": self.recommended_next_queries,
@@ -226,6 +233,39 @@ def _compute_freshness_for(conn: sqlite3.Connection, service_names: set[str]) ->
     return freshness
 
 
+def _derive_contracts_at_risk(conn: sqlite3.Connection, service_names: set[str]) -> list[dict]:
+    """Events published by a relevant service, and every other indexed service that
+    consumes them — reuses the same publish<->consume channel-name join as
+    get_relationships/trace_flow (messages_repo.list_message_links), just grouped by
+    channel instead of walked edge by edge. Always phrased as risk, never as a
+    confirmed break: a consumer is 'potentially affected', not broken.
+    """
+    contracts: dict[str, dict] = {}
+    for name in sorted(service_names):
+        row = services_repo.get_service_by_name(conn, name)
+        if row is None:
+            continue
+        published = {m["channel"]: m for m in messages_repo.list_messages(conn, row["id"]) if m["direction"] == "publishes"}
+        if not published:
+            continue
+        for link in messages_repo.list_message_links(conn, row["id"]):
+            if link["local_direction"] != "publishes" or link["channel"] not in published:
+                continue
+            entry = contracts.setdefault(
+                link["channel"],
+                {
+                    "contract": link["channel"],
+                    "producer": name,
+                    "consumers": [],
+                    "reason": "potentially affects its consumers; requires verification",
+                    "evidence": json.loads(published[link["channel"]]["evidence_json"] or "[]"),
+                },
+            )
+            if link["other_service"] not in entry["consumers"]:
+                entry["consumers"].append(link["other_service"])
+    return list(contracts.values())
+
+
 def _derive_unknowns_from_unmapped(unmapped_internal_hint: list[dict]) -> list[dict]:
     """Every unmapped_internal_hint finding is, by definition, a gap in the System
     Knowledge Model: a dependency that looks internal but was never indexed. Restate
@@ -236,8 +276,8 @@ def _derive_unknowns_from_unmapped(unmapped_internal_hint: list[dict]) -> list[d
         {
             "status": "unknown",
             "service": hint["service"],
-            "reason": f"{hint['service']} looks internal but has not been indexed yet",
-            "suggestion": f"index the {hint['service']} repository for a fuller picture",
+            "reason": "looks internal but has not been indexed yet",
+            "suggestion": "index this repository for a fuller picture",
         }
         for hint in unmapped_internal_hint
     ]
@@ -283,6 +323,7 @@ def analyze_change_surface(
         .with_flow(_derive_flow(conn, relevant))
         .with_external_integrations(_derive_dependency_hints(conn, relevant, service_calls_repo.list_external_integration_calls))
         .with_unmapped_internal_hint(unmapped_internal_hint)
+        .with_contracts_at_risk(_derive_contracts_at_risk(conn, relevant))
         .with_freshness(_compute_freshness_for(conn, relevant))
         .with_unknowns(_derive_unknowns_from_unmapped(unmapped_internal_hint))
         .with_recommended_next_queries(next_queries)

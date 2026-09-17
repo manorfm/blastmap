@@ -189,6 +189,26 @@ def test_external_and_unmapped_internal_buckets_are_populated(tmp_path: Path):
     assert "suggestion" in shipping_unknown
 
 
+def test_contracts_at_risk_lists_consumers_of_a_relevant_service_events(tmp_path: Path):
+    conn = _build_pix_fixture(tmp_path / "pix6.db")
+    backend = FakeBackend({
+        "primary": [
+            {"service": "checkout-service", "reason": "owns checkout entry point", "confidence": 0.95},
+            {"service": "payments-service", "reason": "owns payment method resolution", "confidence": 0.9},
+        ],
+        "secondary": [], "no_change": [],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
+
+    contracts = {c["contract"]: c for c in result["contracts_at_risk"]}
+    assert "payment_authorized" in contracts
+    payment_authorized = contracts["payment_authorized"]
+    assert payment_authorized["producer"] == "payments-service"
+    assert payment_authorized["consumers"] == ["notification-service"]
+    assert "potentially affected" in payment_authorized["reason"] or "requires verification" in payment_authorized["reason"]
+
+
 def test_analyze_change_surface_persists_a_run_and_returns_its_id(tmp_path: Path):
     conn = _build_pix_fixture(tmp_path / "pix4.db")
     backend = FakeBackend({

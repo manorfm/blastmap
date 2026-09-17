@@ -13,6 +13,7 @@ def test_build_emits_empty_lists_by_default():
         "flow": [],
         "external_integrations": [],
         "unmapped_internal_hint": [],
+        "contracts_at_risk": [],
         "freshness": {},
         "unknowns": [],
         "recommended_next_queries": [],

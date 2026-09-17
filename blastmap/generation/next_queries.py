@@ -48,13 +48,13 @@ class NextQueryRecommender:
             recs.append({
                 "tool": "describe_api",
                 "arguments": {"service": service_name, "method": first["method"], "path": first["path"]},
-                "reason": f"{service_name} is a relevant service — inspect its API contract before implementing the change.",
+                "reason": "relevant service — inspect its API contract before changing it.",
             })
         if messages_repo.list_messages(conn, row["id"]):
             recs.append({
                 "tool": "describe_messages",
                 "arguments": {"service": service_name},
-                "reason": f"{service_name} publishes or consumes messages that may need to change too.",
+                "reason": "publishes or consumes messages that may need to change too.",
             })
         return recs
 
@@ -63,7 +63,7 @@ class NextQueryRecommender:
             {
                 "tool": "index",
                 "arguments": {"service": hint["service"]},
-                "reason": f"{hint['service']} looks internal but has not been indexed — index it for a fuller picture.",
+                "reason": f"{hint['service']} looks internal but not indexed yet — index it for a fuller picture.",
             }
             for hint in unmapped_internal_hint
         ]
