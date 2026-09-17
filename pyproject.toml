@@ -1,6 +1,6 @@
 [project]
 name = "context-insight"
-version = "0.4.0"
+version = "0.5.0"
 description = "Tritura microsserviços em documentação semântica enxuta, servida a agentes via MCP."
 requires-python = ">=3.11"
 dependencies = [
@@ -12,6 +12,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
 ]
 
 [project.scripts]
@@ -26,3 +27,15 @@ include = ["context_insight*"]
 
 [tool.setuptools.package-data]
 context_insight = ["db/schema.sql", "generation/prompts/*.md", "generation/schemas/*.json"]
+
+[tool.coverage.run]
+source = ["context_insight"]
+# get_relationships/find_change_surface are exercised via a subprocess MCP server
+# (tests/test_mcp_*.py drive it over real stdio), so coverage must follow across the
+# process boundary: parallel + the COVERAGE_PROCESS_START env var + a `coverage.pth`
+# startup hook in the interpreter's site-packages (see CONTRIBUTING notes / README).
+parallel = true
+relative_files = true
+
+[tool.coverage.report]
+exclude_lines = ["if __name__ == .__main__.:"]

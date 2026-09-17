@@ -21,7 +21,9 @@ Return:
 - response_shape: fields of the response payload, if visible in the evidence
 - calls: any other service, queue or topic this endpoint calls or publishes to while
   handling a request, WHY it does so (business reason, e.g. "to charge the customer's
-  card" or "to check current stock before confirming the order"), and exactly what
-  data it needs from (or sends to) that target
+  card" or "to check current stock before confirming the order"), exactly what
+  data it needs from (or sends to) that target, and your own confidence (0-1) that
+  this call and its reason are correctly attributed from the evidence above — lower it
+  when the target name or business reason is only loosely implied rather than explicit
 - validations: input validation and authorization rules this endpoint enforces
   (e.g. required auth header/role, field constraints)

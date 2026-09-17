@@ -12,6 +12,29 @@ def _now() -> str:
 
 
 # ---------------------------------------------------------------------------
+# repositories
+# ---------------------------------------------------------------------------
+
+def ensure_repository(conn: sqlite3.Connection, name: str, root_path: str) -> int:
+    row = conn.execute("SELECT id FROM repositories WHERE root_path = ?", (root_path,)).fetchone()
+    if row is not None:
+        conn.execute(
+            "UPDATE repositories SET name = ?, updated_at = ? WHERE id = ?", (name, _now(), row["id"])
+        )
+        conn.commit()
+        return row["id"]
+    cur = conn.execute(
+        "INSERT INTO repositories (name, root_path, updated_at) VALUES (?, ?, ?)", (name, root_path, _now())
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def list_repositories(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM repositories ORDER BY name").fetchall()
+
+
+# ---------------------------------------------------------------------------
 # services
 # ---------------------------------------------------------------------------
 
@@ -23,18 +46,21 @@ def get_service_by_id(conn: sqlite3.Connection, service_id: int) -> sqlite3.Row 
     return conn.execute("SELECT * FROM services WHERE id = ?", (service_id,)).fetchone()
 
 
-def ensure_service(conn: sqlite3.Connection, name: str, root_path: str, stack: str) -> int:
+def ensure_service(
+    conn: sqlite3.Connection, name: str, root_path: str, stack: str, repository_id: int | None = None
+) -> int:
     row = get_service_by_name(conn, name)
     if row is not None:
         conn.execute(
-            "UPDATE services SET root_path = ?, stack = ?, updated_at = ? WHERE id = ?",
-            (root_path, stack, _now(), row["id"]),
+            "UPDATE services SET root_path = ?, stack = ?, updated_at = ?, "
+            "repository_id = COALESCE(?, repository_id) WHERE id = ?",
+            (root_path, stack, _now(), repository_id, row["id"]),
         )
         conn.commit()
         return row["id"]
     cur = conn.execute(
-        "INSERT INTO services (name, root_path, stack, updated_at) VALUES (?, ?, ?, ?)",
-        (name, root_path, stack, _now()),
+        "INSERT INTO services (name, root_path, stack, repository_id, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (name, root_path, stack, repository_id, _now()),
     )
     conn.commit()
     return cur.lastrowid
@@ -76,24 +102,24 @@ def upsert_api(
     summary: str,
     description: str,
     response_shape: dict,
-    source_files: list[str],
+    evidence: list[dict],
 ) -> int:
     row = conn.execute(
         "SELECT id FROM apis WHERE service_id = ? AND method = ? AND path = ?",
         (service_id, method, path),
     ).fetchone()
-    payload = (summary, description, json.dumps(response_shape), json.dumps(source_files), _now())
+    payload = (summary, description, json.dumps(response_shape), json.dumps(evidence), _now())
     if row is not None:
         conn.execute(
             """UPDATE apis SET summary = ?, description = ?, response_shape = ?,
-               source_files = ?, updated_at = ? WHERE id = ?""",
+               evidence_json = ?, updated_at = ? WHERE id = ?""",
             (*payload, row["id"]),
         )
         api_id = row["id"]
     else:
         cur = conn.execute(
             """INSERT INTO apis (service_id, method, path, summary, description, response_shape,
-               source_files, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               evidence_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (service_id, method, path, *payload),
         )
         api_id = cur.lastrowid
@@ -110,13 +136,16 @@ def replace_api_validations(conn: sqlite3.Connection, api_id: int, validations: 
     conn.commit()
 
 
-def replace_calls_for_api(conn: sqlite3.Connection, from_service_id: int, api_id: int, calls: list[dict]) -> None:
+def replace_calls_for_api(
+    conn: sqlite3.Connection, from_service_id: int, api_id: int, calls: list[dict], evidence: list[dict]
+) -> None:
     conn.execute("DELETE FROM service_calls WHERE from_api_id = ?", (api_id,))
+    evidence_json = json.dumps(evidence)
     conn.executemany(
         """INSERT INTO service_calls
            (from_service_id, from_api_id, to_service_name, call_kind, reason, data_needed,
-            purpose_kind, source_files, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            purpose_kind, confidence, evidence_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 from_service_id,
@@ -126,7 +155,8 @@ def replace_calls_for_api(conn: sqlite3.Connection, from_service_id: int, api_id
                 c.get("reason"),
                 json.dumps(c.get("data_needed", [])),
                 c.get("purpose_kind"),
-                json.dumps(c.get("source_files", [])),
+                c.get("confidence"),
+                evidence_json,
                 _now(),
             )
             for c in calls
@@ -152,7 +182,8 @@ def get_api_by_key(conn: sqlite3.Connection, service_id: int, method: str, path:
 
 def list_apis(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT method, path, summary FROM apis WHERE service_id = ? ORDER BY path, method", (service_id,)
+        "SELECT method, path, summary, evidence_json FROM apis WHERE service_id = ? ORDER BY path, method",
+        (service_id,),
     ).fetchall()
 
 
@@ -174,7 +205,7 @@ def reconcile_service_call_targets(conn: sqlite3.Connection) -> None:
 
 def list_calls_for_service(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT to_service_name, call_kind, reason, data_needed, purpose_kind
+        """SELECT to_service_name, call_kind, reason, data_needed, purpose_kind, confidence, evidence_json
            FROM service_calls WHERE from_service_id = ? ORDER BY to_service_name""",
         (service_id,),
     ).fetchall()
@@ -182,9 +213,25 @@ def list_calls_for_service(conn: sqlite3.Connection, service_id: int) -> list[sq
 
 def list_calls_for_api(conn: sqlite3.Connection, api_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT to_service_name, call_kind, reason, data_needed, purpose_kind
+        """SELECT to_service_name, call_kind, reason, data_needed, purpose_kind, confidence, evidence_json
            FROM service_calls WHERE from_api_id = ? ORDER BY to_service_name""",
         (api_id,),
+    ).fetchall()
+
+
+def list_inbound_calls(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    """Calls made BY other services INTO this one — 'who depends on me'.
+
+    Only resolves edges whose target has been reconciled to a real service_id
+    (see reconcile_service_call_targets); a still-dangling to_service_name from
+    an unindexed service can't be attributed to a from_service row here.
+    """
+    return conn.execute(
+        """SELECT s.name AS from_service_name, sc.call_kind, sc.reason, sc.data_needed,
+                  sc.purpose_kind, sc.confidence, sc.evidence_json
+           FROM service_calls sc JOIN services s ON s.id = sc.from_service_id
+           WHERE sc.to_service_id = ? ORDER BY s.name""",
+        (service_id,),
     ).fetchall()
 
 
@@ -198,13 +245,16 @@ def list_validations_for_api(conn: sqlite3.Connection, api_id: int) -> list[sqli
 # persistence & messages (one call per service -> full replace)
 # ---------------------------------------------------------------------------
 
-def replace_persistence_entities(conn: sqlite3.Connection, service_id: int, entities: list[dict]) -> None:
+def replace_persistence_entities(
+    conn: sqlite3.Connection, service_id: int, entities: list[dict], evidence: list[dict]
+) -> None:
     conn.execute("DELETE FROM persistence_entities WHERE service_id = ?", (service_id,))
+    evidence_json = json.dumps(evidence)
     conn.executemany(
-        """INSERT INTO persistence_entities (service_id, name, kind, schema_json, source_files, updated_at)
+        """INSERT INTO persistence_entities (service_id, name, kind, schema_json, evidence_json, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)""",
         [
-            (service_id, e["name"], e.get("kind"), json.dumps(e.get("schema_json", {})), json.dumps([]), _now())
+            (service_id, e["name"], e.get("kind"), json.dumps(e.get("schema_json", {})), evidence_json, _now())
             for e in entities
         ],
     )
@@ -213,15 +263,16 @@ def replace_persistence_entities(conn: sqlite3.Connection, service_id: int, enti
 
 def list_persistence(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT name, kind, schema_json FROM persistence_entities WHERE service_id = ? ORDER BY name",
+        "SELECT name, kind, schema_json, evidence_json FROM persistence_entities WHERE service_id = ? ORDER BY name",
         (service_id,),
     ).fetchall()
 
 
-def replace_messages(conn: sqlite3.Connection, service_id: int, messages: list[dict]) -> None:
+def replace_messages(conn: sqlite3.Connection, service_id: int, messages: list[dict], evidence: list[dict]) -> None:
     conn.execute("DELETE FROM messages WHERE service_id = ?", (service_id,))
+    evidence_json = json.dumps(evidence)
     conn.executemany(
-        """INSERT INTO messages (service_id, direction, channel, shape_json, description, source_files, updated_at)
+        """INSERT INTO messages (service_id, direction, channel, shape_json, description, evidence_json, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         [
             (
@@ -230,7 +281,7 @@ def replace_messages(conn: sqlite3.Connection, service_id: int, messages: list[d
                 m["channel"],
                 json.dumps(m.get("shape_json", {})),
                 m.get("description"),
-                json.dumps([]),
+                evidence_json,
                 _now(),
             )
             for m in messages
@@ -241,7 +292,29 @@ def replace_messages(conn: sqlite3.Connection, service_id: int, messages: list[d
 
 def list_messages(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT direction, channel, shape_json, description FROM messages WHERE service_id = ? ORDER BY channel",
+        """SELECT direction, channel, shape_json, description, evidence_json
+           FROM messages WHERE service_id = ? ORDER BY channel""",
+        (service_id,),
+    ).fetchall()
+
+
+def list_message_links(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    """Other services connected to this one through a shared channel name.
+
+    A 'publishes' row on this service links to every other service that 'consumes'
+    the same channel, and vice versa. Purely a name match at query time — no extra
+    storage, since channel is already the shared key both sides record.
+    """
+    return conn.execute(
+        """
+        SELECT m1.direction AS local_direction, m1.channel AS channel, s2.name AS other_service
+        FROM messages m1
+        JOIN messages m2 ON m2.channel = m1.channel AND m2.service_id != m1.service_id
+                         AND m2.direction != m1.direction
+        JOIN services s2 ON s2.id = m2.service_id
+        WHERE m1.service_id = ?
+        ORDER BY m1.channel, s2.name
+        """,
         (service_id,),
     ).fetchall()
 
@@ -358,6 +431,21 @@ def search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict[s
     ):
         results.append(
             {"kind": "message", "service": row["service_name"], "ref": row["channel"], "snippet": row["description"] or ""}
+        )
+
+    for row in conn.execute(
+        """SELECT s.name AS service_name, sc.to_service_name, sc.reason, sc.purpose_kind
+           FROM service_calls sc JOIN services s ON s.id = sc.from_service_id
+           WHERE sc.reason LIKE ? OR sc.purpose_kind LIKE ? OR sc.to_service_name LIKE ? LIMIT ?""",
+        (like, like, like, limit),
+    ):
+        results.append(
+            {
+                "kind": "relationship",
+                "service": row["service_name"],
+                "ref": row["to_service_name"],
+                "snippet": row["reason"] or "",
+            }
         )
 
     return results[:limit]

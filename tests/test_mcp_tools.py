@@ -1,17 +1,14 @@
 """Integration test: drives the real MCP server over stdio, exactly as an agent would."""
-import json
-import sys
 from pathlib import Path
 
 import pytest
-from mcp import ClientSession, StdioServerParameters
+from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
+from tests.mcp_test_helpers import content_json as _content_json
+from tests.mcp_test_helpers import server_params
+
 DB_PATH = Path(__file__).resolve().parent.parent / "verify" / "sample_project.db"
-
-
-def _content_json(result) -> dict:
-    return json.loads(result.content[0].text)
 
 
 @pytest.mark.anyio
@@ -19,10 +16,7 @@ async def test_mcp_progressive_disclosure_flow():
     if not DB_PATH.exists():
         pytest.skip(f"no indexed sample db at {DB_PATH}; run the e2e indexing step first")
 
-    params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "context_insight.mcp.server", "--db", str(DB_PATH)],
-    )
+    params = server_params(DB_PATH)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

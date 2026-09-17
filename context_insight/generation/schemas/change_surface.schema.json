@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "properties": {
+    "primary": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "secondary": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "no_change": {"type": "array", "items": {"$ref": "#/$defs/finding"}}
+  },
+  "required": ["primary", "secondary", "no_change"],
+  "additionalProperties": false,
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "properties": {
+        "service": {"type": "string", "description": "Must be one of the candidate service names given in the prompt."},
+        "reason": {"type": "string", "description": "Short business-level reason for this classification."},
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence that this classification is correct, 0-1. This is a task-specific inference, not a verified fact."
+        }
+      },
+      "required": ["service", "reason", "confidence"],
+      "additionalProperties": false
+    }
+  }
+}

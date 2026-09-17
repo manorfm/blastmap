@@ -4,9 +4,12 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 context_insight.egg-info/
+.DS_Store
 
 # generated artifacts, not source
 *.db
 /docs/
 verify/sample_project.db
 .context_insight/
+.coverage
+.coverage.*

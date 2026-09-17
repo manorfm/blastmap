@@ -1,30 +1,19 @@
 from __future__ import annotations
 
-import json
-import logging
 import os
 import sqlite3
-import time
 from dataclasses import dataclass, replace
-from functools import lru_cache
-from importlib import resources
 from pathlib import Path
-from string import Template
 from typing import Protocol
-
-import jsonschema
 
 from context_insight.db import repository
 from context_insight.discovery.base import CodeExcerpt, EndpointHint, ServiceHints, StackDetector
 from context_insight.discovery.hashing import file_hash, git_head_commit
 from context_insight.discovery.scan_helpers import SKIP_DIRS
 from context_insight.discovery.walker import discover_services
-from context_insight.generation.backend_base import GenerationError, LLMBackend
+from context_insight.generation.backend_base import LLMBackend
+from context_insight.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 
-logger = logging.getLogger(__name__)
-
-PROMPTS_PKG = "context_insight.generation.prompts"
-SCHEMAS_PKG = "context_insight.generation.schemas"
 MAX_EXCERPT_CHARS = 20_000
 
 
@@ -71,22 +60,6 @@ class NullProgressReporter:
 
 
 # ---------------------------------------------------------------------------
-# template / schema loading
-# ---------------------------------------------------------------------------
-
-@lru_cache(maxsize=None)
-def _load_prompt(name: str) -> Template:
-    text = resources.files(PROMPTS_PKG).joinpath(f"{name}.md").read_text(encoding="utf-8")
-    return Template(text)
-
-
-@lru_cache(maxsize=None)
-def _load_schema(name: str) -> dict:
-    text = resources.files(SCHEMAS_PKG).joinpath(f"{name}.schema.json").read_text(encoding="utf-8")
-    return json.loads(text)
-
-
-# ---------------------------------------------------------------------------
 # prompt rendering helpers
 # ---------------------------------------------------------------------------
 
@@ -101,6 +74,16 @@ def _join_excerpts(excerpts: list[CodeExcerpt], max_chars: int = MAX_EXCERPT_CHA
         parts.append(block)
         total += len(block)
     return "\n".join(parts) if parts else "(no excerpts found)"
+
+
+def _evidence_from_excerpts(excerpts: list[CodeExcerpt]) -> list[dict]:
+    """Turn discovery excerpts into persistable evidence pointers (file + line range).
+
+    This is the evidence an LLM call actually saw when it produced a claim, so it's
+    attached as-is to whatever that call generated — it is never fabricated beyond
+    what discovery already found.
+    """
+    return [{"file": e.file_path, "start_line": e.start_line, "end_line": e.end_line} for e in excerpts]
 
 
 def _folder_tree(root: Path, max_depth: int = 2, max_lines: int = 200) -> str:
@@ -127,7 +110,7 @@ def _render_service_overview_prompt(name: str, stack: str, root: Path, hints: Se
     entry_file = hints.entry_excerpt.file_path if hints.entry_excerpt else "(none found)"
     entry_excerpt = hints.entry_excerpt.text if hints.entry_excerpt else "(no entrypoint file detected)"
     endpoint_paths = "\n".join(f"- {e.method} {e.path}" for e in hints.endpoints) or "(none found)"
-    return _load_prompt("service_overview").substitute(
+    return load_prompt("service_overview").substitute(
         service_name=name,
         stack=stack,
         folder_tree=_folder_tree(root),
@@ -144,7 +127,7 @@ def _render_api_detail_prompt(name: str, stack: str, endpoint: EndpointHint, hin
         f"- [{c.call_kind}] {c.target_hint} ({c.excerpt.file_path}:{c.excerpt.start_line})"
         for c in hints.outbound_calls[:30]
     ) or "(none found)"
-    return _load_prompt("api_detail").substitute(
+    return load_prompt("api_detail").substitute(
         service_name=name,
         stack=stack,
         method=endpoint.method,
@@ -156,45 +139,16 @@ def _render_api_detail_prompt(name: str, stack: str, endpoint: EndpointHint, hin
 
 def _render_persistence_prompt(name: str, stack: str, hints: ServiceHints) -> str:
     excerpts = [p.excerpt for p in hints.persistence]
-    return _load_prompt("persistence").substitute(
+    return load_prompt("persistence").substitute(
         service_name=name, stack=stack, persistence_excerpts=_join_excerpts(excerpts)
     )
 
 
 def _render_messaging_prompt(name: str, stack: str, hints: ServiceHints) -> str:
     excerpts = [m.excerpt for m in hints.messaging]
-    return _load_prompt("messaging").substitute(
+    return load_prompt("messaging").substitute(
         service_name=name, stack=stack, messaging_excerpts=_join_excerpts(excerpts)
     )
-
-
-# ---------------------------------------------------------------------------
-# backend invocation with validation + one retry
-# ---------------------------------------------------------------------------
-
-def _generate_with_retry(
-    backend: LLMBackend, prompt: str, schema: dict, cwd: Path, failures_dir: Path, label: str
-) -> dict | None:
-    last_error: Exception | None = None
-    current_prompt = prompt
-    for _attempt in range(2):
-        try:
-            result = backend.generate(current_prompt, schema, cwd)
-            jsonschema.validate(result, schema)
-            return result
-        except (GenerationError, jsonschema.ValidationError) as exc:
-            last_error = exc
-            current_prompt = (
-                f"{prompt}\n\nYour previous response was invalid: {exc}. "
-                "Return ONLY valid JSON matching the schema, no prose, no markdown fences."
-            )
-
-    failures_dir.mkdir(parents=True, exist_ok=True)
-    safe_label = label.replace("/", "_")
-    fail_file = failures_dir / f"{safe_label}-{int(time.time())}.txt"
-    fail_file.write_text(f"Prompt:\n{prompt}\n\nLast error:\n{last_error}", encoding="utf-8")
-    logger.warning("generation failed for %s: %s (see %s)", label, last_error, fail_file)
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +164,7 @@ def index_service(
     force: bool = False,
     failures_root: Path | None = None,
     progress: ProgressReporter | None = None,
+    repository_id: int | None = None,
 ) -> IndexResult:
     failures_root = failures_root or (Path.home() / ".context_insight" / "failures")
     progress = progress or NullProgressReporter()
@@ -219,7 +174,7 @@ def index_service(
 
     existing = repository.get_service_by_name(conn, name)
     is_new = existing is None
-    service_id = repository.ensure_service(conn, name, str(root), detector.id)
+    service_id = repository.ensure_service(conn, name, str(root), detector.id, repository_id=repository_id)
 
     old_hashes = repository.get_indexed_file_hashes(conn, service_id)
     relevant = hints.relevant_files()
@@ -248,8 +203,8 @@ def index_service(
     if needs_overview:
         progress.unit_started(name, "overview")
         prompt = _render_service_overview_prompt(name, detector.id, root, hints)
-        result = _generate_with_retry(
-            backend, prompt, _load_schema("service_overview"), root, failures_root, f"{name}-overview"
+        result = generate_with_retry(
+            backend, prompt, load_schema("service_overview"), root, failures_root, f"{name}-overview"
         )
         if result:
             repository.update_service_overview(conn, service_id, result["short_desc"], result["long_desc"])
@@ -275,20 +230,21 @@ def index_service(
             continue
         progress.unit_started(name, label)
         prompt = _render_api_detail_prompt(name, detector.id, endpoint, hints)
-        result = _generate_with_retry(
-            backend, prompt, _load_schema("api_detail"), root, failures_root, f"{name}-{endpoint.method}-{endpoint.path}"
+        result = generate_with_retry(
+            backend, prompt, load_schema("api_detail"), root, failures_root, f"{name}-{endpoint.method}-{endpoint.path}"
         )
         if not result:
             had_failure = True
             failed_files |= dep_files
             progress.unit_finished(name, label, "failed")
             continue
+        evidence = _evidence_from_excerpts([endpoint.excerpt, *endpoint.extra_excerpts])
         api_id = repository.upsert_api(
             conn, service_id, endpoint.method, endpoint.path,
-            result["summary"], result["description"], result["response_shape"], sorted(dep_files),
+            result["summary"], result["description"], result["response_shape"], evidence,
         )
         repository.replace_api_validations(conn, api_id, result["validations"])
-        repository.replace_calls_for_api(conn, service_id, api_id, result["calls"])
+        repository.replace_calls_for_api(conn, service_id, api_id, result["calls"], evidence)
         llm_calls += 1
         progress.unit_finished(name, label, "ok")
 
@@ -299,14 +255,15 @@ def index_service(
         if force or is_new or (changed & persistence_files) or (removed & persistence_files):
             progress.unit_started(name, "persistence")
             prompt = _render_persistence_prompt(name, detector.id, hints)
-            result = _generate_with_retry(
-                backend, prompt, _load_schema("persistence"), root, failures_root, f"{name}-persistence"
+            result = generate_with_retry(
+                backend, prompt, load_schema("persistence"), root, failures_root, f"{name}-persistence"
             )
             if result:
                 entities = [
                     {"name": e["name"], "kind": e["kind"], "schema_json": e["fields"]} for e in result["entities"]
                 ]
-                repository.replace_persistence_entities(conn, service_id, entities)
+                evidence = _evidence_from_excerpts([p.excerpt for p in hints.persistence])
+                repository.replace_persistence_entities(conn, service_id, entities, evidence)
                 llm_calls += 1
                 progress.unit_finished(name, "persistence", "ok")
             else:
@@ -316,15 +273,15 @@ def index_service(
         else:
             progress.unit_finished(name, "persistence", "skipped")
     else:
-        repository.replace_persistence_entities(conn, service_id, [])
+        repository.replace_persistence_entities(conn, service_id, [], [])
 
     messaging_files = {m.excerpt.file_path for m in hints.messaging}
     if hints.messaging:
         if force or is_new or (changed & messaging_files) or (removed & messaging_files):
             progress.unit_started(name, "messaging")
             prompt = _render_messaging_prompt(name, detector.id, hints)
-            result = _generate_with_retry(
-                backend, prompt, _load_schema("messaging"), root, failures_root, f"{name}-messaging"
+            result = generate_with_retry(
+                backend, prompt, load_schema("messaging"), root, failures_root, f"{name}-messaging"
             )
             if result:
                 messages = [
@@ -336,7 +293,8 @@ def index_service(
                     }
                     for m in result["messages"]
                 ]
-                repository.replace_messages(conn, service_id, messages)
+                evidence = _evidence_from_excerpts([m.excerpt for m in hints.messaging])
+                repository.replace_messages(conn, service_id, messages, evidence)
                 llm_calls += 1
                 progress.unit_finished(name, "messaging", "ok")
             else:
@@ -346,7 +304,7 @@ def index_service(
         else:
             progress.unit_finished(name, "messaging", "skipped")
     else:
-        repository.replace_messages(conn, service_id, [])
+        repository.replace_messages(conn, service_id, [], [])
 
     route_files = {e.excerpt.file_path for e in hints.endpoints}
     for rel, h in new_hashes.items():
@@ -387,6 +345,7 @@ def index_path(
     service_override: str | None = None,
     force: bool = False,
     progress: ProgressReporter | None = None,
+    repository_name: str | None = None,
 ) -> list[IndexResult]:
     candidates = discover_services(path)
     if not candidates:
@@ -399,7 +358,10 @@ def index_path(
             raise DiscoveryError("--service can only be used when <path> points at a single service")
         candidates = [replace(candidates[0], name=service_override)]
 
+    resolved_path = path.resolve()
+    repository_id = repository.ensure_repository(conn, repository_name or resolved_path.name, str(resolved_path))
+
     return [
-        index_service(conn, c.name, c.path, c.detector, backend, force=force, progress=progress)
+        index_service(conn, c.name, c.path, c.detector, backend, force=force, progress=progress, repository_id=repository_id)
         for c in candidates
     ]

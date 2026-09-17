@@ -7,12 +7,18 @@ from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
+from context_insight.config import resolve_backend
 from context_insight.db.connection import open_db
+from context_insight.generation.backend_base import LLMBackend
 from context_insight.mcp import queries
 
 
-def build_server(db_path: Path | None = None) -> MCPServer:
+def build_server(db_path: Path | None = None, backend: LLMBackend | None = None) -> MCPServer:
     mcp = MCPServer("context-insight")
+    # Only find_change_surface uses a backend; the other 6 tools are pure SQLite
+    # reads and never touch it. Resolved once here rather than per-call since
+    # constructing a backend is cheap (no subprocess runs until .generate() is called).
+    resolved_backend = backend or resolve_backend(None)
 
     def _conn() -> sqlite3.Connection:
         # A fresh short-lived connection per call: tool handlers may run on different
@@ -66,14 +72,41 @@ def build_server(db_path: Path | None = None) -> MCPServer:
         with closing(_conn()) as conn:
             return queries.search(conn, query)
 
+    @mcp.tool()
+    def get_relationships(service: str, direction: str = "both") -> dict:
+        """Graph of edges around one service: outbound calls it makes, inbound calls other
+        services make into it ('who depends on me'), and queue/topic links inferred from
+        matching publish/consume channel names. direction: 'outbound', 'inbound' or 'both'.
+        Each edge carries its business reason, confidence and evidence (file/line) when
+        known — this is the navigation primitive behind find_change_surface."""
+        with closing(_conn()) as conn:
+            return queries.get_relationships(conn, service, direction)
+
+    @mcp.tool()
+    def find_change_surface(task: str, hint_services: list[str] | None = None) -> dict:
+        """Given a business task/epic description, find which indexed services likely
+        need code changes — WITHOUT reading any source file. Call this FIRST when handed
+        an epic, before exploring the codebase. Returns primary/secondary/no_change_hint
+        service lists plus a relevant call flow, each finding with a business reason,
+        confidence (0-1) and evidence (file/line). This is a task-specific inference, not
+        a verified fact — treat it as a starting point, not ground truth. Pass
+        hint_services if you already suspect specific services, to anchor the search."""
+        with closing(_conn()) as conn:
+            return queries.find_change_surface(conn, resolved_backend, task, hint_services)
+
     return mcp
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="context-insight serve")
     parser.add_argument("--db", type=Path, default=None)
+    parser.add_argument("--backend", choices=["claude", "codex"], default=None, help="Used only by find_change_surface")
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--claude-bare", action="store_true")
+    parser.add_argument("--codex-api-key", action="store_true")
     args = parser.parse_args()
-    server = build_server(args.db)
+    backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    server = build_server(args.db, backend=backend)
     server.run()
 
 

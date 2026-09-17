@@ -1,10 +1,13 @@
-"""Read helpers backing the MCP tools. Thin JSON-shaping wrappers over db.repository."""
+"""Read helpers backing the MCP tools. Thin JSON-shaping wrappers over db.repository
+(and, for find_change_surface, over generation.change_surface)."""
 from __future__ import annotations
 
 import json
 import sqlite3
 
 from context_insight.db import repository
+from context_insight.generation import change_surface
+from context_insight.generation.backend_base import LLMBackend
 
 
 def _fmt_call(c: sqlite3.Row) -> dict:
@@ -110,3 +113,65 @@ def describe_messages(conn: sqlite3.Connection, service: str) -> dict:
 
 def search(conn: sqlite3.Connection, query: str) -> dict:
     return {"results": repository.search(conn, query)}
+
+
+def _fmt_relationship_call(c: sqlite3.Row, *, direction: str, other_key: str, other_value: str) -> dict:
+    return {
+        "type": c["call_kind"].upper(),
+        "direction": direction,
+        other_key: other_value,
+        "reason": c["reason"],
+        "confidence": c["confidence"],
+        "evidence": json.loads(c["evidence_json"] or "[]"),
+    }
+
+
+def _fmt_message_link(link: sqlite3.Row) -> dict:
+    direction = "outbound" if link["local_direction"] == "publishes" else "inbound"
+    other_key = "target_service" if direction == "outbound" else "source_service"
+    return {
+        "type": "MESSAGE_LINK",
+        "direction": direction,
+        "channel": link["channel"],
+        other_key: link["other_service"],
+        "reason": None,
+        "confidence": None,
+        "evidence": [],
+    }
+
+
+def get_relationships(conn: sqlite3.Connection, service: str, direction: str = "both") -> dict:
+    """Fact + semantic-interpretation edges around one service: outbound calls it
+    makes, inbound calls other services make into it, and queue/topic links inferred
+    from matching publish/consume channel names."""
+    row = repository.get_service_by_name(conn, service)
+    if row is None:
+        return {"error": f"unknown service: {service}"}
+
+    relationships: list[dict] = []
+    if direction in ("outbound", "both"):
+        for c in repository.list_calls_for_service(conn, row["id"]):
+            relationships.append(
+                _fmt_relationship_call(c, direction="outbound", other_key="target_service", other_value=c["to_service_name"])
+            )
+    if direction in ("inbound", "both"):
+        for c in repository.list_inbound_calls(conn, row["id"]):
+            relationships.append(
+                _fmt_relationship_call(c, direction="inbound", other_key="source_service", other_value=c["from_service_name"])
+            )
+
+    for link in repository.list_message_links(conn, row["id"]):
+        local_is_outbound = link["local_direction"] == "publishes"
+        if direction == "both" or (direction == "outbound" and local_is_outbound) or (direction == "inbound" and not local_is_outbound):
+            relationships.append(_fmt_message_link(link))
+
+    return {"service": service, "relationships": relationships}
+
+
+def find_change_surface(
+    conn: sqlite3.Connection, backend: LLMBackend, task: str, hint_services: list[str] | None = None
+) -> dict:
+    """Task/epic -> likely change surface, computed from the already-indexed System
+    Knowledge Model (no source file is read here). This is a task inference, not a
+    fact: every finding carries reason + confidence + evidence."""
+    return change_surface.analyze_change_surface(conn, task, backend, hint_services)

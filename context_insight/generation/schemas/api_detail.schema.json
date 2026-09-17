@@ -39,9 +39,15 @@
           "purpose_kind": {
             "type": "string",
             "enum": ["validation", "data_fetch", "enrichment", "notification", "other"]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Your confidence that this call and its reason are correctly attributed from the evidence, 0-1."
           }
         },
-        "required": ["to_service_name", "call_kind", "reason", "data_needed", "purpose_kind"],
+        "required": ["to_service_name", "call_kind", "reason", "data_needed", "purpose_kind", "confidence"],
         "additionalProperties": false
       }
     },

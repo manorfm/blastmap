@@ -19,7 +19,8 @@ def _cmd_index(args: argparse.Namespace) -> int:
     try:
         with RichProgressReporter() as progress:
             results = index_path(
-                conn, Path(args.path), backend, service_override=args.service, force=args.force, progress=progress
+                conn, Path(args.path), backend, service_override=args.service, force=args.force,
+                progress=progress, repository_name=args.repository_name,
             )
     except (DiscoveryError, GenerationError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -106,7 +107,8 @@ def _cmd_export(args: argparse.Namespace) -> int:
 def _cmd_serve(args: argparse.Namespace) -> int:
     from context_insight.mcp.server import build_server
 
-    server = build_server(args.db)
+    backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    server = build_server(args.db, backend=backend)
     server.run()
     return 0
 
@@ -125,6 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_index = sub.add_parser("index", help="Index a monorepo root or a single service repo")
     p_index.add_argument("path")
     p_index.add_argument("--service", default=None, help="Override the inferred service name (only valid for a single-service path)")
+    p_index.add_argument("--repository-name", default=None, help="Explicit repository name; avoids collisions when indexing several repos into one shared DB")
     p_index.add_argument("--force", action="store_true", help="Regenerate everything, ignoring file-hash skip")
     add_backend_args(p_index)
     p_index.set_defaults(func=_cmd_index)
@@ -152,8 +155,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.set_defaults(func=_cmd_export)
 
     p_serve = sub.add_parser("serve", help="Run the MCP server (stdio)")
-    p_serve.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     p_serve.add_argument("--transport", choices=["stdio"], default="stdio")
+    add_backend_args(p_serve)  # find_change_surface is the only tool that uses a backend
     p_serve.set_defaults(func=_cmd_serve)
 
     return parser
