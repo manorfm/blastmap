@@ -1,49 +1,88 @@
 # blastmap
 
+Task-aware change intelligence for AI coding agents: given an engineering task, what
+is the smallest architectural surface an agent needs to understand before touching
+code — with evidence, confidence and freshness made explicit, instead of implied.
+
+## O que isto não é
+
+- **Não é um code graph genérico** via AST/LSP — isso já existe (Serena,
+  Codebase-Memory MCP e similares), e não é a camada que falta.
+- **Não é RAG genérico** sobre o repositório, nem "memória de código".
+- **Não é busca semântica com vector DB** — `search`/`find_change_surface` usam
+  SQLite FTS5 (bm25); embeddings só entrariam com um benchmark mostrando que FTS5
+  não basta, o que ainda não foi feito (ver "Limitações conhecidas").
+- **Não tenta reescrever código nem agir sozinho** — é uma camada de conhecimento
+  consultada via MCP; quem decide e edita é o agente.
+
 ## Ideia
 
 Agentes de IA que precisam entender um sistema de microsserviços hoje só têm dois
 caminhos: ler o código-fonte inteiro (caro em tokens, lento) ou depender de
-documentação manual que fica desatualizada. O `blastmap` "tritura" uma ou
-várias árvores de código, usa um LLM (Claude Code ou Codex, via CLI headless, usando
-sua assinatura em vez de API paga) para sintetizar uma documentação enxuta e
+documentação manual que fica desatualizada. O `blastmap` "tritura" uma ou várias
+árvores de código — repositório por repositório, ou um monorepo de uma vez, de forma
+cumulativa no mesmo banco — usa um LLM (Claude Code ou Codex, via CLI headless,
+usando sua assinatura em vez de API paga) para sintetizar uma documentação enxuta e
 **semântica** — não só estrutural — por microsserviço e por API, persiste isso em
 SQLite como um **System Knowledge Model** consultável, e serve tudo a agentes via
 tool calls MCP com drill-down progressivo: lista serviços → descreve um serviço →
 lista APIs → detalha uma API.
 
-O foco não é reconstruir um call-graph via AST/LSP (isso já existe em ferramentas como
-Serena ou Codebase-Memory MCP), nem virar um code-graph genérico. O foco é a camada
-que falta, em duas frentes:
+O foco é a camada que falta entre "ler o código-fonte" e "perguntar a um humano", em
+duas frentes:
 
 - **Por que**, não só o quê: para cada API, documentar por que ela chama outro
   serviço/fila (motivo de negócio), o que valida, quem pode chamar, e o que persiste —
   informação que hoje só existe na cabeça de quem escreveu o código.
-- **System Intelligence para tarefas**: dado um épico em texto livre, apontar quais
-  serviços/repositórios provavelmente precisam mudar — sem o agente precisar explorar
-  manualmente o sistema inteiro primeiro (`find_change_surface`, ver abaixo).
+- **Change Intelligence orientada a tarefa**: dado um épico em texto livre, apontar
+  qual é a **menor superfície arquitetural** que provavelmente precisa mudar — sem o
+  agente precisar explorar manualmente o sistema inteiro primeiro
+  (`find_change_surface`, ver abaixo). O produto final não é "mais contexto", é
+  **contexto mais relevante**: sempre que uma decisão for entre devolver mais
+  informação ou informação mais relevante, a resposta certa é a segunda.
 
-Toda resposta separa **fatos** (estrutura extraída deterministicamente),
-**interpretação semântica** (síntese do LLM a partir de evidência) e **inferência de
-tarefa** (uma conclusão específica de um épico, sempre com `reason`, `confidence` e
-`evidence` — nunca tratada como verdade absoluta).
+Toda resposta separa três camadas explicitamente, e nunca as confunde:
+
+- **Fato**: estrutura extraída deterministicamente (ex.: `orders-service` chama
+  `payments-service`; `orders-service` existe).
+- **Interpretação semântica**: síntese do LLM a partir de evidência real (ex.:
+  "`payments-service` é dono da autorização de pagamento").
+- **Inferência de tarefa**: uma conclusão específica de um épico, sempre com
+  `reason`, `confidence` e `evidence`, e nunca tratada como verdade absoluta (ex.:
+  "adicionar Pix provavelmente exige mudar `payments-service`"). Junto disso, o
+  sistema também é explícito sobre o que **não sabe** (`unknowns`) e sobre se o
+  conhecimento indexado pode estar **desatualizado** (`freshness`) — ausência de
+  informação nunca vira silenciosamente "não existe" ou "não é afetado".
 
 ## Uso básico
 
 ```bash
 blastmap index /caminho/do/repositorio --backend claude   # ou --backend codex
-blastmap index /outro/repositorio --repository-name outro-repo  # múltiplos repos no mesmo DB
+blastmap index /outro/repositorio --repository-name outro-repo  # múltiplos repos no mesmo DB, cumulativo
 blastmap list
 blastmap status [servico]
 blastmap export md --out docs/
 blastmap serve --backend claude   # servidor MCP (stdio); backend usado só por find_change_surface
+blastmap verify <run_id> --repository <nome> --since <commit>   # confere uma predição contra o git diff real
 ```
+
+Cada subcomando é autoexplicativo via `--help` (ex. `blastmap index --help`), com um
+exemplo pronto para copiar. `blastmap --help` explica o fluxo completo: **index → ask
+→ verify**.
+
+O conhecimento é cumulativo por natureza: dá pra indexar um repositório de cada vez
+(`blastmap index <repo1>`, depois `blastmap index <repo2> --repository-name <repo2>`,
+...) conforme eles forem ficando disponíveis, ou apontar para uma raiz de monorepo de
+uma vez só — o mesmo banco SQLite acumula os dois casos sem colisão de nomes, e
+`find_change_surface`/`search` sempre enxergam tudo que já foi indexado até aquele
+momento, não só o último repositório indexado.
 
 ## Formato de resposta do MCP
 
 As tool calls devolvem sempre JSON estruturado (nunca texto livre), pensado pra um
-agente ir refinando o pedido sem carregar tudo de uma vez. Exemplos reais, gerados a
-partir da fixture de exemplo do projeto:
+agente ir refinando o pedido sem carregar tudo de uma vez. Exemplos abaixo, gerados a
+partir das fixtures de exemplo do projeto (`verify/sample_project` para as tools de
+descrição; a fixture de testes "checkout/payments/Pix" para `find_change_surface`).
 
 **`list_services()`** — visão geral, uma linha por serviço:
 ```json
@@ -57,7 +96,7 @@ partir da fixture de exemplo do projeto:
 
 **`describe_service("orders-service")`** — descrição completa + dependências com o
 motivo de negócio (`reason`, `data_needed`, `purpose_kind`) + APIs/persistência/
-mensageria só como referência (nome, sem detalhe de campo):
+mensageria só como referência (nome, sem detalhe de campo) + `freshness`:
 ```json
 {
   "name": "orders-service",
@@ -73,9 +112,14 @@ mensageria só como referência (nome, sem detalhe de campo):
     {"method": "POST", "path": "/orders", "summary": "Creates a new order by charging the customer's payment method and checking stock availability, then publishes an order-created event."}
   ],
   "persists": [{"name": "orders", "kind": "sql_table"}],
-  "messages": [{"direction": "publishes", "channel": "order_created", "description": "Published after a payment charge succeeds and inventory stock is confirmed; signals that a new order has been created."}]
+  "messages": [{"direction": "publishes", "channel": "order_created", "description": "Published after a payment charge succeeds and inventory stock is confirmed; signals that a new order has been created."}],
+  "freshness": {"indexed_at": "2026-03-01T12:00:00+00:00", "source_commit": "a1b2c3d", "current_commit": "a1b2c3d", "stale": false}
 }
 ```
+`stale: true` significa que o repositório teve commits novos desde a indexação — o
+agente deveria considerar reindexar antes de confiar demais no conteúdo. `stale: null`
+significa que não dá pra saber (repositório não é git, ou nunca foi indexado com um
+commit associado) — nunca tratado como "está tudo bem", nem como "está desatualizado".
 
 **`describe_api("orders-service", "POST", "/orders")`** — o nível mais detalhado:
 formato da resposta campo a campo, as mesmas chamadas de dependência (agora só as
@@ -107,28 +151,32 @@ são chamados à parte de propósito, pra manter `describe_service` enxuto.
 
 ## System Intelligence: relacionamentos e change surface
 
-Quatro tools adicionais vão além de "como um serviço funciona" e respondem "o que está
-conectado a quê", "como A chega em B" e "o que essa tarefa provavelmente afeta":
+Tools adicionais vão além de "como um serviço funciona" e respondem "o que está
+conectado a quê", "como A chega em B", "o que essa tarefa provavelmente afeta" e "a
+predição de ontem se confirmou de verdade?":
 
 **`get_relationships("payments-service", direction="both")`** — grafo de 1 salto ao
 redor de um serviço: chamadas que ele faz (outbound), chamadas que outros serviços
 fazem nele (inbound — "quem depende de mim", hoje só possível via este tool), e
 vínculos de fila/tópico inferidos por nome de canal compartilhado
 (`MESSAGE_LINK`). Cada aresta carrega `reason`, `confidence` (quando aplicável),
-`target_kind` (`internal`/`external`/`unknown` — ver seção seguinte) e `evidence`
-(arquivo/linha):
+`target_kind` (`internal`/`external`/`unknown` — ver seção seguinte), `provenance`
+(`llm` quando veio de síntese sobre código real, `deterministic` quando é um fato
+estrutural puro, como o `MESSAGE_LINK` por nome de canal) e `evidence` (arquivo/linha):
 ```json
 {
   "service": "payments-service",
   "relationships": [
     {"type": "HTTP", "direction": "inbound", "source_service": "checkout-service",
      "reason": "authorize the payment for the order", "confidence": 0.9, "target_kind": "internal",
-     "evidence": [{"file": "checkout.py", "start_line": 1, "end_line": 20}]},
+     "evidence": [{"file": "checkout.py", "start_line": 1, "end_line": 20}],
+     "provenance": {"source": "llm"}},
     {"type": "HTTP", "direction": "outbound", "target_service": "Stripe API",
      "reason": "charge the customer's card via the vendor gateway", "confidence": 0.85, "target_kind": "external",
-     "evidence": []},
+     "evidence": [], "provenance": {"source": "llm"}},
     {"type": "MESSAGE_LINK", "direction": "outbound", "channel": "payment_authorized",
-     "target_service": "notification-service", "reason": null, "confidence": null, "evidence": []}
+     "target_service": "notification-service", "reason": null, "confidence": null, "evidence": [],
+     "provenance": {"source": "deterministic"}}
   ]
 }
 ```
@@ -159,20 +207,20 @@ classificação usa dois sinais, nessa ordem de precedência:
    nome que segue o mesmo padrão de nomenclatura dos serviços já indexados (ex. sufixo
    `-service`) → `internal` (não mapeado ainda).
 
-Essa distinção alimenta dois buckets novos em `find_change_surface`:
+Essa distinção alimenta dois buckets em `find_change_surface`:
 - **`external_integrations`**: integrações de terceiro alcançáveis pelos serviços
   `primary`/`secondary` — o agente pode precisar mexer nessa integração também.
 - **`unmapped_internal_hint`**: dependências que parecem internas mas ainda não foram
-  indexadas — sinal de "indexe mais do sistema pra ter o quadro completo".
+  indexadas — sinal de "indexe mais do sistema pra ter o quadro completo". Cada uma
+  também aparece, restated, em `unknowns` (ver abaixo).
 
 **`find_change_surface("Adicionar suporte a Pix no checkout")`** — a primeira tool que
 um agente deveria chamar ao receber um épico, antes de abrir qualquer arquivo. Usa
 apenas o conhecimento já indexado (busca por palavra-chave sobre serviços/APIs/
-relações + expansão de grafo via `get_relationships` + uma única síntese LLM) —
-**nunca relê código-fonte**. A lista de serviços candidatos passada ao LLM é fechada;
-qualquer nome que ele inventar fora dela é descartado antes de responder. Resultado é
-uma **inferência de tarefa**, não fato — sempre com `reason`, `confidence` e
-`evidence` por item:
+relações + expansão de grafo + uma única síntese LLM) — **nunca relê código-fonte**. A
+lista de serviços candidatos passada ao LLM é fechada; qualquer nome que ele inventar
+fora dela é descartado antes de responder. Resultado é uma **inferência de tarefa**,
+não fato:
 ```json
 {
   "primary": [
@@ -189,18 +237,59 @@ uma **inferência de tarefa**, não fato — sempre com `reason`, `confidence` e
   "external_integrations": [
     {"service": "Stripe API", "via_service": "payments-service", "reason": "charge the customer's card via the vendor gateway", "confidence": 0.85, "evidence": []}
   ],
-  "unmapped_internal_hint": []
+  "unmapped_internal_hint": [
+    {"service": "shipping-service", "via_service": "order-service", "reason": "schedule delivery once the order is confirmed", "confidence": 0.6, "evidence": []}
+  ],
+  "contracts_at_risk": [
+    {"contract": "payment_authorized", "producer": "payments-service", "consumers": ["notification-service"],
+     "reason": "potentially affects its consumers; requires verification", "evidence": []}
+  ],
+  "unknowns": [
+    {"status": "unknown", "service": "shipping-service", "reason": "looks internal but has not been indexed yet",
+     "suggestion": "index this repository for a fuller picture"}
+  ],
+  "freshness": {
+    "checkout-service": {"indexed_at": "2026-03-01T12:00:00+00:00", "source_commit": "a1b2c3d", "current_commit": "a1b2c3d", "stale": false},
+    "payments-service": {"indexed_at": "2026-03-01T12:00:00+00:00", "source_commit": "a1b2c3d", "current_commit": "a1b2c3d", "stale": false},
+    "order-service": {"indexed_at": "2026-03-01T12:00:00+00:00", "source_commit": "e4f5g6h", "current_commit": "9z8y7x6", "stale": true}
+  },
+  "recommended_next_queries": [
+    {"tool": "describe_api", "arguments": {"service": "checkout-service", "method": "POST", "path": "/checkout"},
+     "reason": "relevant service — inspect its API contract before changing it."},
+    {"tool": "describe_messages", "arguments": {"service": "payments-service"},
+     "reason": "publishes or consumes messages that may need to change too."},
+    {"tool": "index", "arguments": {"service": "shipping-service"},
+     "reason": "shipping-service looks internal but not indexed yet — index it for a fuller picture."}
+  ],
+  "run_id": 1
 }
 ```
+- **`contracts_at_risk`**: eventos publicados por um serviço `primary`/`secondary` e
+  quem mais consome aquele canal — sempre em linguagem de risco ("potentially
+  affects", "requires verification"), nunca declarando uma quebra confirmada.
+- **`unknowns`**: toda lacuna explícita da resposta (serviço não mapeado, ou a tarefa
+  inteira não bateu com nada indexado), com `status`, `reason` e `suggestion` — pra um
+  agente poder ramificar em cima disso em vez de inferir "não existe" de uma lista
+  vazia.
+- **`freshness`**: por serviço relevante, se o conhecimento indexado pode estar
+  desatualizado (commit indexado vs. commit atual do repositório).
+- **`recommended_next_queries`**: lista ranqueada de `{tool, arguments, reason}` — as
+  próximas chamadas MCP de maior valor dado o que já se sabe (ex.: `describe_api` num
+  serviço `primary` sem detalhe carregado, ou `index` numa dependência de
+  `unmapped_internal_hint`), computada de graça a partir do que já foi lido — **zero
+  custo extra de LLM**. É a peça de maior retorno por token de todo o change surface:
+  em vez de só entregar contexto, ela diz **onde olhar em seguida**.
+
 Aceita um `hint_services` opcional para ancorar a busca quando o agente já suspeita de
 serviços específicos. Se a tarefa não bater com nada indexado, retorna listas vazias
-com uma `note` explicando — sem chamar o LLM.
+com uma `note` (para humanos) e um `unknowns` (estruturado, para o agente) explicando
+— sem chamar o LLM.
 
 ### Auditoria e feedback
 
 Toda chamada de `find_change_surface` que efetivamente rodou o LLM é registrada
 (`change_surface_runs`/`change_surface_findings`) e o `run_id` volta na resposta.
-Depois de agir sobre o resultado, o agente pode fechar o loop:
+Depois de agir sobre o resultado, o agente pode fechar o loop manualmente:
 ```
 record_change_surface_feedback(run_id=1, service="payments-service", outcome="confirmed")
 ```
@@ -209,6 +298,37 @@ precisou). Chamadas futuras de `find_change_surface` para esse mesmo serviço t�
 `confidence` recalibrada com base nesse histórico — só depois de um mínimo de 3
 feedbacks acumulados, e como um ajuste leve (30%) sobre o palpite fresco do LLM, nunca
 substituindo o julgamento feito com a evidência da tarefa atual.
+
+### Ground truth via git: `verify_change_surface` / `blastmap verify`
+
+Em vez de depender só do agente lembrar de reportar o resultado, dá pra confrontar
+uma predição passada contra o `git diff` real de um repositório desde um commit:
+```
+verify_change_surface(run_id=1, repository="my-monorepo", since_commit="a1b2c3d")
+```
+```json
+{
+  "run_id": 1, "repository": "my-monorepo", "since_commit": "a1b2c3d",
+  "predicted": ["checkout-service", "payments-service"],
+  "actual": ["checkout-service"],
+  "true_positives": ["checkout-service"],
+  "false_positives": ["payments-service"],
+  "false_negatives": [],
+  "precision": 0.5, "recall": 1.0,
+  "verification_id": 7
+}
+```
+A versão MCP é só leitura (não grava feedback sozinha); a CLI tem um
+`--record-feedback` que, opcionalmente, grava `confirmed`/`rejected` automaticamente
+a partir do resultado:
+```bash
+blastmap verify 1 --repository my-monorepo --since a1b2c3d --record-feedback
+```
+Cada verificação fica salva (`change_surface_verifications`) e aparece em
+`blastmap status`. É intencionalmente escopada a **um repositório por vez** — comparar
+vários históricos de git não relacionados sob um único `--since` não faria sentido;
+num setup cumulativo com vários repositórios, roda-se um `verify` por repositório,
+do mesmo jeito que a indexação também é feita um repositório de cada vez.
 
 ## O que já está implementado
 
@@ -221,66 +341,107 @@ substituindo o julgamento feito com a evidência da tarefa atual.
   Harness de invocação (prompt/schema loading + retry) compartilhado entre indexação e
   `find_change_surface` (`generation/llm_harness.py`).
 - **SQLite como fonte da verdade** — um System Knowledge Model único, com
-  `repositories` (multi-repositório explícito) e `services.repository_id`, e
-  atualização incremental por hash de arquivo: só regenera a unidade (API/
+  `repositories` (multi-repositório explícito, cumulativo) e `services.repository_id`,
+  e atualização incremental por hash de arquivo: só regenera a unidade (API/
   persistência/mensageria/overview) cujo arquivo mudou.
+- **Camada de repositório dividida por agregado** (`db/repositories/`: `services`,
+  `apis`, `service_calls`, `persistence`, `messages`, `indexed_files`,
+  `change_surface`, `verification`, `index_runs`, `search`, `repositories`) — cada
+  módulo só conhece suas próprias tabelas; nenhum outro módulo roda SQL diretamente.
 - **Evidência persistida**: `apis`, `service_calls`, `persistence_entities` e
   `messages` carregam `evidence_json` (arquivo + linha) — o mesmo trecho que o LLM viu
   ao gerar aquela informação, não uma linha inventada depois. `service_calls` também
   carrega `confidence` (0-1, avaliada pelo próprio LLM) e `target_kind`
   (`internal`/`external`/`unknown` — LLM com o código real como sinal primário,
   heurística determinística de vendor/nomenclatura como fallback só para `unknown`).
-- **Servidor MCP** com 11 tools somente leitura (uma escreve feedback, ver abaixo): as
-  7 originais (`list_services`, `describe_service`, `list_apis`, `describe_api`,
-  `describe_persistence`, `describe_messages`, `search`) mais quatro novas de
-  navegação/inferência: `get_relationships` (grafo de 1 salto), `trace_flow` (caminho
-  multi-salto entre dois serviços), `find_change_surface` (tarefa → serviços afetados,
-  com auditoria) e `record_change_surface_feedback` (fecha o loop de confiança).
-  Registrável em qualquer cliente MCP (Claude Code, Codex, etc.).
-- **Busca por full-text (SQLite FTS5)**, não mais `LIKE`: `search` e a retrieval de
+- **Provenance e freshness explícitos**: `provenance` (`llm` vs. `deterministic`)
+  formaliza a distinção fato/interpretação onde ela já era implícita; `freshness`
+  (`generation/freshness.py`) compara o commit indexado com o commit atual do
+  repositório sob demanda — nunca persistido, então nunca fica ele mesmo desatualizado.
+- **`find_change_surface` como Builder** (`generation/change_surface.ChangeSurfaceBuilder`):
+  cada peça da resposta (achados, fluxo, integrações externas, contratos em risco,
+  unknowns, freshness, próximas consultas recomendadas) é montada por um método
+  próprio, em vez de um dict crescendo ad hoc. Retrieval de candidatos é uma estratégia
+  plugável (`generation/retrieval.KeywordGraphRetrieval`).
+- **`recommended_next_queries`** (`generation/next_queries.py`): próxima consulta MCP
+  de maior valor dado o que já foi computado, sem custo extra de LLM.
+- **`contracts_at_risk`**: consumidores de um evento publicado por um serviço
+  relevante, reaproveitando o mesmo join de canal usado por `get_relationships`.
+- **Ground truth via git** (`generation/verification.py`, `blastmap verify`): compara
+  uma predição passada contra o `git diff` real de um repositório, calcula
+  precisão/recall e pode gravar feedback automaticamente.
+- **Servidor MCP** com 12 tools (uma escreve feedback; `verify_change_surface` grava um
+  registro de auditoria mas não grava feedback sozinha): as 7 originais
+  (`list_services`, `describe_service`, `list_apis`, `describe_api`,
+  `describe_persistence`, `describe_messages`, `search`) mais cinco de
+  navegação/inferência/verificação: `get_relationships`, `trace_flow`,
+  `find_change_surface`, `record_change_surface_feedback` e `verify_change_surface`.
+  Toda tool documenta no próprio docstring quando chamá-la, o que ela devolve e qual a
+  próxima tool natural — a narrativa de progressive disclosure vive no schema MCP, não
+  só no README. Registrável em qualquer cliente MCP (Claude Code, Codex, etc.).
+- **Busca por full-text (SQLite FTS5)**, não vector DB: `search` e a retrieval de
   candidatos do `find_change_surface` usam um índice FTS5 (prefix match + ranking
-  `bm25`) reconstruído por serviço a cada indexação (`db.repository.rebuild_search_index*`).
+  `bm25`) reconstruído por serviço a cada indexação (`db.repositories.search`).
 - **Export para Markdown** legível por humano, gerado a partir do SQLite.
 - **CI** (GitHub Actions, `.github/workflows/ci.yml`): roda a suíte inteira em
   Python 3.11 e 3.12 a cada push/PR — nenhum teste depende de `claude`/`codex` CLI
-  real (backend sempre fake ou dados seedados direto via `db.repository`).
-- **CLI** (`index`, `update`, `list`, `status`, `export`, `serve`) instalável
-  globalmente via `pipx install -e .`, com barra de progresso no terminal (spinner,
-  percentual, status colorido por unidade) durante o `index`. `index` aceita
-  `--repository-name` para indexar vários repositórios distintos no mesmo DB sem
+  real (backend sempre fake ou dados seedados direto via `db.repositories.*`).
+- **CLI** (`index`, `update`, `list`, `status`, `export`, `verify`, `serve`) instalável
+  globalmente via `pipx install -e .`, autoexplicativa via `--help` (cada subcomando
+  tem um exemplo pronto), com barra de progresso no terminal (spinner, percentual,
+  status colorido por unidade) durante o `index`. `index` aceita `--repository-name`
+  para indexar vários repositórios distintos no mesmo DB, de forma cumulativa, sem
   colisão de nomes; `serve` aceita `--backend`/`--model` (usados só por
-  `find_change_surface`).
-- **Testes automatizados** (pytest, ciclo TDD, ~86% de cobertura): descoberta (3 das 4
-  stacks), camada de banco/SQLite (`repositories`, evidência, chamadas inbound,
-  vínculos de mensageria, FTS5, auditoria/feedback), `generation/orchestrator.py` e
-  `cli.py` com backend LLM fake rodando a descoberta real contra `verify/sample_project`
-  (não só banco seedado direto), `export/markdown.py`, `generation/change_surface.py`
-  (filtro anti-alucinação, recalibração de confiança, harness de eficiência de
-  contexto com orçamento de tamanho de resposta), e testes de integração reais via
-  protocolo MCP (stdio) para `get_relationships`, `trace_flow` e `find_change_surface`.
+  `find_change_surface`); `--version` reporta a versão instalada.
+- **Testes automatizados** (pytest, ciclo TDD, red→green→refactor): descoberta (3 das
+  4 stacks), cada módulo de `db/repositories/` isoladamente, `generation/orchestrator.py`
+  e `cli.py` com backend LLM fake rodando a descoberta real contra
+  `verify/sample_project`, `export/markdown.py`, `generation/change_surface.py`
+  (builder, retrieval, filtro anti-alucinação, recalibração de confiança, freshness,
+  provenance, unknowns, contratos em risco, próximas consultas), `generation/verification.py`
+  (precisão/recall contra um git real, num repositório de teste descartável), testes
+  de integração reais via protocolo MCP (stdio) para `get_relationships`, `trace_flow`,
+  `find_change_surface` e `verify_change_surface`, harness de eficiência de contexto
+  com orçamento de tamanho de resposta, e uma **suíte de auto-indexação**
+  (`tests/test_self_index_e2e.py`): o próprio `blastmap` indexa seu próprio código-fonte
+  e responde `find_change_surface` sobre si mesmo — a prova mais direta de que o
+  pipeline funciona fim-a-fim contra um código real e não trivial.
 - **Versionamento manual e deliberado**: `python scripts/bump_version.py
   <major|minor|patch>` atualiza `pyproject.toml` e `blastmap/__init__.py` juntos, como
   parte do passo de release — sem hook de commit tentando adivinhar o bump certo.
 
 ## Limitações conhecidas
 
-- **Sem retrocompatibilidade de schema**: o banco não tem framework de migração — o
-  schema em `db/schema.sql` é a única forma esperada. Um `~/.blastmap/blastmap.db`
-  criado antes desta versão não ganha as colunas/tabelas novas automaticamente
-  (SQLite não altera uma tabela já existente via `CREATE TABLE IF NOT EXISTS`); apague
-  o arquivo e rode `blastmap index` de novo.
+- **Sem retrocompatibilidade de schema**: o banco não tem framework de migração de
+  colunas — o schema em `db/schema.sql` é a única forma esperada para tabelas já
+  existentes (SQLite não altera uma tabela via `CREATE TABLE IF NOT EXISTS`; tabelas
+  novas, como `change_surface_verifications`, são adicionadas automaticamente, colunas
+  novas em tabelas existentes não). Se uma mudança de schema afetar uma tabela já
+  existente, apague `~/.blastmap/blastmap.db` e rode `blastmap index` de novo.
 - Heurísticas de descoberta são propositalmente simples (regex): apontam o LLM para o
   trecho certo, mas podem perder padrões incomuns (ex.: cliente HTTP instanciado numa
-  variável com nome não convencional). Sem teste automatizado especificamente para as
-  stacks Go/JVM em `cli.py`/`orchestrator.py` (cobertos via Python/Node na suíte) — só
+  variável com nome não convencional), e são desenhadas para o formato de um
+  microsserviço web (endpoint HTTP, fila, ORM) — um pacote Python que é biblioteca/CLI
+  em vez de serviço web (como o próprio `blastmap`) não casa com nenhum desses
+  padrões, e por isso só gera a unidade de overview, sem endpoints/persistência/
+  mensageria detectados (ver `tests/test_self_index_e2e.py`, que documenta esse caso
+  real em vez de escondê-lo). Sem teste automatizado especificamente para as stacks
+  Go/JVM em `cli.py`/`orchestrator.py` (cobertos via Python/Node na suíte) — só
   `discovery/go_stack.py` isoladamente.
 - `find_change_surface`/`search` tokenizam a query e usam FTS5 com prefix match — bom
   pra achar por palavra-chave, mas ainda não é busca semântica: uma tarefa cujo
   vocabulário não aparece em nenhuma descrição/razão indexada, e sem `hint_services`,
-  não encontra candidatos (retorna listas vazias com uma `note`, sem chamar o LLM).
+  não encontra candidatos (retorna listas vazias com uma `note`/`unknowns`, sem chamar
+  o LLM).
 - Recalibração de confiança (`record_change_surface_feedback`) é por nome exato de
   serviço, sem generalizar entre tarefas parecidas nem entre serviços — cada um
-  acumula seu próprio histórico, do zero.
+  acumula seu próprio histórico, do zero. `verify_change_surface` ajuda a popular esse
+  histórico automaticamente a partir de git, mas ainda não correlaciona tarefas
+  parecidas entre si (precedente histórico arquitetural é uma evolução futura, não
+  implementada).
+- `verify_change_surface`/`blastmap verify` são escopados a um repositório por vez —
+  não há uma noção de "diff cumulativo" entre vários repositórios não relacionados sob
+  um único commit de referência.
 - A heurística determinística de `target_kind` (`discovery/integration_heuristics.py`)
   tem uma lista curta e manual de vendors conhecidos — um vendor fora da lista cai em
   `unknown` (nunca em `external` errado por engano; a lista foi feita pra evitar falso
@@ -293,17 +454,19 @@ substituindo o julgamento feito com a evidência da tarefa atual.
 pip install -e ".[dev]"
 pytest tests/                                    # suíte determinística (sem LLM), TDD
 pytest tests/ --cov=blastmap --cov-report=term-missing   # cobertura
+ruff check --select F401,F841 blastmap tests scripts     # imports/variáveis não usadas
+vulture blastmap --min-confidence 80                     # funções/atributos não usados
 ```
 
-O CI (`.github/workflows/ci.yml`) roda exatamente essa suíte determinística em
+O CI (`.github/workflows/ci.yml`) roda exatamente a suíte de testes determinística em
 Python 3.11/3.12 a cada push/PR — `verify/sample_project.db` não existe em CI, então
 `test_mcp_tools.py` sempre pula lá (comportamento esperado, não uma falha).
 
-`get_relationships`/`find_change_surface` são exercitados via sessão MCP real (stdio),
-que sobe `blastmap.mcp.server` num **subprocesso** — para a cobertura enxergar
-esse subprocesso (em vez de reportar `mcp/server.py`/`mcp/queries.py` como 0% mesmo
-sendo testados), é preciso um hook de `coverage` no `site-packages` do venv mais a
-variável `COVERAGE_PROCESS_START`:
+`get_relationships`/`find_change_surface`/`verify_change_surface` são exercitados via
+sessão MCP real (stdio), que sobe `blastmap.mcp.server` num **subprocesso** — para a
+cobertura enxergar esse subprocesso (em vez de reportar `mcp/server.py`/`mcp/queries.py`
+como 0% mesmo sendo testados), é preciso um hook de `coverage` no `site-packages` do
+venv mais a variável `COVERAGE_PROCESS_START`:
 ```bash
 echo "import coverage; coverage.process_startup()" > $(python -c "import site; print(site.getsitepackages()[0])")/coverage_subprocess.pth
 COVERAGE_PROCESS_START=pyproject.toml python -m coverage run -m pytest tests/
@@ -311,12 +474,28 @@ python -m coverage combine && python -m coverage report -m
 ```
 
 A suíte automatizada nunca chama um LLM de verdade (backends fake/determinísticos,
-DBs seedadas direto via `db.repository`). Para validar o pipeline real fim-a-fim —
-discovery → geração LLM real → SQLite → MCP — use a própria fixture do projeto como
-teste e2e manual:
+DBs seedadas direto via `db.repositories.*`) — inclusive a suíte de auto-indexação
+(`tests/test_self_index_e2e.py`), que roda a descoberta real contra o próprio
+código-fonte do `blastmap` com um backend fake. Para validar o pipeline real
+fim-a-fim — discovery → geração LLM real → SQLite → MCP — use a própria fixture do
+projeto como teste e2e manual:
 ```bash
 blastmap index verify/sample_project --backend claude --db verify/sample_project.db
 pytest tests/test_mcp_tools.py   # antes fica "skipped"; roda de verdade com esse DB
 ```
 Isso também é o que popula `verify/sample_project.db` (gitignored, não versionado —
-cada dev/CI gera o seu).
+cada dev/CI gera o seu). Dá pra fazer o mesmo contra o próprio `blastmap`, com as
+ressalvas de heurística descritas em "Limitações conhecidas":
+```bash
+blastmap index . --service blastmap-core --db verify/self_index.db --backend claude
+```
+
+## Referência rápida
+
+**CLI** (`blastmap <comando> --help` para exemplos): `index`, `update`, `list`,
+`status`, `export`, `verify`, `serve`, `--version`.
+
+**MCP** (`blastmap serve`): `list_services`, `describe_service`, `list_apis`,
+`describe_api`, `describe_persistence`, `describe_messages`, `search`,
+`get_relationships`, `trace_flow`, `find_change_surface`,
+`record_change_surface_feedback`, `verify_change_surface`.
