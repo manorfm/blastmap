@@ -122,13 +122,33 @@ def _render_prompt(task: str, candidates_block: str) -> str:
     return load_prompt("change_surface").substitute(task=task, candidates=candidates_block)
 
 
-def _filter_known(findings: list[dict], known: set[str], evidence_by_service: dict[str, list[dict]]) -> list[dict]:
+MIN_FEEDBACK_SAMPLES = 3
+# How much historical accuracy for this exact service nudges a fresh LLM confidence.
+# Kept low deliberately: the LLM saw real evidence for this specific task, while
+# feedback history is a coarser, task-agnostic signal — it should nudge, not override.
+FEEDBACK_BLEND_WEIGHT = 0.3
+
+
+def _recalibrate_confidence(conn: sqlite3.Connection, service: str, confidence: float) -> float:
+    stats = repository.get_feedback_stats(conn, service)
+    total = stats["confirmed"] + stats["rejected"]
+    if total < MIN_FEEDBACK_SAMPLES:
+        return confidence
+    precision = stats["confirmed"] / total
+    blended = (1 - FEEDBACK_BLEND_WEIGHT) * confidence + FEEDBACK_BLEND_WEIGHT * precision
+    return round(max(0.0, min(1.0, blended)), 4)
+
+
+def _filter_known(
+    conn: sqlite3.Connection, findings: list[dict], known: set[str], evidence_by_service: dict[str, list[dict]]
+) -> list[dict]:
     out = []
     for f in findings:
         name = f.get("service")
         if name not in known:
             continue  # drop any service the LLM invented outside the given candidate list
         confidence = max(0.0, min(1.0, float(f.get("confidence", 0) or 0)))
+        confidence = _recalibrate_confidence(conn, name, confidence)
         out.append(
             {
                 "service": name,
@@ -211,16 +231,16 @@ def analyze_change_surface(
         return _empty_result("change surface synthesis failed; see ~/.context_insight/failures")
 
     known = set(candidates)
-    primary = _filter_known(result.get("primary", []), known, evidence_by_service)
-    secondary = _filter_known(result.get("secondary", []), known, evidence_by_service)
-    no_change = _filter_known(result.get("no_change", []), known, evidence_by_service)
+    primary = _filter_known(conn, result.get("primary", []), known, evidence_by_service)
+    secondary = _filter_known(conn, result.get("secondary", []), known, evidence_by_service)
+    no_change = _filter_known(conn, result.get("no_change", []), known, evidence_by_service)
 
     relevant = {f["service"] for f in primary} | {f["service"] for f in secondary}
     flow = _derive_flow(conn, relevant)
     external_integrations = _derive_dependency_hints(conn, relevant, repository.list_external_integration_calls)
     unmapped_internal_hint = _derive_dependency_hints(conn, relevant, repository.list_unmapped_internal_calls)
 
-    return {
+    response = {
         "primary": primary,
         "secondary": secondary,
         "no_change_hint": no_change,
@@ -228,3 +248,5 @@ def analyze_change_surface(
         "external_integrations": external_integrations,
         "unmapped_internal_hint": unmapped_internal_hint,
     }
+    response["run_id"] = repository.record_change_surface_run(conn, task, backend.name, response)
+    return response

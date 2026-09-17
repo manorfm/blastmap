@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install context_insight with dev dependencies
+        run: pip install -e ".[dev]"
+
+      # No claude/codex CLI is available (or authenticated) in CI, so the suite
+      # never shells out to a real LLM backend — every test either fakes the
+      # LLMBackend protocol or seeds SQLite directly via db.repository. The one
+      # test that needs a real indexed DB (tests/test_mcp_tools.py) self-skips
+      # when verify/sample_project.db isn't present, which is the case here.
+      - name: Run tests with coverage
+        run: |
+          python -m coverage run -m pytest tests/ -v
+          python -m coverage report -m

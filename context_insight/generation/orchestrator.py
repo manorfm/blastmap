@@ -320,6 +320,7 @@ def index_service(
 
     repository.set_service_last_commit(conn, service_id, git_head_commit(root))
     repository.reconcile_service_call_targets(conn)
+    repository.rebuild_search_index_for_service(conn, service_id)
 
     status = "partial" if had_failure else "ok"
     repository.finish_index_run(

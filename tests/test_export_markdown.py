@@ -1,0 +1,77 @@
+from pathlib import Path
+
+from context_insight.db import repository
+from context_insight.db.connection import open_db
+from context_insight.export.markdown import export_markdown
+
+
+def _seed(conn):
+    orders_id = repository.ensure_service(conn, "orders-service", "/tmp/orders", "python")
+    repository.update_service_overview(conn, orders_id, "Handles orders.", "Longer description of orders-service.")
+    api_id = repository.upsert_api(
+        conn, orders_id, "POST", "/orders", "creates an order", "Creates a new order.",
+        [{"field": "order_id", "type_desc": "string"}], [],
+    )
+    repository.replace_api_validations(conn, api_id, [{"kind": "authorization", "description": "needs a bearer token"}])
+    repository.replace_calls_for_api(
+        conn, orders_id, api_id,
+        [{
+            "to_service_name": "payments-service", "call_kind": "http",
+            "reason": "charge the customer", "data_needed": ["amount"],
+            "purpose_kind": "data_fetch", "confidence": 0.9,
+        }],
+        [],
+    )
+    repository.replace_persistence_entities(conn, orders_id, [{"name": "orders", "kind": "sql_table", "schema_json": []}], [])
+    repository.replace_messages(
+        conn, orders_id, [{"direction": "publishes", "channel": "order_created", "shape_json": [], "description": "order created"}], [],
+    )
+    return orders_id
+
+
+def test_export_markdown_writes_service_index_and_api_detail(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    _seed(conn)
+    out_dir = tmp_path / "docs"
+
+    written = export_markdown(conn, out_dir)
+
+    index_path = out_dir / "orders-service" / "index.md"
+    assert index_path in written
+    index_text = index_path.read_text(encoding="utf-8")
+    assert "orders-service" in index_text
+    assert "Handles orders." in index_text
+    assert "payments-service" in index_text  # dependency line
+    assert "charge the customer" in index_text
+    assert "POST /orders" in index_text
+
+    api_files = list((out_dir / "orders-service" / "apis").glob("*.md"))
+    assert len(api_files) == 1
+    api_text = api_files[0].read_text(encoding="utf-8")
+    assert "order_id" in api_text
+    assert "authorization" in api_text
+
+
+def test_export_markdown_service_filter_only_writes_matching_service(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    _seed(conn)
+    repository.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
+    out_dir = tmp_path / "docs"
+
+    written = export_markdown(conn, out_dir, service_filter="orders-service")
+
+    assert all("orders-service" in str(p) for p in written)
+    assert not (out_dir / "payments-service").exists()
+
+
+def test_export_markdown_handles_service_with_no_apis(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository.ensure_service(conn, "empty-service", "/tmp/empty", "python")
+    out_dir = tmp_path / "docs"
+
+    written = export_markdown(conn, out_dir)
+
+    index_text = (out_dir / "empty-service" / "index.md").read_text(encoding="utf-8")
+    assert "nenhuma API detectada" in index_text
+    assert not (out_dir / "empty-service" / "apis").exists()
+    assert len(written) == 1

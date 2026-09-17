@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -400,6 +401,72 @@ def commit(conn: sqlite3.Connection) -> None:
 
 
 # ---------------------------------------------------------------------------
+# change_surface audit trail + feedback (see generation/change_surface.py)
+# ---------------------------------------------------------------------------
+
+_ROLE_BY_RESULT_KEY = {
+    "primary": "primary",
+    "secondary": "secondary",
+    "no_change_hint": "no_change",
+    "external_integrations": "external_integration",
+    "unmapped_internal_hint": "unmapped_internal",
+}
+
+
+def record_change_surface_run(conn: sqlite3.Connection, task_text: str, backend: str, result: dict) -> int:
+    cur = conn.execute(
+        "INSERT INTO change_surface_runs (task_text, backend, created_at) VALUES (?, ?, ?)",
+        (task_text, backend, _now()),
+    )
+    run_id = cur.lastrowid
+    rows = [
+        (run_id, f["service"], role, f.get("reason"), f.get("confidence"), json.dumps(f.get("evidence", [])))
+        for key, role in _ROLE_BY_RESULT_KEY.items()
+        for f in result.get(key, [])
+    ]
+    conn.executemany(
+        """INSERT INTO change_surface_findings (run_id, service, role, reason, confidence, evidence_json)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    conn.commit()
+    return run_id
+
+
+def get_change_surface_run(conn: sqlite3.Connection, run_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM change_surface_runs WHERE id = ?", (run_id,)).fetchone()
+
+
+def list_change_surface_runs(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM change_surface_runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def list_change_surface_findings(conn: sqlite3.Connection, run_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM change_surface_findings WHERE run_id = ? ORDER BY id", (run_id,)
+    ).fetchall()
+
+
+def record_change_surface_feedback(conn: sqlite3.Connection, run_id: int, service: str, outcome: str) -> None:
+    conn.execute(
+        "INSERT INTO change_surface_feedback (run_id, service, outcome, recorded_at) VALUES (?, ?, ?, ?)",
+        (run_id, service, outcome, _now()),
+    )
+    conn.commit()
+
+
+def get_feedback_stats(conn: sqlite3.Connection, service: str) -> dict[str, int]:
+    row = conn.execute(
+        """SELECT
+             SUM(CASE WHEN outcome = 'confirmed' THEN 1 ELSE 0 END) AS confirmed,
+             SUM(CASE WHEN outcome = 'rejected' THEN 1 ELSE 0 END) AS rejected
+           FROM change_surface_feedback WHERE service = ?""",
+        (service,),
+    ).fetchone()
+    return {"confirmed": row["confirmed"] or 0, "rejected": row["rejected"] or 0}
+
+
+# ---------------------------------------------------------------------------
 # index_runs
 # ---------------------------------------------------------------------------
 
@@ -432,66 +499,80 @@ def recent_index_runs(conn: sqlite3.Connection, service_id: int | None = None, l
 
 
 # ---------------------------------------------------------------------------
-# search
+# search (SQLite FTS5, ranked by bm25 — see rebuild_search_index* for how the
+# index is populated; this section only reads it)
 # ---------------------------------------------------------------------------
 
+_FTS_TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
+
+
+def _build_fts_query(query: str) -> str | None:
+    # Tokens are pre-filtered to [a-zA-Z0-9]+ so they're always safe as bare FTS5
+    # tokens (no quoting needed). The trailing * makes each a prefix match, since
+    # FTS5 tokens match whole words by default and the old LIKE-based search's
+    # substring behavior (e.g. "charge" hitting "Charges") should still work.
+    tokens = _FTS_TOKEN_RE.findall(query)
+    if not tokens:
+        return None
+    return " OR ".join(f"{t}*" for t in tokens)
+
+
 def search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict[str, Any]]:
-    like = f"%{query}%"
-    results: list[dict[str, Any]] = []
+    fts_query = _build_fts_query(query)
+    if fts_query is None:
+        return []
+    rows = conn.execute(
+        """SELECT kind, service, ref, snippet FROM search_fts
+           WHERE search_fts MATCH ? ORDER BY bm25(search_fts) LIMIT ?""",
+        (fts_query, limit),
+    ).fetchall()
+    return [{"kind": r["kind"], "service": r["service"], "ref": r["ref"], "snippet": r["snippet"] or ""} for r in rows]
 
-    for row in conn.execute(
-        "SELECT name, short_desc, long_desc FROM services WHERE name LIKE ? OR short_desc LIKE ? OR long_desc LIKE ? LIMIT ?",
-        (like, like, like, limit),
-    ):
-        results.append(
-            {"kind": "service", "service": row["name"], "ref": row["name"], "snippet": row["short_desc"] or ""}
+
+def _populate_search_index_for_service(conn: sqlite3.Connection, service_id: int) -> None:
+    service = get_service_by_id(conn, service_id)
+    if service is None:
+        return
+    name = service["name"]
+    conn.execute(
+        "INSERT INTO search_fts (kind, service, ref, snippet, content_text, service_id) VALUES (?, ?, ?, ?, ?, ?)",
+        ("service", name, name, service["short_desc"] or "",
+         " ".join(filter(None, [name, service["short_desc"], service["long_desc"]])), service_id),
+    )
+    for a in list_apis(conn, service_id):
+        ref = f"{a['method']} {a['path']}"
+        conn.execute(
+            "INSERT INTO search_fts (kind, service, ref, snippet, content_text, service_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("api", name, ref, a["summary"] or "",
+             " ".join(filter(None, [a["summary"], a["path"]])), service_id),
+        )
+    for p in list_persistence(conn, service_id):
+        conn.execute(
+            "INSERT INTO search_fts (kind, service, ref, snippet, content_text, service_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("persistence", name, p["name"], "", p["name"], service_id),
+        )
+    for m in list_messages(conn, service_id):
+        conn.execute(
+            "INSERT INTO search_fts (kind, service, ref, snippet, content_text, service_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("message", name, m["channel"], m["description"] or "",
+             " ".join(filter(None, [m["channel"], m["description"]])), service_id),
+        )
+    for c in list_calls_for_service(conn, service_id):
+        conn.execute(
+            "INSERT INTO search_fts (kind, service, ref, snippet, content_text, service_id) VALUES (?, ?, ?, ?, ?, ?)",
+            ("relationship", name, c["to_service_name"], c["reason"] or "",
+             " ".join(filter(None, [c["to_service_name"], c["reason"], c["purpose_kind"]])), service_id),
         )
 
-    for row in conn.execute(
-        """SELECT s.name AS service_name, a.method, a.path, a.summary, a.description
-           FROM apis a JOIN services s ON s.id = a.service_id
-           WHERE a.summary LIKE ? OR a.description LIKE ? OR a.path LIKE ? LIMIT ?""",
-        (like, like, like, limit),
-    ):
-        results.append(
-            {
-                "kind": "api",
-                "service": row["service_name"],
-                "ref": f"{row['method']} {row['path']}",
-                "snippet": row["summary"] or "",
-            }
-        )
 
-    for row in conn.execute(
-        """SELECT s.name AS service_name, p.name FROM persistence_entities p
-           JOIN services s ON s.id = p.service_id WHERE p.name LIKE ? LIMIT ?""",
-        (like, limit),
-    ):
-        results.append({"kind": "persistence", "service": row["service_name"], "ref": row["name"], "snippet": ""})
+def rebuild_search_index_for_service(conn: sqlite3.Connection, service_id: int) -> None:
+    conn.execute("DELETE FROM search_fts WHERE service_id = ?", (service_id,))
+    _populate_search_index_for_service(conn, service_id)
+    conn.commit()
 
-    for row in conn.execute(
-        """SELECT s.name AS service_name, m.channel, m.description FROM messages m
-           JOIN services s ON s.id = m.service_id
-           WHERE m.channel LIKE ? OR m.description LIKE ? LIMIT ?""",
-        (like, like, limit),
-    ):
-        results.append(
-            {"kind": "message", "service": row["service_name"], "ref": row["channel"], "snippet": row["description"] or ""}
-        )
 
-    for row in conn.execute(
-        """SELECT s.name AS service_name, sc.to_service_name, sc.reason, sc.purpose_kind
-           FROM service_calls sc JOIN services s ON s.id = sc.from_service_id
-           WHERE sc.reason LIKE ? OR sc.purpose_kind LIKE ? OR sc.to_service_name LIKE ? LIMIT ?""",
-        (like, like, like, limit),
-    ):
-        results.append(
-            {
-                "kind": "relationship",
-                "service": row["service_name"],
-                "ref": row["to_service_name"],
-                "snippet": row["reason"] or "",
-            }
-        )
-
-    return results[:limit]
+def rebuild_search_index(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM search_fts")
+    for row in conn.execute("SELECT id FROM services"):
+        _populate_search_index_for_service(conn, row["id"])
+    conn.commit()

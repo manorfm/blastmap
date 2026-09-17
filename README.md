@@ -107,8 +107,8 @@ são chamados à parte de propósito, pra manter `describe_service` enxuto.
 
 ## System Intelligence: relacionamentos e change surface
 
-Duas tools adicionais vão além de "como um serviço funciona" e respondem "o que está
-conectado a quê" e "o que essa tarefa provavelmente afeta":
+Quatro tools adicionais vão além de "como um serviço funciona" e respondem "o que está
+conectado a quê", "como A chega em B" e "o que essa tarefa provavelmente afeta":
 
 **`get_relationships("payments-service", direction="both")`** — grafo de 1 salto ao
 redor de um serviço: chamadas que ele faz (outbound), chamadas que outros serviços
@@ -132,6 +132,17 @@ vínculos de fila/tópico inferidos por nome de canal compartilhado
   ]
 }
 ```
+
+**`trace_flow("orders-service", "ledger-service")`** — caminho mais curto entre dois
+serviços, andando por `service_calls` (outbound) e vínculos de fila (publish→consume)
+— o complemento multi-salto do `get_relationships` (que só anda 1 salto por chamada).
+Útil quando você sabe que dois serviços estão relacionados mas não como:
+```json
+{"path": [{"from": "orders-service", "to": "payments-service", "type": "HTTP", "reason": "...", "confidence": 0.9, "evidence": [...]},
+          {"from": "payments-service", "to": "ledger-service", "type": "QUEUE_PUBLISH", "reason": "...", "confidence": 0.85, "evidence": []}],
+ "reachable": true, "hops": 2}
+```
+Se não houver caminho dentro de `max_hops` (padrão 6), devolve `{"path": [], "reachable": false, "note": "..."}`.
 
 ### Interno vs. externo (`target_kind`)
 
@@ -185,6 +196,20 @@ Aceita um `hint_services` opcional para ancorar a busca quando o agente já susp
 serviços específicos. Se a tarefa não bater com nada indexado, retorna listas vazias
 com uma `note` explicando — sem chamar o LLM.
 
+### Auditoria e feedback
+
+Toda chamada de `find_change_surface` que efetivamente rodou o LLM é registrada
+(`change_surface_runs`/`change_surface_findings`) e o `run_id` volta na resposta.
+Depois de agir sobre o resultado, o agente pode fechar o loop:
+```
+record_change_surface_feedback(run_id=1, service="payments-service", outcome="confirmed")
+```
+`outcome` é `"confirmed"` (o serviço realmente precisou mudar) ou `"rejected"` (não
+precisou). Chamadas futuras de `find_change_surface` para esse mesmo serviço têm a
+`confidence` recalibrada com base nesse histórico — só depois de um mínimo de 3
+feedbacks acumulados, e como um ajuste leve (30%) sobre o palpite fresco do LLM, nunca
+substituindo o julgamento feito com a evidência da tarefa atual.
+
 ## O que já está implementado
 
 - **Descoberta por heurística** (regex/assinatura de arquivo, sem parser AST completo)
@@ -205,25 +230,34 @@ com uma `note` explicando — sem chamar o LLM.
   carrega `confidence` (0-1, avaliada pelo próprio LLM) e `target_kind`
   (`internal`/`external`/`unknown` — LLM com o código real como sinal primário,
   heurística determinística de vendor/nomenclatura como fallback só para `unknown`).
-- **Servidor MCP** com 9 tools somente leitura: as 7 originais
-  (`list_services`, `describe_service`, `list_apis`, `describe_api`,
-  `describe_persistence`, `describe_messages`, `search`) mais duas novas de
-  navegação/inferência: `get_relationships` (grafo de 1 salto, outbound/inbound/
-  filas) e `find_change_surface` (tarefa → serviços afetados). Registrável em
-  qualquer cliente MCP (Claude Code, Codex, etc.).
+- **Servidor MCP** com 11 tools somente leitura (uma escreve feedback, ver abaixo): as
+  7 originais (`list_services`, `describe_service`, `list_apis`, `describe_api`,
+  `describe_persistence`, `describe_messages`, `search`) mais quatro novas de
+  navegação/inferência: `get_relationships` (grafo de 1 salto), `trace_flow` (caminho
+  multi-salto entre dois serviços), `find_change_surface` (tarefa → serviços afetados,
+  com auditoria) e `record_change_surface_feedback` (fecha o loop de confiança).
+  Registrável em qualquer cliente MCP (Claude Code, Codex, etc.).
+- **Busca por full-text (SQLite FTS5)**, não mais `LIKE`: `search` e a retrieval de
+  candidatos do `find_change_surface` usam um índice FTS5 (prefix match + ranking
+  `bm25`) reconstruído por serviço a cada indexação (`db.repository.rebuild_search_index*`).
 - **Export para Markdown** legível por humano, gerado a partir do SQLite.
+- **CI** (GitHub Actions, `.github/workflows/ci.yml`): roda a suíte inteira em
+  Python 3.11 e 3.12 a cada push/PR — nenhum teste depende de `claude`/`codex` CLI
+  real (backend sempre fake ou dados seedados direto via `db.repository`).
 - **CLI** (`index`, `update`, `list`, `status`, `export`, `serve`) instalável
   globalmente via `pipx install -e .`, com barra de progresso no terminal (spinner,
   percentual, status colorido por unidade) durante o `index`. `index` aceita
   `--repository-name` para indexar vários repositórios distintos no mesmo DB sem
   colisão de nomes; `serve` aceita `--backend`/`--model` (usados só por
   `find_change_surface`).
-- **Testes automatizados** (pytest, ciclo TDD): descoberta (3 das 4 stacks), camada de
-  banco/SQLite (incluindo `repositories`, evidência, chamadas inbound e vínculos de
-  mensageria), `generation/change_surface.py` com backend LLM fake (incluindo o
-  filtro anti-alucinação e um cenário fim-a-fim "Pix no checkout"), e testes de
-  integração reais via protocolo MCP (stdio) para `get_relationships` e
-  `find_change_surface`.
+- **Testes automatizados** (pytest, ciclo TDD, ~86% de cobertura): descoberta (3 das 4
+  stacks), camada de banco/SQLite (`repositories`, evidência, chamadas inbound,
+  vínculos de mensageria, FTS5, auditoria/feedback), `generation/orchestrator.py` e
+  `cli.py` com backend LLM fake rodando a descoberta real contra `verify/sample_project`
+  (não só banco seedado direto), `export/markdown.py`, `generation/change_surface.py`
+  (filtro anti-alucinação, recalibração de confiança, harness de eficiência de
+  contexto com orçamento de tamanho de resposta), e testes de integração reais via
+  protocolo MCP (stdio) para `get_relationships`, `trace_flow` e `find_change_surface`.
 - **Hook de versionamento semântico** (`scripts/git-hooks/commit-msg`): bump
   automático de `major`/`minor`/`patch` a partir da mensagem de commit (Conventional
   Commits).
@@ -240,16 +274,18 @@ com uma `note` explicando — sem chamar o LLM.
   hook não entra no commit atual — ele fica staged e só é absorvido (e re-bumpado) no
   commit seguinte. Precisa de uma estratégia diferente (`pre-commit` ou um passo
   separado de release).
-- Sem teste automatizado para o fluxo completo de geração (`generation/orchestrator.py`)
-  nem para `cli.py`/`export/markdown.py` — hoje validados manualmente com chamadas
-  reais aos backends.
 - Heurísticas de descoberta são propositalmente simples (regex): apontam o LLM para o
   trecho certo, mas podem perder padrões incomuns (ex.: cliente HTTP instanciado numa
-  variável com nome não convencional).
-- `find_change_surface` usa `LIKE` por palavra-chave para achar os serviços iniciais
-  (mesma limitação de `search`) e expande o grafo até 2 saltos — uma tarefa cujo
+  variável com nome não convencional). Sem teste automatizado especificamente para as
+  stacks Go/JVM em `cli.py`/`orchestrator.py` (cobertos via Python/Node na suíte) — só
+  `discovery/go_stack.py` isoladamente.
+- `find_change_surface`/`search` tokenizam a query e usam FTS5 com prefix match — bom
+  pra achar por palavra-chave, mas ainda não é busca semântica: uma tarefa cujo
   vocabulário não aparece em nenhuma descrição/razão indexada, e sem `hint_services`,
   não encontra candidatos (retorna listas vazias com uma `note`, sem chamar o LLM).
+- Recalibração de confiança (`record_change_surface_feedback`) é por nome exato de
+  serviço, sem generalizar entre tarefas parecidas nem entre serviços — cada um
+  acumula seu próprio histórico, do zero.
 - A heurística determinística de `target_kind` (`discovery/integration_heuristics.py`)
   tem uma lista curta e manual de vendors conhecidos — um vendor fora da lista cai em
   `unknown` (nunca em `external` errado por engano; a lista foi feita pra evitar falso
@@ -263,6 +299,10 @@ pip install -e ".[dev]"
 pytest tests/                                    # suíte determinística (sem LLM), TDD
 pytest tests/ --cov=context_insight --cov-report=term-missing   # cobertura
 ```
+
+O CI (`.github/workflows/ci.yml`) roda exatamente essa suíte determinística em
+Python 3.11/3.12 a cada push/PR — `verify/sample_project.db` não existe em CI, então
+`test_mcp_tools.py` sempre pula lá (comportamento esperado, não uma falha).
 
 `get_relationships`/`find_change_surface` são exercitados via sessão MCP real (stdio),
 que sobe `context_insight.mcp.server` num **subprocesso** — para a cobertura enxergar

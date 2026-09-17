@@ -98,6 +98,38 @@ CREATE TABLE IF NOT EXISTS indexed_files (
     UNIQUE(service_id, file_path)
 );
 
+-- Audit trail of find_change_surface calls, and the outcome feedback agents can
+-- report back (record_change_surface_feedback), which recalibrate_confidence()
+-- folds into future task inferences for that service.
+CREATE TABLE IF NOT EXISTS change_surface_runs (
+    id         INTEGER PRIMARY KEY,
+    task_text  TEXT NOT NULL,
+    backend    TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS change_surface_findings (
+    id            INTEGER PRIMARY KEY,
+    run_id        INTEGER NOT NULL REFERENCES change_surface_runs(id) ON DELETE CASCADE,
+    service       TEXT NOT NULL,
+    role          TEXT NOT NULL CHECK (role IN ('primary', 'secondary', 'no_change', 'external_integration', 'unmapped_internal')),
+    reason        TEXT,
+    confidence    REAL,
+    evidence_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS change_surface_feedback (
+    id          INTEGER PRIMARY KEY,
+    run_id      INTEGER NOT NULL REFERENCES change_surface_runs(id) ON DELETE CASCADE,
+    service     TEXT NOT NULL,
+    outcome     TEXT NOT NULL CHECK (outcome IN ('confirmed', 'rejected')),
+    recorded_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_surface_findings_run ON change_surface_findings(run_id);
+CREATE INDEX IF NOT EXISTS idx_change_surface_findings_service ON change_surface_findings(service);
+CREATE INDEX IF NOT EXISTS idx_change_surface_feedback_service ON change_surface_feedback(service);
+
 CREATE TABLE IF NOT EXISTS index_runs (
     id            INTEGER PRIMARY KEY,
     service_id    INTEGER REFERENCES services(id) ON DELETE SET NULL,
@@ -108,6 +140,20 @@ CREATE TABLE IF NOT EXISTS index_runs (
     files_changed INTEGER DEFAULT 0,
     llm_calls     INTEGER DEFAULT 0,
     notes         TEXT
+);
+
+-- Full-text search index, populated explicitly by repository.rebuild_search_index*
+-- (not kept in sync via triggers — every write path in this project already replaces
+-- rows in bulk per service, so an explicit rebuild after each service's writes is
+-- simpler and cheap at this project's scale). content_text is the only indexed
+-- column; the rest are just retrieved back on a match, not searched.
+CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+    kind UNINDEXED,
+    service UNINDEXED,
+    ref UNINDEXED,
+    snippet UNINDEXED,
+    content_text,
+    service_id UNINDEXED
 );
 
 CREATE INDEX IF NOT EXISTS idx_apis_service ON apis(service_id);

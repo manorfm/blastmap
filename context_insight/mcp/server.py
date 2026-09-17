@@ -83,6 +83,17 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.get_relationships(conn, service, direction)
 
     @mcp.tool()
+    def trace_flow(from_service: str, to_service: str, max_hops: int = 6) -> dict:
+        """Shortest path connecting two services, walking outbound calls and
+        publish->consume message links (the multi-hop counterpart to
+        get_relationships' single hop). Use this when you know two services are
+        related but not how — e.g. 'does checkout-service's request ever reach
+        ledger-service, and through what?'. Each hop carries its business reason and
+        evidence when known."""
+        with closing(_conn()) as conn:
+            return queries.trace_flow(conn, from_service, to_service, max_hops)
+
+    @mcp.tool()
     def find_change_surface(task: str, hint_services: list[str] | None = None) -> dict:
         """Given a business task/epic description, find which indexed services likely
         need code changes — WITHOUT reading any source file. Call this FIRST when handed
@@ -94,9 +105,22 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         services of this same system but haven't been indexed yet — index them for a
         fuller picture). This is a task-specific inference, not a verified fact — treat
         it as a starting point, not ground truth. Pass hint_services if you already
-        suspect specific services, to anchor the search."""
+        suspect specific services, to anchor the search. The response includes a
+        run_id — pass it to record_change_surface_feedback once you know whether the
+        findings were actually right, to improve future confidence for this service."""
         with closing(_conn()) as conn:
             return queries.find_change_surface(conn, resolved_backend, task, hint_services)
+
+    @mcp.tool()
+    def record_change_surface_feedback(run_id: int, service: str, outcome: str) -> dict:
+        """Report whether a find_change_surface finding was actually right: call this
+        AFTER you've acted on a change surface result, once you know whether a given
+        service really needed a change. outcome: 'confirmed' (it did) or 'rejected'
+        (it didn't). run_id comes from a prior find_change_surface response. This
+        closes the feedback loop — future find_change_surface confidence for this
+        service is nudged by its track record."""
+        with closing(_conn()) as conn:
+            return queries.record_change_surface_feedback(conn, run_id, service, outcome)
 
     return mcp
 

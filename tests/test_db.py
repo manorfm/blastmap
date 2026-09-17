@@ -212,6 +212,7 @@ def test_search_finds_service_api_and_relationship(tmp_path: Path):
         }],
         [],
     )
+    repository.rebuild_search_index(conn)
 
     by_service = repository.search(conn, "charge")
     assert "service" in {r["kind"] for r in by_service}
@@ -219,3 +220,38 @@ def test_search_finds_service_api_and_relationship(tmp_path: Path):
 
     by_reason = repository.search(conn, "pix")
     assert any(r["kind"] == "relationship" and r["service"] == "checkout-service" for r in by_reason)
+
+
+def test_search_ranks_stronger_matches_first(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    strong_id = repository.ensure_service(conn, "discount-service", "/tmp/discount", "python")
+    repository.update_service_overview(
+        conn, strong_id, "Applies discount codes to orders.",
+        "discount discount discount — heavily about discounts specifically.",
+    )
+    weak_id = repository.ensure_service(conn, "catalog-service", "/tmp/catalog", "python")
+    repository.update_service_overview(
+        conn, weak_id, "Manages the product catalog.",
+        "Mentions discount only once, in passing, as an unrelated aside.",
+    )
+    repository.rebuild_search_index(conn)
+
+    results = repository.search(conn, "discount")
+
+    names_in_order = [r["service"] for r in results if r["kind"] == "service"]
+    assert names_in_order.index("discount-service") < names_in_order.index("catalog-service")
+
+
+def test_search_index_is_rebuilt_per_service_without_duplicating_others(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    a_id = repository.ensure_service(conn, "service-a", "/tmp/a", "python")
+    b_id = repository.ensure_service(conn, "service-b", "/tmp/b", "python")
+    repository.update_service_overview(conn, a_id, "Handles alpha things.", "L")
+    repository.update_service_overview(conn, b_id, "Handles beta things.", "L")
+    repository.rebuild_search_index(conn)
+    repository.rebuild_search_index_for_service(conn, a_id)  # re-run for just one service
+
+    results = repository.search(conn, "things")
+    services = [r["service"] for r in results if r["kind"] == "service"]
+    assert services.count("service-a") == 1  # not duplicated by the second rebuild
+    assert "service-b" in services  # untouched service is still there

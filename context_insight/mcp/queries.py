@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections import deque
 
 from context_insight.db import repository
 from context_insight.generation import change_surface
@@ -170,6 +171,63 @@ def get_relationships(conn: sqlite3.Connection, service: str, direction: str = "
     return {"service": service, "relationships": relationships}
 
 
+def _outgoing_edges(conn: sqlite3.Connection, service_row: sqlite3.Row) -> list[dict]:
+    edges = []
+    for c in repository.list_calls_for_service(conn, service_row["id"]):
+        edges.append(
+            {
+                "to": c["to_service_name"],
+                "type": c["call_kind"].upper(),
+                "reason": c["reason"],
+                "confidence": c["confidence"],
+                "evidence": json.loads(c["evidence_json"] or "[]"),
+            }
+        )
+    for link in repository.list_message_links(conn, service_row["id"]):
+        if link["local_direction"] == "publishes":
+            edges.append(
+                {
+                    "to": link["other_service"],
+                    "type": "MESSAGE_LINK",
+                    "reason": f"channel: {link['channel']}",
+                    "confidence": None,
+                    "evidence": [],
+                }
+            )
+    return edges
+
+
+def trace_flow(conn: sqlite3.Connection, from_service: str, to_service: str, max_hops: int = 6) -> dict:
+    """Shortest directed path from one service to another, walking outbound calls and
+    publish->consume message links — the multi-hop counterpart to get_relationships'
+    single hop. Facts + semantic reasons per hop, same as get_relationships."""
+    from_row = repository.get_service_by_name(conn, from_service)
+    if from_row is None:
+        return {"error": f"unknown service: {from_service}"}
+    if repository.get_service_by_name(conn, to_service) is None:
+        return {"error": f"unknown service: {to_service}"}
+    if from_service == to_service:
+        return {"path": [], "reachable": True, "hops": 0, "note": "from and to are the same service"}
+
+    visited = {from_service}
+    queue = deque([(from_service, [])])
+    while queue:
+        current, path = queue.popleft()
+        if len(path) >= max_hops:
+            continue
+        current_row = repository.get_service_by_name(conn, current)
+        for edge in _outgoing_edges(conn, current_row):
+            hop = {"from": current, **edge}
+            new_path = path + [hop]
+            if hop["to"] == to_service:
+                return {"path": new_path, "reachable": True, "hops": len(new_path)}
+            if hop["to"] not in visited and repository.get_service_by_name(conn, hop["to"]) is not None:
+                visited.add(hop["to"])
+                queue.append((hop["to"], new_path))
+
+    return {"path": [], "reachable": False, "note": f"no path found within {max_hops} hops"}
+
+
 def find_change_surface(
     conn: sqlite3.Connection, backend: LLMBackend, task: str, hint_services: list[str] | None = None
 ) -> dict:
@@ -177,3 +235,20 @@ def find_change_surface(
     Knowledge Model (no source file is read here). This is a task inference, not a
     fact: every finding carries reason + confidence + evidence."""
     return change_surface.analyze_change_surface(conn, task, backend, hint_services)
+
+
+def record_change_surface_feedback(conn: sqlite3.Connection, run_id: int, service: str, outcome: str) -> dict:
+    """Closes the loop on a past find_change_surface call: report whether a finding
+    was actually confirmed (you changed that service) or rejected (it wasn't needed).
+    Future find_change_surface confidence for this service is nudged by this history
+    (see generation.change_surface._recalibrate_confidence)."""
+    if outcome not in ("confirmed", "rejected"):
+        return {"error": f"invalid outcome: {outcome!r} (expected 'confirmed' or 'rejected')"}
+    run = repository.get_change_surface_run(conn, run_id)
+    if run is None:
+        return {"error": f"unknown change surface run_id: {run_id}"}
+    findings = repository.list_change_surface_findings(conn, run_id)
+    if not any(f["service"] == service for f in findings):
+        return {"error": f"service {service!r} was not part of run {run_id}"}
+    repository.record_change_surface_feedback(conn, run_id, service, outcome)
+    return {"ok": True}

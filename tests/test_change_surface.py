@@ -94,6 +94,7 @@ def _build_pix_fixture(db_path: Path):
         conn, notif_id,
         [{"direction": "consumes", "channel": "payment_authorized", "shape_json": [], "description": "d"}], [],
     )
+    repository.rebuild_search_index(conn)
     return conn
 
 
@@ -170,6 +171,41 @@ def test_external_and_unmapped_internal_buckets_are_populated(tmp_path: Path):
     assert unmapped == {"shipping-service"}  # only surfaced because order-service is secondary
     shipping_finding = next(f for f in result["unmapped_internal_hint"] if f["service"] == "shipping-service")
     assert shipping_finding["via_service"] == "order-service"
+
+
+def test_analyze_change_surface_persists_a_run_and_returns_its_id(tmp_path: Path):
+    conn = _build_pix_fixture(tmp_path / "pix4.db")
+    backend = FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout entry point", "confidence": 0.95}],
+        "secondary": [], "no_change": [],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
+
+    assert "run_id" in result
+    findings = repository.list_change_surface_findings(conn, result["run_id"])
+    assert any(f["service"] == "checkout-service" and f["role"] == "primary" for f in findings)
+
+
+def test_confidence_is_recalibrated_from_historical_feedback(tmp_path: Path):
+    conn = _build_pix_fixture(tmp_path / "pix5.db")
+    backend = FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout entry point", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    })
+
+    # No history yet -> confidence passes through unchanged.
+    first = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
+    assert first["primary"][0]["confidence"] == 0.9
+
+    # Record enough "rejected" feedback for checkout-service that future runs
+    # should be nudged down, even though the LLM keeps saying 0.9.
+    run_id = first["run_id"]
+    for _ in range(4):
+        repository.record_change_surface_feedback(conn, run_id, "checkout-service", "rejected")
+
+    second = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
+    assert second["primary"][0]["confidence"] < 0.9
 
 
 def test_hint_services_are_included_even_without_keyword_match(tmp_path: Path):
