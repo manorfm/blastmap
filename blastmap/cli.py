@@ -6,8 +6,10 @@ from pathlib import Path
 
 from blastmap.cli_progress import RichProgressReporter
 from blastmap.config import resolve_backend
-from blastmap.db import repository
 from blastmap.db.connection import DEFAULT_DB_PATH, open_db
+from blastmap.db.repositories import index_runs as index_runs_repo
+from blastmap.db.repositories import indexed_files as indexed_files_repo
+from blastmap.db.repositories import services as services_repo
 from blastmap.export.markdown import export_markdown
 from blastmap.generation.backend_base import GenerationError
 from blastmap.generation.orchestrator import DiscoveryError, index_path, index_service
@@ -32,7 +34,7 @@ def _cmd_index(args: argparse.Namespace) -> int:
 
 def _cmd_update(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
-    row = repository.get_service_by_name(conn, args.service)
+    row = services_repo.get_service_by_name(conn, args.service)
     if row is None:
         print(f"error: unknown service {args.service!r} (run `blastmap list`)", file=sys.stderr)
         return 1
@@ -59,7 +61,7 @@ def _cmd_update(args: argparse.Namespace) -> int:
 
 def _cmd_list(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
-    rows = repository.list_services(conn)
+    rows = services_repo.list_services(conn)
     if not rows:
         print("(nenhum serviço indexado ainda)")
         return 0
@@ -71,24 +73,24 @@ def _cmd_list(args: argparse.Namespace) -> int:
 def _cmd_status(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     if args.service:
-        row = repository.get_service_by_name(conn, args.service)
+        row = services_repo.get_service_by_name(conn, args.service)
         if row is None:
             print(f"error: unknown service {args.service!r}", file=sys.stderr)
             return 1
-        hashes = repository.get_indexed_file_hashes(conn, row["id"])
+        hashes = indexed_files_repo.get_indexed_file_hashes(conn, row["id"])
         print(f"service: {row['name']} ({row['stack']}) — {row['root_path']}")
         print(f"last_commit: {row['last_commit']}")
         print(f"indexed files: {len(hashes)}")
-        for run in repository.recent_index_runs(conn, row["id"], limit=5):
+        for run in index_runs_repo.recent_index_runs(conn, row["id"], limit=5):
             print(
                 f"  run#{run['id']} {run['started_at']} status={run['status']} backend={run['backend']} "
                 f"files_changed={run['files_changed']} llm_calls={run['llm_calls']} notes={run['notes']}"
             )
     else:
-        services = repository.list_services(conn)
+        services = services_repo.list_services(conn)
         print(f"services indexed: {len(services)}")
-        for run in repository.recent_index_runs(conn, limit=10):
-            svc = repository.get_service_by_id(conn, run["service_id"]) if run["service_id"] else None
+        for run in index_runs_repo.recent_index_runs(conn, limit=10):
+            svc = services_repo.get_service_by_id(conn, run["service_id"]) if run["service_id"] else None
             name = svc["name"] if svc else "?"
             print(
                 f"  run#{run['id']} service={name} status={run['status']} backend={run['backend']} "

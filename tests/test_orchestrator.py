@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from blastmap.db import repository
 from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import repositories as repositories_repo
+from blastmap.db.repositories import services as services_repo
 from blastmap.discovery.registry import detector_for
 from blastmap.discovery.walker import discover_services
 from blastmap.generation.backend_base import GenerationError
@@ -73,12 +75,12 @@ def test_index_path_indexes_all_three_sample_services(tmp_path: Path):
     assert all(r.status == "ok" for r in results)
     assert all(r.llm_calls > 0 for r in results)
 
-    services = {s["name"] for s in repository.list_services(conn)}
+    services = {s["name"] for s in services_repo.list_services(conn)}
     assert services == names
 
-    orders = repository.get_service_by_name(conn, "orders-service")
+    orders = services_repo.get_service_by_name(conn, "orders-service")
     assert orders["short_desc"] == "Fake short description."
-    apis = repository.list_apis(conn, orders["id"])
+    apis = apis_repo.list_apis(conn, orders["id"])
     assert any(a["method"] == "POST" and a["path"] == "/orders" for a in apis)
 
 
@@ -86,12 +88,12 @@ def test_repository_is_created_and_linked_to_all_services(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend())
 
-    repos = repository.list_repositories(conn)
+    repos = repositories_repo.list_repositories(conn)
     assert len(repos) == 1
     assert repos[0]["root_path"] == str(SAMPLE_ROOT.resolve())
 
-    for svc in repository.list_services(conn):
-        row = repository.get_service_by_name(conn, svc["name"])
+    for svc in services_repo.list_services(conn):
+        row = services_repo.get_service_by_name(conn, svc["name"])
         assert row["repository_id"] == repos[0]["id"]
 
 
@@ -135,9 +137,9 @@ def test_generation_failure_is_isolated_per_unit(tmp_path: Path):
 
     assert result.status == "partial"
     # the API unit still succeeded even though overview failed for this service
-    orders_row = repository.get_service_by_name(conn2, "orders-service")
+    orders_row = services_repo.get_service_by_name(conn2, "orders-service")
     assert orders_row["short_desc"] is None  # overview failed, never written
-    apis = repository.list_apis(conn2, orders_row["id"])
+    apis = apis_repo.list_apis(conn2, orders_row["id"])
     assert len(apis) == 1  # api_detail unit succeeded independently
     assert failures_root.exists()
     assert list(failures_root.glob("*.txt"))
@@ -171,4 +173,4 @@ def test_index_service_directly_with_service_override_style_path(tmp_path: Path)
     result = index_service(conn, "custom-orders-name", single_service_root, detector, FakeOrchestratorBackend())
 
     assert result.status == "ok"
-    assert repository.get_service_by_name(conn, "custom-orders-name") is not None
+    assert services_repo.get_service_by_name(conn, "custom-orders-name") is not None

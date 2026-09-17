@@ -11,94 +11,94 @@ it returns outside that list is dropped rather than trusted (see _filter_known).
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from blastmap.db import repository
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import change_surface as change_surface_repo
+from blastmap.db.repositories import persistence as persistence_repo
+from blastmap.db.repositories import service_calls as service_calls_repo
+from blastmap.db.repositories import services as services_repo
 from blastmap.generation.backend_base import LLMBackend
 from blastmap.generation.llm_harness import generate_with_retry, load_prompt, load_schema
+from blastmap.generation.retrieval import CandidateRetrieval, KeywordGraphRetrieval
 
 MAX_CANDIDATES = 10
 MAX_LISTED_PER_SERVICE = 8
 MAX_EVIDENCE_PER_SERVICE = 5
 
-_STOPWORDS = {
-    "the", "a", "an", "to", "for", "in", "on", "of", "and", "or", "with", "add", "support",
-    "de", "da", "do", "das", "dos", "em", "no", "na", "para", "com", "que", "um", "uma", "e",
-}
 
+@dataclass
+class ChangeSurfaceBuilder:
+    """Accumulates one find_change_surface response piece by piece and emits it as
+    a single immutable dict (Builder pattern) — the growth point for every new
+    change-surface field (freshness, unknowns, recommended_next_queries, ...)
+    instead of assembling a flat dict inline in analyze_change_surface."""
 
-def _extract_keywords(text: str) -> list[str]:
-    words = re.findall(r"[a-zA-Z0-9]+", text.lower())
-    seen: list[str] = []
-    for w in words:
-        if len(w) >= 3 and w not in _STOPWORDS and w not in seen:
-            seen.append(w)
-    return seen
+    primary: list[dict] = field(default_factory=list)
+    secondary: list[dict] = field(default_factory=list)
+    no_change_hint: list[dict] = field(default_factory=list)
+    flow: list[dict] = field(default_factory=list)
+    external_integrations: list[dict] = field(default_factory=list)
+    unmapped_internal_hint: list[dict] = field(default_factory=list)
+    note: str | None = None
 
+    def with_findings(self, primary: list[dict], secondary: list[dict], no_change_hint: list[dict]) -> "ChangeSurfaceBuilder":
+        self.primary = primary
+        self.secondary = secondary
+        self.no_change_hint = no_change_hint
+        return self
 
-def _seed_services(conn: sqlite3.Connection, task: str) -> set[str]:
-    seeds: set[str] = set()
-    for keyword in _extract_keywords(task):
-        for r in repository.search(conn, keyword, limit=20):
-            seeds.add(r["service"])
-    return seeds
+    def with_flow(self, flow: list[dict]) -> "ChangeSurfaceBuilder":
+        self.flow = flow
+        return self
 
+    def with_external_integrations(self, items: list[dict]) -> "ChangeSurfaceBuilder":
+        self.external_integrations = items
+        return self
 
-def _expand_candidates(conn: sqlite3.Connection, seeds: set[str], max_candidates: int, hops: int = 2) -> list[str]:
-    """Breadth-first walk of the relationship graph (get_relationships' own edges,
-    reused directly), starting from the keyword-matched seeds. Bounded to a couple of
-    hops and max_candidates so a service connected only through an intermediate one
-    (e.g. order-service <- payments-service <- checkout-service) still surfaces,
-    without turning into an unbounded system-wide traversal. Still pure SQL — no
-    source file is read to compute this.
-    """
-    visited: set[str] = set()
-    frontier: set[str] = set(seeds)
-    for _ in range(hops):
-        if not frontier or len(visited) >= max_candidates:
-            break
-        newly_found: set[str] = set()
-        for name in frontier:
-            visited.add(name)
-            row = repository.get_service_by_name(conn, name)
-            if row is None:
-                continue
-            for c in repository.list_calls_for_service(conn, row["id"]):
-                newly_found.add(c["to_service_name"])
-            for c in repository.list_inbound_calls(conn, row["id"]):
-                newly_found.add(c["from_service_name"])
-            for link in repository.list_message_links(conn, row["id"]):
-                newly_found.add(link["other_service"])
-        frontier = newly_found - visited
-    visited |= frontier  # include the last frontier even though its own edges go unexplored
+    def with_unmapped_internal_hint(self, items: list[dict]) -> "ChangeSurfaceBuilder":
+        self.unmapped_internal_hint = items
+        return self
 
-    # Only keep names that resolve to a real indexed service — a dangling
-    # to_service_name with no matching row can't be given any context below.
-    known = [name for name in visited if repository.get_service_by_name(conn, name) is not None]
-    return sorted(known)[:max_candidates]
+    def with_note(self, note: str) -> "ChangeSurfaceBuilder":
+        self.note = note
+        return self
+
+    def build(self) -> dict:
+        result = {
+            "primary": self.primary,
+            "secondary": self.secondary,
+            "no_change_hint": self.no_change_hint,
+            "flow": self.flow,
+            "external_integrations": self.external_integrations,
+            "unmapped_internal_hint": self.unmapped_internal_hint,
+        }
+        if self.note is not None:
+            result["note"] = self.note
+        return result
 
 
 def _build_context(conn: sqlite3.Connection, candidates: list[str]) -> tuple[str, dict[str, list[dict]]]:
     blocks: list[str] = []
     evidence_by_service: dict[str, list[dict]] = {}
     for name in candidates:
-        row = repository.get_service_by_name(conn, name)
+        row = services_repo.get_service_by_name(conn, name)
         evidence: list[dict] = []
 
-        apis = repository.list_apis(conn, row["id"])[:MAX_LISTED_PER_SERVICE]
+        apis = apis_repo.list_apis(conn, row["id"])[:MAX_LISTED_PER_SERVICE]
         api_lines = [f"  - API {a['method']} {a['path']}: {a['summary'] or ''}" for a in apis]
 
-        outbound = repository.list_calls_for_service(conn, row["id"])[:MAX_LISTED_PER_SERVICE]
+        outbound = service_calls_repo.list_calls_for_service(conn, row["id"])[:MAX_LISTED_PER_SERVICE]
         outbound_lines = [f"  - calls {c['to_service_name']} ({c['call_kind']}): {c['reason'] or ''}" for c in outbound]
         for c in outbound:
             evidence.extend(json.loads(c["evidence_json"] or "[]"))
 
-        inbound = repository.list_inbound_calls(conn, row["id"])[:MAX_LISTED_PER_SERVICE]
+        inbound = service_calls_repo.list_inbound_calls(conn, row["id"])[:MAX_LISTED_PER_SERVICE]
         inbound_lines = [f"  - called by {c['from_service_name']} ({c['call_kind']}): {c['reason'] or ''}" for c in inbound]
 
-        persistence = repository.list_persistence(conn, row["id"])[:MAX_LISTED_PER_SERVICE]
+        persistence = persistence_repo.list_persistence(conn, row["id"])[:MAX_LISTED_PER_SERVICE]
         persistence_lines = [f"  - persists {p['name']} ({p['kind']})" for p in persistence]
         for p in persistence:
             evidence.extend(json.loads(p["evidence_json"] or "[]"))
@@ -130,7 +130,7 @@ FEEDBACK_BLEND_WEIGHT = 0.3
 
 
 def _recalibrate_confidence(conn: sqlite3.Connection, service: str, confidence: float) -> float:
-    stats = repository.get_feedback_stats(conn, service)
+    stats = change_surface_repo.get_feedback_stats(conn, service)
     total = stats["confirmed"] + stats["rejected"]
     if total < MIN_FEEDBACK_SAMPLES:
         return confidence
@@ -163,10 +163,10 @@ def _filter_known(
 def _derive_flow(conn: sqlite3.Connection, service_names: set[str]) -> list[dict]:
     flow = []
     for name in service_names:
-        row = repository.get_service_by_name(conn, name)
+        row = services_repo.get_service_by_name(conn, name)
         if row is None:
             continue
-        for c in repository.list_calls_for_service(conn, row["id"]):
+        for c in service_calls_repo.list_calls_for_service(conn, row["id"]):
             if c["to_service_name"] in service_names:
                 flow.append({"from": name, "to": c["to_service_name"], "type": c["call_kind"].upper()})
     return flow
@@ -180,7 +180,7 @@ def _derive_dependency_hints(conn: sqlite3.Connection, service_names: set[str], 
     """
     out: list[dict] = []
     for name in sorted(service_names):
-        row = repository.get_service_by_name(conn, name)
+        row = services_repo.get_service_by_name(conn, name)
         if row is None:
             continue
         for c in lister(conn, row["id"]):
@@ -196,30 +196,19 @@ def _derive_dependency_hints(conn: sqlite3.Connection, service_names: set[str], 
     return out
 
 
-def _empty_result(note: str) -> dict:
-    return {
-        "primary": [], "secondary": [], "no_change_hint": [], "flow": [],
-        "external_integrations": [], "unmapped_internal_hint": [], "note": note,
-    }
-
-
 def analyze_change_surface(
     conn: sqlite3.Connection,
     task: str,
     backend: LLMBackend,
     hint_services: list[str] | None = None,
     max_candidates: int = MAX_CANDIDATES,
+    retrieval: CandidateRetrieval | None = None,
 ) -> dict:
-    seeds = _seed_services(conn, task)
-    if hint_services:
-        seeds |= set(hint_services)
-
-    if not seeds:
-        return _empty_result("no indexed service matched this task; pass hint_services or index more of the system")
-
-    candidates = _expand_candidates(conn, seeds, max_candidates)
+    retrieval = retrieval or KeywordGraphRetrieval()
+    candidates = retrieval.candidates(conn, task, hint_services, max_candidates)
     if not candidates:
-        return _empty_result("matched services could not be resolved to indexed rows")
+        note = "no indexed service matched this task; pass hint_services or index more of the system"
+        return ChangeSurfaceBuilder().with_note(note).build()
 
     candidates_block, evidence_by_service = _build_context(conn, candidates)
     prompt = _render_prompt(task, candidates_block)
@@ -228,7 +217,7 @@ def analyze_change_surface(
 
     result = generate_with_retry(backend, prompt, schema, Path.home() / ".blastmap", failures_dir, "change-surface")
     if result is None:
-        return _empty_result("change surface synthesis failed; see ~/.blastmap/failures")
+        return ChangeSurfaceBuilder().with_note("change surface synthesis failed; see ~/.blastmap/failures").build()
 
     known = set(candidates)
     primary = _filter_known(conn, result.get("primary", []), known, evidence_by_service)
@@ -236,17 +225,13 @@ def analyze_change_surface(
     no_change = _filter_known(conn, result.get("no_change", []), known, evidence_by_service)
 
     relevant = {f["service"] for f in primary} | {f["service"] for f in secondary}
-    flow = _derive_flow(conn, relevant)
-    external_integrations = _derive_dependency_hints(conn, relevant, repository.list_external_integration_calls)
-    unmapped_internal_hint = _derive_dependency_hints(conn, relevant, repository.list_unmapped_internal_calls)
-
-    response = {
-        "primary": primary,
-        "secondary": secondary,
-        "no_change_hint": no_change,
-        "flow": flow,
-        "external_integrations": external_integrations,
-        "unmapped_internal_hint": unmapped_internal_hint,
-    }
-    response["run_id"] = repository.record_change_surface_run(conn, task, backend.name, response)
+    response = (
+        ChangeSurfaceBuilder()
+        .with_findings(primary, secondary, no_change)
+        .with_flow(_derive_flow(conn, relevant))
+        .with_external_integrations(_derive_dependency_hints(conn, relevant, service_calls_repo.list_external_integration_calls))
+        .with_unmapped_internal_hint(_derive_dependency_hints(conn, relevant, service_calls_repo.list_unmapped_internal_calls))
+        .build()
+    )
+    response["run_id"] = change_surface_repo.record_change_surface_run(conn, task, backend.name, response)
     return response

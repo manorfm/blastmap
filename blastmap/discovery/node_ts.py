@@ -5,7 +5,6 @@ import re
 from pathlib import Path
 
 from blastmap.discovery.base import (
-    CodeExcerpt,
     EndpointHint,
     MessagingHint,
     OutboundCallHint,

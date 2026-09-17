@@ -6,7 +6,15 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from blastmap.db import repository
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import index_runs as index_runs_repo
+from blastmap.db.repositories import indexed_files as indexed_files_repo
+from blastmap.db.repositories import messages as messages_repo
+from blastmap.db.repositories import persistence as persistence_repo
+from blastmap.db.repositories import repositories as repositories_repo
+from blastmap.db.repositories import search as search_repo
+from blastmap.db.repositories import service_calls as service_calls_repo
+from blastmap.db.repositories import services as services_repo
 from blastmap.discovery.base import CodeExcerpt, EndpointHint, ServiceHints, StackDetector
 from blastmap.discovery.hashing import file_hash, git_head_commit
 from blastmap.discovery.scan_helpers import SKIP_DIRS
@@ -172,11 +180,11 @@ def index_service(
     total_units = 1 + len(hints.endpoints) + (1 if hints.persistence else 0) + (1 if hints.messaging else 0)
     progress.service_started(name, total_units)
 
-    existing = repository.get_service_by_name(conn, name)
+    existing = services_repo.get_service_by_name(conn, name)
     is_new = existing is None
-    service_id = repository.ensure_service(conn, name, str(root), detector.id, repository_id=repository_id)
+    service_id = services_repo.ensure_service(conn, name, str(root), detector.id, repository_id=repository_id)
 
-    old_hashes = repository.get_indexed_file_hashes(conn, service_id)
+    old_hashes = indexed_files_repo.get_indexed_file_hashes(conn, service_id)
     relevant = hints.relevant_files()
     new_hashes: dict[str, str] = {}
     changed: set[str] = set()
@@ -190,7 +198,7 @@ def index_service(
             changed.add(rel)
     removed = set(old_hashes) - set(new_hashes)
 
-    run_id = repository.start_index_run(conn, service_id, backend.name)
+    run_id = index_runs_repo.start_index_run(conn, service_id, backend.name)
     llm_calls = 0
     had_failure = False
     # Files whose derived unit failed to generate this run. Their hash is deliberately
@@ -207,7 +215,7 @@ def index_service(
             backend, prompt, load_schema("service_overview"), root, failures_root, f"{name}-overview"
         )
         if result:
-            repository.update_service_overview(conn, service_id, result["short_desc"], result["long_desc"])
+            services_repo.update_service_overview(conn, service_id, result["short_desc"], result["long_desc"])
             llm_calls += 1
             progress.unit_finished(name, "overview", "ok")
         else:
@@ -221,7 +229,7 @@ def index_service(
     for endpoint in hints.endpoints:
         key = (endpoint.method, endpoint.path)
         keep_keys.add(key)
-        existing_api = repository.get_api_by_key(conn, service_id, *key)
+        existing_api = apis_repo.get_api_by_key(conn, service_id, *key)
         dep_files = endpoint.dependency_files()
         needs_regen = force or existing_api is None or bool(dep_files & changed)
         label = f"{endpoint.method} {endpoint.path}"
@@ -239,16 +247,16 @@ def index_service(
             progress.unit_finished(name, label, "failed")
             continue
         evidence = _evidence_from_excerpts([endpoint.excerpt, *endpoint.extra_excerpts])
-        api_id = repository.upsert_api(
+        api_id = apis_repo.upsert_api(
             conn, service_id, endpoint.method, endpoint.path,
             result["summary"], result["description"], result["response_shape"], evidence,
         )
-        repository.replace_api_validations(conn, api_id, result["validations"])
-        repository.replace_calls_for_api(conn, service_id, api_id, result["calls"], evidence)
+        apis_repo.replace_api_validations(conn, api_id, result["validations"])
+        service_calls_repo.replace_calls_for_api(conn, service_id, api_id, result["calls"], evidence)
         llm_calls += 1
         progress.unit_finished(name, label, "ok")
 
-    repository.prune_apis_not_in(conn, service_id, keep_keys)
+    apis_repo.prune_apis_not_in(conn, service_id, keep_keys)
 
     persistence_files = {p.excerpt.file_path for p in hints.persistence}
     if hints.persistence:
@@ -263,7 +271,7 @@ def index_service(
                     {"name": e["name"], "kind": e["kind"], "schema_json": e["fields"]} for e in result["entities"]
                 ]
                 evidence = _evidence_from_excerpts([p.excerpt for p in hints.persistence])
-                repository.replace_persistence_entities(conn, service_id, entities, evidence)
+                persistence_repo.replace_persistence_entities(conn, service_id, entities, evidence)
                 llm_calls += 1
                 progress.unit_finished(name, "persistence", "ok")
             else:
@@ -273,7 +281,7 @@ def index_service(
         else:
             progress.unit_finished(name, "persistence", "skipped")
     else:
-        repository.replace_persistence_entities(conn, service_id, [], [])
+        persistence_repo.replace_persistence_entities(conn, service_id, [], [])
 
     messaging_files = {m.excerpt.file_path for m in hints.messaging}
     if hints.messaging:
@@ -294,7 +302,7 @@ def index_service(
                     for m in result["messages"]
                 ]
                 evidence = _evidence_from_excerpts([m.excerpt for m in hints.messaging])
-                repository.replace_messages(conn, service_id, messages, evidence)
+                messages_repo.replace_messages(conn, service_id, messages, evidence)
                 llm_calls += 1
                 progress.unit_finished(name, "messaging", "ok")
             else:
@@ -304,7 +312,7 @@ def index_service(
         else:
             progress.unit_finished(name, "messaging", "skipped")
     else:
-        repository.replace_messages(conn, service_id, [], [])
+        messages_repo.replace_messages(conn, service_id, [], [])
 
     route_files = {e.excerpt.file_path for e in hints.endpoints}
     for rel, h in new_hashes.items():
@@ -313,17 +321,17 @@ def index_service(
         category = "route" if rel in route_files else (
             "persistence" if rel in persistence_files else ("messaging" if rel in messaging_files else "other")
         )
-        repository.set_indexed_file_hash(conn, service_id, rel, h, category)
+        indexed_files_repo.set_indexed_file_hash(conn, service_id, rel, h, category)
     if removed:
-        repository.remove_indexed_files(conn, service_id, removed)
-    repository.commit(conn)
+        indexed_files_repo.remove_indexed_files(conn, service_id, removed)
+    conn.commit()
 
-    repository.set_service_last_commit(conn, service_id, git_head_commit(root))
-    repository.reconcile_service_call_targets(conn)
-    repository.rebuild_search_index_for_service(conn, service_id)
+    services_repo.set_service_last_commit(conn, service_id, git_head_commit(root))
+    service_calls_repo.reconcile_service_call_targets(conn)
+    search_repo.rebuild_search_index_for_service(conn, service_id)
 
     status = "partial" if had_failure else "ok"
-    repository.finish_index_run(
+    index_runs_repo.finish_index_run(
         conn, run_id, status, len(changed) + len(removed), llm_calls,
         "some units failed, see failures dir" if had_failure else None,
     )
@@ -360,7 +368,7 @@ def index_path(
         candidates = [replace(candidates[0], name=service_override)]
 
     resolved_path = path.resolve()
-    repository_id = repository.ensure_repository(conn, repository_name or resolved_path.name, str(resolved_path))
+    repository_id = repositories_repo.ensure_repository(conn, repository_name or resolved_path.name, str(resolved_path))
 
     return [
         index_service(conn, c.name, c.path, c.detector, backend, force=force, progress=progress, repository_id=repository_id)

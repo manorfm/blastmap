@@ -15,7 +15,6 @@ from blastmap.discovery.scan_helpers import (
     ENDPOINT_BEFORE,
     excerpt_around,
     find_matches,
-    first_existing_file,
 )
 
 EXTENSIONS = (".java", ".kt")

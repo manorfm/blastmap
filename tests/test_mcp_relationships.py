@@ -1,5 +1,5 @@
 """Integration test for get_relationships: drives the real MCP server over stdio
-against a deterministic fixture DB built directly through db.repository (no LLM call
+against a deterministic fixture DB built directly through db.repositories (no LLM call
 involved), the same pattern used by find_change_surface's end-to-end test.
 """
 from pathlib import Path
@@ -8,23 +8,26 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from blastmap.db import repository
 from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import messages as messages_repo
+from blastmap.db.repositories import service_calls as service_calls_repo
+from blastmap.db.repositories import services as services_repo
 
 from tests.mcp_test_helpers import content_json, server_params
 
 
 def _build_fixture_db(db_path: Path) -> None:
     conn = open_db(db_path)
-    checkout_id = repository.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
-    payments_id = repository.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
-    notif_id = repository.ensure_service(conn, "notification-service", "/tmp/notif", "python")
+    checkout_id = services_repo.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
+    services_repo.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
+    notif_id = services_repo.ensure_service(conn, "notification-service", "/tmp/notif", "python")
 
-    api_id = repository.upsert_api(
+    api_id = apis_repo.upsert_api(
         conn, checkout_id, "POST", "/checkout", "starts checkout", "desc", [],
         [{"file": "checkout.py", "start_line": 1, "end_line": 20}],
     )
-    repository.replace_calls_for_api(
+    service_calls_repo.replace_calls_for_api(
         conn, checkout_id, api_id,
         [{
             "to_service_name": "payments-service", "call_kind": "http",
@@ -33,14 +36,14 @@ def _build_fixture_db(db_path: Path) -> None:
         }],
         [{"file": "checkout.py", "start_line": 1, "end_line": 20}],
     )
-    repository.reconcile_service_call_targets(conn)
+    service_calls_repo.reconcile_service_call_targets(conn)
 
-    repository.replace_messages(
+    messages_repo.replace_messages(
         conn, checkout_id,
         [{"direction": "publishes", "channel": "order_created", "shape_json": [], "description": "d"}],
         [{"file": "checkout.py", "start_line": 30, "end_line": 35}],
     )
-    repository.replace_messages(
+    messages_repo.replace_messages(
         conn, notif_id,
         [{"direction": "consumes", "channel": "order_created", "shape_json": [], "description": "d"}],
         [{"file": "notify.py", "start_line": 5, "end_line": 10}],

@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 from blastmap import cli
-from blastmap.db import repository
 from blastmap.db.connection import open_db
+from blastmap.db.repositories import repositories as repositories_repo
+from blastmap.db.repositories import services as services_repo
 from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
 
 
@@ -31,7 +32,7 @@ def test_index_command_indexes_sample_project(tmp_path: Path, capsys):
     assert "orders-service" in out
     assert "status=ok" in out
     conn = open_db(db_path)
-    assert len(repository.list_services(conn)) == 3
+    assert len(services_repo.list_services(conn)) == 3
 
 
 def test_index_command_accepts_repository_name(tmp_path: Path):
@@ -41,7 +42,7 @@ def test_index_command_accepts_repository_name(tmp_path: Path):
     cli._cmd_index(args)
 
     conn = open_db(db_path)
-    repos = repository.list_repositories(conn)
+    repos = repositories_repo.list_repositories(conn)
     assert repos[0]["name"] == "custom-repo"
 
 

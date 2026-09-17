@@ -4,8 +4,10 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from blastmap.db import repository
 from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import service_calls as service_calls_repo
+from blastmap.db.repositories import services as services_repo
 from blastmap.mcp import queries
 from tests.mcp_test_helpers import content_json, server_params
 
@@ -14,13 +16,13 @@ def _chain_fixture(db_path: Path):
     """checkout-service -> payments-service -> ledger-service, no direct A->C edge.
     inventory-service is disconnected, to exercise the unreachable case."""
     conn = open_db(db_path)
-    checkout_id = repository.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
-    payments_id = repository.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
-    ledger_id = repository.ensure_service(conn, "ledger-service", "/tmp/ledger", "python")
-    repository.ensure_service(conn, "inventory-service", "/tmp/inventory", "python")
+    checkout_id = services_repo.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
+    payments_id = services_repo.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
+    services_repo.ensure_service(conn, "ledger-service", "/tmp/ledger", "python")
+    services_repo.ensure_service(conn, "inventory-service", "/tmp/inventory", "python")
 
-    checkout_api = repository.upsert_api(conn, checkout_id, "POST", "/checkout", "s", "d", [], [])
-    repository.replace_calls_for_api(
+    checkout_api = apis_repo.upsert_api(conn, checkout_id, "POST", "/checkout", "s", "d", [], [])
+    service_calls_repo.replace_calls_for_api(
         conn, checkout_id, checkout_api,
         [{
             "to_service_name": "payments-service", "call_kind": "http", "reason": "authorize payment",
@@ -28,10 +30,10 @@ def _chain_fixture(db_path: Path):
         }],
         [{"file": "checkout.py", "start_line": 1, "end_line": 10}],
     )
-    repository.reconcile_service_call_targets(conn)
+    service_calls_repo.reconcile_service_call_targets(conn)
 
-    payments_api = repository.upsert_api(conn, payments_id, "POST", "/charge", "s", "d", [], [])
-    repository.replace_calls_for_api(
+    payments_api = apis_repo.upsert_api(conn, payments_id, "POST", "/charge", "s", "d", [], [])
+    service_calls_repo.replace_calls_for_api(
         conn, payments_id, payments_api,
         [{
             "to_service_name": "ledger-service", "call_kind": "queue_publish", "reason": "record the transaction",
@@ -39,7 +41,7 @@ def _chain_fixture(db_path: Path):
         }],
         [],
     )
-    repository.reconcile_service_call_targets(conn)
+    service_calls_repo.reconcile_service_call_targets(conn)
     return conn
 
 

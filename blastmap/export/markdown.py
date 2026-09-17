@@ -5,7 +5,11 @@ import re
 import sqlite3
 from pathlib import Path
 
-from blastmap.db import repository
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import messages as messages_repo
+from blastmap.db.repositories import persistence as persistence_repo
+from blastmap.db.repositories import service_calls as service_calls_repo
+from blastmap.db.repositories import services as services_repo
 
 
 def _slug(text: str) -> str:
@@ -25,17 +29,17 @@ def _fmt_calls(calls: list[sqlite3.Row]) -> list[str]:
 
 def export_markdown(conn: sqlite3.Connection, out_dir: Path, service_filter: str | None = None) -> list[Path]:
     written: list[Path] = []
-    for svc in repository.list_services(conn):
+    for svc in services_repo.list_services(conn):
         if service_filter and svc["name"] != service_filter:
             continue
-        service_row = repository.get_service_by_name(conn, svc["name"])
+        service_row = services_repo.get_service_by_name(conn, svc["name"])
         service_dir = out_dir / svc["name"]
         service_dir.mkdir(parents=True, exist_ok=True)
 
-        calls = repository.list_calls_for_service(conn, svc["id"])
-        apis = repository.list_apis(conn, svc["id"])
-        persistence = repository.list_persistence(conn, svc["id"])
-        messages = repository.list_messages(conn, svc["id"])
+        calls = service_calls_repo.list_calls_for_service(conn, svc["id"])
+        apis = apis_repo.list_apis(conn, svc["id"])
+        persistence = persistence_repo.list_persistence(conn, svc["id"])
+        messages = messages_repo.list_messages(conn, svc["id"])
 
         lines = [
             f"# {svc['name']}",
@@ -75,9 +79,9 @@ def export_markdown(conn: sqlite3.Connection, out_dir: Path, service_filter: str
             apis_dir = service_dir / "apis"
             apis_dir.mkdir(parents=True, exist_ok=True)
             for a in apis:
-                api_row = repository.get_api_by_key(conn, svc["id"], a["method"], a["path"])
-                api_calls = repository.list_calls_for_api(conn, api_row["id"])
-                validations = repository.list_validations_for_api(conn, api_row["id"])
+                api_row = apis_repo.get_api_by_key(conn, svc["id"], a["method"], a["path"])
+                api_calls = service_calls_repo.list_calls_for_api(conn, api_row["id"])
+                validations = apis_repo.list_validations_for_api(conn, api_row["id"])
                 response_shape = json.loads(api_row["response_shape"] or "[]")
 
                 api_lines = [f"# {a['method']} {a['path']}", "", api_row["description"] or "", "", "## Resposta"]

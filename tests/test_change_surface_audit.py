@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from blastmap.db import repository
 from blastmap.db.connection import open_db
+from blastmap.db.repositories import change_surface as repository
 from blastmap.mcp import queries
 
 SAMPLE_RESULT = {

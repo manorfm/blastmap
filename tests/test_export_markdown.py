@@ -1,19 +1,23 @@
 from pathlib import Path
 
-from blastmap.db import repository
 from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import messages as messages_repo
+from blastmap.db.repositories import persistence as persistence_repo
+from blastmap.db.repositories import service_calls as service_calls_repo
+from blastmap.db.repositories import services as services_repo
 from blastmap.export.markdown import export_markdown
 
 
 def _seed(conn):
-    orders_id = repository.ensure_service(conn, "orders-service", "/tmp/orders", "python")
-    repository.update_service_overview(conn, orders_id, "Handles orders.", "Longer description of orders-service.")
-    api_id = repository.upsert_api(
+    orders_id = services_repo.ensure_service(conn, "orders-service", "/tmp/orders", "python")
+    services_repo.update_service_overview(conn, orders_id, "Handles orders.", "Longer description of orders-service.")
+    api_id = apis_repo.upsert_api(
         conn, orders_id, "POST", "/orders", "creates an order", "Creates a new order.",
         [{"field": "order_id", "type_desc": "string"}], [],
     )
-    repository.replace_api_validations(conn, api_id, [{"kind": "authorization", "description": "needs a bearer token"}])
-    repository.replace_calls_for_api(
+    apis_repo.replace_api_validations(conn, api_id, [{"kind": "authorization", "description": "needs a bearer token"}])
+    service_calls_repo.replace_calls_for_api(
         conn, orders_id, api_id,
         [{
             "to_service_name": "payments-service", "call_kind": "http",
@@ -22,8 +26,8 @@ def _seed(conn):
         }],
         [],
     )
-    repository.replace_persistence_entities(conn, orders_id, [{"name": "orders", "kind": "sql_table", "schema_json": []}], [])
-    repository.replace_messages(
+    persistence_repo.replace_persistence_entities(conn, orders_id, [{"name": "orders", "kind": "sql_table", "schema_json": []}], [])
+    messages_repo.replace_messages(
         conn, orders_id, [{"direction": "publishes", "channel": "order_created", "shape_json": [], "description": "order created"}], [],
     )
     return orders_id
@@ -55,7 +59,7 @@ def test_export_markdown_writes_service_index_and_api_detail(tmp_path: Path):
 def test_export_markdown_service_filter_only_writes_matching_service(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     _seed(conn)
-    repository.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
+    services_repo.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
     out_dir = tmp_path / "docs"
 
     written = export_markdown(conn, out_dir, service_filter="orders-service")
@@ -66,7 +70,7 @@ def test_export_markdown_service_filter_only_writes_matching_service(tmp_path: P
 
 def test_export_markdown_handles_service_with_no_apis(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
-    repository.ensure_service(conn, "empty-service", "/tmp/empty", "python")
+    services_repo.ensure_service(conn, "empty-service", "/tmp/empty", "python")
     out_dir = tmp_path / "docs"
 
     written = export_markdown(conn, out_dir)

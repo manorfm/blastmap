@@ -5,8 +5,13 @@ deterministically without a real subprocess call — matching the harness's own
 """
 from pathlib import Path
 
-from blastmap.db import repository
 from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import change_surface as change_surface_repo
+from blastmap.db.repositories import messages as messages_repo
+from blastmap.db.repositories import search as search_repo
+from blastmap.db.repositories import service_calls as service_calls_repo
+from blastmap.db.repositories import services as services_repo
 from blastmap.generation import change_surface
 
 
@@ -24,21 +29,21 @@ class FakeBackend:
 
 def _build_pix_fixture(db_path: Path):
     conn = open_db(db_path)
-    checkout_id = repository.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
-    payments_id = repository.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
-    order_id = repository.ensure_service(conn, "order-service", "/tmp/order", "python")
-    notif_id = repository.ensure_service(conn, "notification-service", "/tmp/notif", "python")
+    checkout_id = services_repo.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
+    payments_id = services_repo.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
+    order_id = services_repo.ensure_service(conn, "order-service", "/tmp/order", "python")
+    notif_id = services_repo.ensure_service(conn, "notification-service", "/tmp/notif", "python")
 
-    repository.update_service_overview(conn, checkout_id, "Owns the checkout entry point and forwards payment method.", "L")
-    repository.update_service_overview(conn, payments_id, "Owns payment method resolution and payment authorization.", "L")
-    repository.update_service_overview(conn, order_id, "Consumes payment confirmation to create orders.", "L")
-    repository.update_service_overview(conn, notif_id, "Sends emails when an order ships.", "L")
+    services_repo.update_service_overview(conn, checkout_id, "Owns the checkout entry point and forwards payment method.", "L")
+    services_repo.update_service_overview(conn, payments_id, "Owns payment method resolution and payment authorization.", "L")
+    services_repo.update_service_overview(conn, order_id, "Consumes payment confirmation to create orders.", "L")
+    services_repo.update_service_overview(conn, notif_id, "Sends emails when an order ships.", "L")
 
-    api_id = repository.upsert_api(
+    api_id = apis_repo.upsert_api(
         conn, checkout_id, "POST", "/checkout", "starts checkout", "desc", [],
         [{"file": "checkout.py", "start_line": 1, "end_line": 20}],
     )
-    repository.replace_calls_for_api(
+    service_calls_repo.replace_calls_for_api(
         conn, checkout_id, api_id,
         [{
             "to_service_name": "payments-service", "call_kind": "http",
@@ -47,10 +52,10 @@ def _build_pix_fixture(db_path: Path):
         }],
         [{"file": "checkout.py", "start_line": 1, "end_line": 20}],
     )
-    repository.reconcile_service_call_targets(conn)
+    service_calls_repo.reconcile_service_call_targets(conn)
 
-    order_api_id = repository.upsert_api(conn, order_id, "POST", "/orders", "creates order", "desc", [], [])
-    repository.replace_calls_for_api(
+    order_api_id = apis_repo.upsert_api(conn, order_id, "POST", "/orders", "creates order", "desc", [], [])
+    service_calls_repo.replace_calls_for_api(
         conn, order_id, order_api_id,
         [
             {
@@ -68,10 +73,10 @@ def _build_pix_fixture(db_path: Path):
         ],
         [],
     )
-    repository.reconcile_service_call_targets(conn)
+    service_calls_repo.reconcile_service_call_targets(conn)
 
-    payments_api_id = repository.upsert_api(conn, payments_id, "POST", "/charge", "charges a card", "desc", [], [])
-    repository.replace_calls_for_api(
+    payments_api_id = apis_repo.upsert_api(conn, payments_id, "POST", "/charge", "charges a card", "desc", [], [])
+    service_calls_repo.replace_calls_for_api(
         conn, payments_id, payments_api_id,
         [{
             # A genuine external integration — should surface as external_integrations.
@@ -81,20 +86,20 @@ def _build_pix_fixture(db_path: Path):
         }],
         [],
     )
-    repository.reconcile_service_call_targets(conn)
+    service_calls_repo.reconcile_service_call_targets(conn)
 
     # notification-service is only reachable via a message link off payments-service —
     # exercises the same "connected but unlikely to change" shape as the user's own
     # example (order events reaching a notifier that has nothing to do with Pix).
-    repository.replace_messages(
+    messages_repo.replace_messages(
         conn, payments_id,
         [{"direction": "publishes", "channel": "payment_authorized", "shape_json": [], "description": "d"}], [],
     )
-    repository.replace_messages(
+    messages_repo.replace_messages(
         conn, notif_id,
         [{"direction": "consumes", "channel": "payment_authorized", "shape_json": [], "description": "d"}], [],
     )
-    repository.rebuild_search_index(conn)
+    search_repo.rebuild_search_index(conn)
     return conn
 
 
@@ -183,7 +188,7 @@ def test_analyze_change_surface_persists_a_run_and_returns_its_id(tmp_path: Path
     result = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
 
     assert "run_id" in result
-    findings = repository.list_change_surface_findings(conn, result["run_id"])
+    findings = change_surface_repo.list_change_surface_findings(conn, result["run_id"])
     assert any(f["service"] == "checkout-service" and f["role"] == "primary" for f in findings)
 
 
@@ -202,7 +207,7 @@ def test_confidence_is_recalibrated_from_historical_feedback(tmp_path: Path):
     # should be nudged down, even though the LLM keeps saying 0.9.
     run_id = first["run_id"]
     for _ in range(4):
-        repository.record_change_surface_feedback(conn, run_id, "checkout-service", "rejected")
+        change_surface_repo.record_change_surface_feedback(conn, run_id, "checkout-service", "rejected")
 
     second = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
     assert second["primary"][0]["confidence"] < 0.9

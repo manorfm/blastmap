@@ -8,7 +8,7 @@ from pathlib import Path
 
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
 
-from blastmap.db import repository
+from blastmap.db.repositories import services as services_repo
 from blastmap.generation import change_surface
 
 # Budget: find_change_surface's whole point is a small, progressive-disclosure
@@ -36,7 +36,7 @@ def _context_efficiency(result: dict, total_services: int) -> dict:
 
 def test_find_change_surface_flags_a_minority_of_services(tmp_path: Path):
     conn = _build_pix_fixture(tmp_path / "eff1.db")
-    total_services = len(repository.list_services(conn))
+    total_services = len(services_repo.list_services(conn))
     backend = FakeBackend({
         "primary": [
             {"service": "checkout-service", "reason": "owns checkout entry point", "confidence": 0.95},
@@ -68,7 +68,7 @@ def test_evidence_points_at_a_small_number_of_files_not_the_whole_codebase(tmp_p
     })
 
     result = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
-    metrics = _context_efficiency(result, len(repository.list_services(conn)))
+    metrics = _context_efficiency(result, len(services_repo.list_services(conn)))
 
     # An agent acting on this result knows exactly which few files to open — this is
     # the "read only what you need" promise made concrete and checkable.
