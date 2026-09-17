@@ -6,9 +6,9 @@ import json
 import sqlite3
 from collections import deque
 
-from context_insight.db import repository
-from context_insight.generation import change_surface
-from context_insight.generation.backend_base import LLMBackend
+from blastmap.db import repository
+from blastmap.generation import change_surface
+from blastmap.generation.backend_base import LLMBackend
 
 
 def _fmt_call(c: sqlite3.Row) -> dict:

@@ -1,4 +1,4 @@
-"""Rich-based terminal progress for `context-insight index`/`update`.
+"""Rich-based terminal progress for `blastmap index`/`update`.
 
 Kept separate from generation/orchestrator.py so the generation logic never depends
 on a UI library — it only calls the small ProgressReporter protocol.

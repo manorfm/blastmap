@@ -8,8 +8,8 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from context_insight.db import repository
-from context_insight.db.connection import open_db
+from blastmap.db import repository
+from blastmap.db.connection import open_db
 
 from tests.mcp_test_helpers import content_json, server_params
 

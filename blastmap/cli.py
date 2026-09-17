@@ -4,13 +4,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from context_insight.cli_progress import RichProgressReporter
-from context_insight.config import resolve_backend
-from context_insight.db import repository
-from context_insight.db.connection import DEFAULT_DB_PATH, open_db
-from context_insight.export.markdown import export_markdown
-from context_insight.generation.backend_base import GenerationError
-from context_insight.generation.orchestrator import DiscoveryError, index_path, index_service
+from blastmap.cli_progress import RichProgressReporter
+from blastmap.config import resolve_backend
+from blastmap.db import repository
+from blastmap.db.connection import DEFAULT_DB_PATH, open_db
+from blastmap.export.markdown import export_markdown
+from blastmap.generation.backend_base import GenerationError
+from blastmap.generation.orchestrator import DiscoveryError, index_path, index_service
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
@@ -34,17 +34,17 @@ def _cmd_update(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     row = repository.get_service_by_name(conn, args.service)
     if row is None:
-        print(f"error: unknown service {args.service!r} (run `context-insight list`)", file=sys.stderr)
+        print(f"error: unknown service {args.service!r} (run `blastmap list`)", file=sys.stderr)
         return 1
     root = Path(row["root_path"])
     if not root.is_dir():
         print(
             f"error: root path for {args.service!r} no longer exists: {root}\n"
-            f"       re-run `context-insight index <newpath> --service {args.service}` instead.",
+            f"       re-run `blastmap index <newpath> --service {args.service}` instead.",
             file=sys.stderr,
         )
         return 1
-    from context_insight.discovery.registry import detector_for
+    from blastmap.discovery.registry import detector_for
 
     detector = detector_for(root)
     if detector is None:
@@ -105,7 +105,7 @@ def _cmd_export(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    from context_insight.mcp.server import build_server
+    from blastmap.mcp.server import build_server
 
     backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
     server = build_server(args.db, backend=backend)
@@ -114,7 +114,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="context-insight")
+    parser = argparse.ArgumentParser(prog="blastmap")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_backend_args(p: argparse.ArgumentParser) -> None:

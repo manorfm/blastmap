@@ -1,60 +1,26 @@
 #!/usr/bin/env python3
-"""Bumps the project's semantic version from a Conventional Commits message.
+"""Bumps the project's semantic version as a deliberate release step. Run by hand:
 
-Invoked by the commit-msg git hook (scripts/git-hooks/commit-msg), never by hand
-except to test it. Rules (matching Conventional Commits / semantic-release):
-  - "feat: ..."            -> minor bump
-  - "fix: ..." / "perf:"   -> patch bump
-  - "feat!: ..." or a
-    "BREAKING CHANGE:"     -> major bump
-    footer/body line
-  - anything else
-    (chore/docs/refactor/
-    style/test/build/ci,
-    or a non-conventional
-    message)               -> no bump
+    python scripts/bump_version.py <major|minor|patch>
 
-On a bump, updates the version string in both pyproject.toml and
-context_insight/__init__.py and stages them (git add) so they land in the same
-commit that triggered the bump.
+Updates the version string in both pyproject.toml and blastmap/__init__.py.
 """
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = REPO_ROOT / "pyproject.toml"
-INIT_FILE = REPO_ROOT / "context_insight" / "__init__.py"
+INIT_FILE = REPO_ROOT / "blastmap" / "__init__.py"
 
-CONVENTIONAL_RE = re.compile(r"^(?P<type>\w+)(?:\([^)]*\))?(?P<breaking>!)?:\s")
-
-# Commit sources where re-running the bump would be wrong or meaningless:
-# amends/reuses an existing message ("commit"), or merge/squash commits.
-SKIP_SOURCES = {"merge", "squash", "commit"}
-
-
-def bump_kind(message: str) -> str | None:
-    stripped = message.strip()
-    if not stripped:
-        return None
-    first_line = stripped.splitlines()[0]
-    match = CONVENTIONAL_RE.match(first_line)
-    if not match:
-        return None
-    if match.group("breaking") or "BREAKING CHANGE" in message:
-        return "major"
-    commit_type = match.group("type").lower()
-    if commit_type == "feat":
-        return "minor"
-    if commit_type in ("fix", "perf"):
-        return "patch"
-    return None
+_KINDS = ("major", "minor", "patch")
 
 
 def next_version(current: str, kind: str) -> str:
+    if kind not in _KINDS:
+        raise ValueError(f"unknown bump kind: {kind!r} (expected one of {_KINDS})")
     major, minor, patch = (int(p) for p in current.split("."))
     if kind == "major":
         return f"{major + 1}.0.0"
@@ -63,50 +29,39 @@ def next_version(current: str, kind: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
-def read_version() -> str:
-    text = PYPROJECT.read_text(encoding="utf-8")
+def read_version(pyproject_path: Path) -> str:
+    text = pyproject_path.read_text(encoding="utf-8")
     match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
     if not match:
-        raise SystemExit("bump_version: could not find `version = \"...\"` in pyproject.toml")
+        raise SystemExit(f'bump_version: could not find `version = "..."` in {pyproject_path}')
     return match.group(1)
 
 
-def write_version(new_version: str) -> None:
-    targets = (
-        (PYPROJECT, r'^version\s*=\s*"[^"]+"', f'version = "{new_version}"'),
-        (INIT_FILE, r'^__version__\s*=\s*"[^"]+"', f'__version__ = "{new_version}"'),
-    )
-    for path, pattern, replacement in targets:
+def write_version(pyproject_path: Path, init_path: Path, new_version: str) -> None:
+    for path, pattern, replacement in (
+        (pyproject_path, r'^version\s*=\s*"[^"]+"', f'version = "{new_version}"'),
+        (init_path, r'^__version__\s*=\s*"[^"]+"', f'__version__ = "{new_version}"'),
+    ):
         text = path.read_text(encoding="utf-8")
         new_text, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
         if count == 0:
             raise SystemExit(f"bump_version: could not find version line in {path}")
         path.write_text(new_text, encoding="utf-8")
-        subprocess.run(["git", "add", str(path)], check=True, cwd=REPO_ROOT)
+
+
+def bump(pyproject_path: Path, init_path: Path, kind: str) -> tuple[str, str]:
+    current = read_version(pyproject_path)
+    new_version = next_version(current, kind)
+    write_version(pyproject_path, init_path, new_version)
+    return current, new_version
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("bump_version: missing commit message file path, skipping", file=sys.stderr)
-        return 0  # never block a commit over a hook wiring mistake
-
-    msg_file = Path(sys.argv[1])
-    commit_source = sys.argv[2] if len(sys.argv) > 2 else ""
-    if commit_source in SKIP_SOURCES:
-        return 0
-
-    message = msg_file.read_text(encoding="utf-8")
-    if message.lstrip().startswith("Merge "):
-        return 0
-
-    kind = bump_kind(message)
-    if kind is None:
-        return 0
-
-    current = read_version()
-    new_version = next_version(current, kind)
-    write_version(new_version)
-    print(f"bump_version: {current} -> {new_version} ({kind} bump, conventional commit)", file=sys.stderr)
+    if len(sys.argv) != 2 or sys.argv[1] not in _KINDS:
+        print(f"usage: bump_version.py <{'|'.join(_KINDS)}>", file=sys.stderr)
+        return 1
+    current, new_version = bump(PYPROJECT, INIT_FILE, sys.argv[1])
+    print(f"bump_version: {current} -> {new_version}")
     return 0
 
 

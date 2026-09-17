@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from context_insight import cli
-from context_insight.db import repository
-from context_insight.db.connection import open_db
+from blastmap import cli
+from blastmap.db import repository
+from blastmap.db.connection import open_db
 from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
 
 

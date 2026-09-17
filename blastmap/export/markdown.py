@@ -5,7 +5,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from context_insight.db import repository
+from blastmap.db import repository
 
 
 def _slug(text: str) -> str:

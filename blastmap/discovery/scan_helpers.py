@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Iterator
 
-from context_insight.discovery.base import CodeExcerpt
+from blastmap.discovery.base import CodeExcerpt
 
 SKIP_DIRS = {
     "node_modules", ".venv", "venv", "env", "dist", "build", ".git", "target",

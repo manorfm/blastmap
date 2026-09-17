@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from context_insight.db import repository
-from context_insight.db.connection import open_db
+from blastmap.db import repository
+from blastmap.db.connection import open_db
 
 EVIDENCE = [{"file": "main.py", "start_line": 10, "end_line": 20}]
 

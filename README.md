@@ -1,10 +1,10 @@
-# context_insight
+# blastmap
 
 ## Ideia
 
 Agentes de IA que precisam entender um sistema de microsserviços hoje só têm dois
 caminhos: ler o código-fonte inteiro (caro em tokens, lento) ou depender de
-documentação manual que fica desatualizada. O `context_insight` "tritura" uma ou
+documentação manual que fica desatualizada. O `blastmap` "tritura" uma ou
 várias árvores de código, usa um LLM (Claude Code ou Codex, via CLI headless, usando
 sua assinatura em vez de API paga) para sintetizar uma documentação enxuta e
 **semântica** — não só estrutural — por microsserviço e por API, persiste isso em
@@ -31,12 +31,12 @@ tarefa** (uma conclusão específica de um épico, sempre com `reason`, `confide
 ## Uso básico
 
 ```bash
-context-insight index /caminho/do/repositorio --backend claude   # ou --backend codex
-context-insight index /outro/repositorio --repository-name outro-repo  # múltiplos repos no mesmo DB
-context-insight list
-context-insight status [servico]
-context-insight export md --out docs/
-context-insight serve --backend claude   # servidor MCP (stdio); backend usado só por find_change_surface
+blastmap index /caminho/do/repositorio --backend claude   # ou --backend codex
+blastmap index /outro/repositorio --repository-name outro-repo  # múltiplos repos no mesmo DB
+blastmap list
+blastmap status [servico]
+blastmap export md --out docs/
+blastmap serve --backend claude   # servidor MCP (stdio); backend usado só por find_change_surface
 ```
 
 ## Formato de resposta do MCP
@@ -258,22 +258,17 @@ substituindo o julgamento feito com a evidência da tarefa atual.
   (filtro anti-alucinação, recalibração de confiança, harness de eficiência de
   contexto com orçamento de tamanho de resposta), e testes de integração reais via
   protocolo MCP (stdio) para `get_relationships`, `trace_flow` e `find_change_surface`.
-- **Hook de versionamento semântico** (`scripts/git-hooks/commit-msg`): bump
-  automático de `major`/`minor`/`patch` a partir da mensagem de commit (Conventional
-  Commits).
+- **Versionamento manual e deliberado**: `python scripts/bump_version.py
+  <major|minor|patch>` atualiza `pyproject.toml` e `blastmap/__init__.py` juntos, como
+  parte do passo de release — sem hook de commit tentando adivinhar o bump certo.
 
 ## Limitações conhecidas
 
 - **Sem retrocompatibilidade de schema**: o banco não tem framework de migração — o
-  schema em `db/schema.sql` é a única forma esperada. Um `~/.context_insight/context_insight.db`
+  schema em `db/schema.sql` é a única forma esperada. Um `~/.blastmap/blastmap.db`
   criado antes desta versão não ganha as colunas/tabelas novas automaticamente
   (SQLite não altera uma tabela já existente via `CREATE TABLE IF NOT EXISTS`); apague
-  o arquivo e rode `context-insight index` de novo.
-- O hook de versionamento tem um problema real em aberto: o Git fixa a árvore do
-  commit **antes** de rodar o hook `commit-msg`, então o bump de versão feito pelo
-  hook não entra no commit atual — ele fica staged e só é absorvido (e re-bumpado) no
-  commit seguinte. Precisa de uma estratégia diferente (`pre-commit` ou um passo
-  separado de release).
+  o arquivo e rode `blastmap index` de novo.
 - Heurísticas de descoberta são propositalmente simples (regex): apontam o LLM para o
   trecho certo, mas podem perder padrões incomuns (ex.: cliente HTTP instanciado numa
   variável com nome não convencional). Sem teste automatizado especificamente para as
@@ -297,7 +292,7 @@ substituindo o julgamento feito com a evidência da tarefa atual.
 ```bash
 pip install -e ".[dev]"
 pytest tests/                                    # suíte determinística (sem LLM), TDD
-pytest tests/ --cov=context_insight --cov-report=term-missing   # cobertura
+pytest tests/ --cov=blastmap --cov-report=term-missing   # cobertura
 ```
 
 O CI (`.github/workflows/ci.yml`) roda exatamente essa suíte determinística em
@@ -305,7 +300,7 @@ Python 3.11/3.12 a cada push/PR — `verify/sample_project.db` não existe em CI
 `test_mcp_tools.py` sempre pula lá (comportamento esperado, não uma falha).
 
 `get_relationships`/`find_change_surface` são exercitados via sessão MCP real (stdio),
-que sobe `context_insight.mcp.server` num **subprocesso** — para a cobertura enxergar
+que sobe `blastmap.mcp.server` num **subprocesso** — para a cobertura enxergar
 esse subprocesso (em vez de reportar `mcp/server.py`/`mcp/queries.py` como 0% mesmo
 sendo testados), é preciso um hook de `coverage` no `site-packages` do venv mais a
 variável `COVERAGE_PROCESS_START`:
@@ -320,7 +315,7 @@ DBs seedadas direto via `db.repository`). Para validar o pipeline real fim-a-fim
 discovery → geração LLM real → SQLite → MCP — use a própria fixture do projeto como
 teste e2e manual:
 ```bash
-context-insight index verify/sample_project --backend claude --db verify/sample_project.db
+blastmap index verify/sample_project --backend claude --db verify/sample_project.db
 pytest tests/test_mcp_tools.py   # antes fica "skipped"; roda de verdade com esse DB
 ```
 Isso também é o que popula `verify/sample_project.db` (gitignored, não versionado —

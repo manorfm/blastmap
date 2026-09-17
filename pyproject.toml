@@ -1,6 +1,6 @@
 [project]
-name = "context-insight"
-version = "1.1.0"
+name = "blastmap"
+version = "1.2.0"
 description = "Tritura microsserviços em documentação semântica enxuta, servida a agentes via MCP."
 requires-python = ">=3.11"
 dependencies = [
@@ -16,20 +16,20 @@ dev = [
 ]
 
 [project.scripts]
-context-insight = "context_insight.cli:main"
+blastmap = "blastmap.cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["context_insight*"]
+include = ["blastmap*"]
 
 [tool.setuptools.package-data]
-context_insight = ["db/schema.sql", "generation/prompts/*.md", "generation/schemas/*.json"]
+blastmap = ["db/schema.sql", "generation/prompts/*.md", "generation/schemas/*.json"]
 
 [tool.coverage.run]
-source = ["context_insight"]
+source = ["blastmap"]
 # get_relationships/find_change_surface are exercised via a subprocess MCP server
 # (tests/test_mcp_*.py drive it over real stdio), so coverage must follow across the
 # process boundary: parallel + the COVERAGE_PROCESS_START env var + a `coverage.pth`

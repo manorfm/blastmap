@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from context_insight.db import repository
-from context_insight.db.connection import open_db
-from context_insight.discovery.registry import detector_for
-from context_insight.discovery.walker import discover_services
-from context_insight.generation.backend_base import GenerationError
-from context_insight.generation.orchestrator import DiscoveryError, index_path, index_service
+from blastmap.db import repository
+from blastmap.db.connection import open_db
+from blastmap.discovery.registry import detector_for
+from blastmap.discovery.walker import discover_services
+from blastmap.generation.backend_base import GenerationError
+from blastmap.generation.orchestrator import DiscoveryError, index_path, index_service
 
 SAMPLE_ROOT = Path(__file__).resolve().parent.parent / "verify" / "sample_project"
 

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from context_insight.discovery.base import StackDetector
-from context_insight.discovery.go_stack import GoDetector
-from context_insight.discovery.jvm_stack import JvmSpringDetector
-from context_insight.discovery.node_ts import NodeTsDetector
-from context_insight.discovery.python_stack import PythonDetector
+from blastmap.discovery.base import StackDetector
+from blastmap.discovery.go_stack import GoDetector
+from blastmap.discovery.jvm_stack import JvmSpringDetector
+from blastmap.discovery.node_ts import NodeTsDetector
+from blastmap.discovery.python_stack import PythonDetector
 
 # Order matters only in that the first matching detector "claims" a folder.
 # Add a new stack by writing one StackDetector implementation and appending it here.

@@ -3,12 +3,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from context_insight.generation.backend_base import LLMBackend
-from context_insight.generation.claude_backend import ClaudeBackend
-from context_insight.generation.codex_backend import CodexBackend
+from blastmap.generation.backend_base import LLMBackend
+from blastmap.generation.claude_backend import ClaudeBackend
+from blastmap.generation.codex_backend import CodexBackend
 
 DEFAULT_BACKEND = "claude"
-DEFAULT_DB_PATH = Path.home() / ".context_insight" / "context_insight.db"
+DEFAULT_DB_PATH = Path.home() / ".blastmap" / "blastmap.db"
 
 
 def resolve_backend(

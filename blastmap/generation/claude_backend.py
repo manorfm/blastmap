@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from context_insight.generation.backend_base import GenerationError
+from blastmap.generation.backend_base import GenerationError
 
 TIMEOUT_SECONDS = 180
 

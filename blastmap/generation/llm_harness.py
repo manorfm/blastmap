@@ -15,12 +15,12 @@ from string import Template
 
 import jsonschema
 
-from context_insight.generation.backend_base import GenerationError, LLMBackend
+from blastmap.generation.backend_base import GenerationError, LLMBackend
 
 logger = logging.getLogger(__name__)
 
-PROMPTS_PKG = "context_insight.generation.prompts"
-SCHEMAS_PKG = "context_insight.generation.schemas"
+PROMPTS_PKG = "blastmap.generation.prompts"
+SCHEMAS_PKG = "blastmap.generation.schemas"
 
 
 @lru_cache(maxsize=None)

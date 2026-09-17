@@ -7,14 +7,14 @@ from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
-from context_insight.config import resolve_backend
-from context_insight.db.connection import open_db
-from context_insight.generation.backend_base import LLMBackend
-from context_insight.mcp import queries
+from blastmap.config import resolve_backend
+from blastmap.db.connection import open_db
+from blastmap.generation.backend_base import LLMBackend
+from blastmap.mcp import queries
 
 
 def build_server(db_path: Path | None = None, backend: LLMBackend | None = None) -> MCPServer:
-    mcp = MCPServer("context-insight")
+    mcp = MCPServer("blastmap")
     # Only find_change_surface uses a backend; the other 6 tools are pure SQLite
     # reads and never touch it. Resolved once here rather than per-call since
     # constructing a backend is cheap (no subprocess runs until .generate() is called).
@@ -126,7 +126,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="context-insight serve")
+    parser = argparse.ArgumentParser(prog="blastmap serve")
     parser.add_argument("--db", type=Path, default=None)
     parser.add_argument("--backend", choices=["claude", "codex"], default=None, help="Used only by find_change_surface")
     parser.add_argument("--model", default=None)

@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from context_insight.discovery.jvm_stack import JvmSpringDetector
-from context_insight.discovery.node_ts import NodeTsDetector
-from context_insight.discovery.python_stack import PythonDetector
-from context_insight.discovery.walker import discover_services
+from blastmap.discovery.jvm_stack import JvmSpringDetector
+from blastmap.discovery.node_ts import NodeTsDetector
+from blastmap.discovery.python_stack import PythonDetector
+from blastmap.discovery.walker import discover_services
 
 SAMPLE_ROOT = Path(__file__).resolve().parent.parent / "verify" / "sample_project"
 

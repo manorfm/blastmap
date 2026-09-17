@@ -5,7 +5,7 @@ from importlib import resources
 from pathlib import Path
 
 SCHEMA_VERSION = "2"
-DEFAULT_DB_PATH = Path.home() / ".context_insight" / "context_insight.db"
+DEFAULT_DB_PATH = Path.home() / ".blastmap" / "blastmap.db"
 
 
 def open_db(db_path: Path | None = None) -> sqlite3.Connection:
@@ -19,7 +19,7 @@ def open_db(db_path: Path | None = None) -> sqlite3.Connection:
 
 
 def _init_schema(conn: sqlite3.Connection) -> None:
-    schema_sql = resources.files("context_insight.db").joinpath("schema.sql").read_text()
+    schema_sql = resources.files("blastmap.db").joinpath("schema.sql").read_text()
     conn.executescript(schema_sql)
     row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
     if row is None:

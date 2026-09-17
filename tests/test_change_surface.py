@@ -5,9 +5,9 @@ deterministically without a real subprocess call — matching the harness's own
 """
 from pathlib import Path
 
-from context_insight.db import repository
-from context_insight.db.connection import open_db
-from context_insight.generation import change_surface
+from blastmap.db import repository
+from blastmap.db.connection import open_db
+from blastmap.generation import change_surface
 
 
 class FakeBackend:

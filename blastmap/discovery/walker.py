@@ -5,9 +5,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from context_insight.discovery.base import StackDetector
-from context_insight.discovery.registry import detector_for
-from context_insight.discovery.scan_helpers import SKIP_DIRS
+from blastmap.discovery.base import StackDetector
+from blastmap.discovery.registry import detector_for
+from blastmap.discovery.scan_helpers import SKIP_DIRS
 
 
 @dataclass

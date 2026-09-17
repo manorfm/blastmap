@@ -3,14 +3,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from context_insight.discovery.base import (
+from blastmap.discovery.base import (
     EndpointHint,
     MessagingHint,
     OutboundCallHint,
     PersistenceHint,
     ServiceHints,
 )
-from context_insight.discovery.scan_helpers import (
+from blastmap.discovery.scan_helpers import (
     ENDPOINT_AFTER,
     ENDPOINT_BEFORE,
     excerpt_around,

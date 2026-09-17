@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from context_insight.db import repository
-from context_insight.db.connection import open_db
-from context_insight.export.markdown import export_markdown
+from blastmap.db import repository
+from blastmap.db.connection import open_db
+from blastmap.export.markdown import export_markdown
 
 
 def _seed(conn):

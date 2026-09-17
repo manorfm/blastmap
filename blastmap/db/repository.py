@@ -1,4 +1,4 @@
-"""Only module allowed to run SQL against the context_insight database."""
+"""Only module allowed to run SQL against the blastmap database."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from context_insight.discovery.integration_heuristics import classify_target_kind
+from blastmap.discovery.integration_heuristics import classify_target_kind
 
 
 def _now() -> str:

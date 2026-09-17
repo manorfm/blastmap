@@ -6,13 +6,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from context_insight.db import repository
-from context_insight.discovery.base import CodeExcerpt, EndpointHint, ServiceHints, StackDetector
-from context_insight.discovery.hashing import file_hash, git_head_commit
-from context_insight.discovery.scan_helpers import SKIP_DIRS
-from context_insight.discovery.walker import discover_services
-from context_insight.generation.backend_base import LLMBackend
-from context_insight.generation.llm_harness import generate_with_retry, load_prompt, load_schema
+from blastmap.db import repository
+from blastmap.discovery.base import CodeExcerpt, EndpointHint, ServiceHints, StackDetector
+from blastmap.discovery.hashing import file_hash, git_head_commit
+from blastmap.discovery.scan_helpers import SKIP_DIRS
+from blastmap.discovery.walker import discover_services
+from blastmap.generation.backend_base import LLMBackend
+from blastmap.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 
 MAX_EXCERPT_CHARS = 20_000
 
@@ -166,7 +166,7 @@ def index_service(
     progress: ProgressReporter | None = None,
     repository_id: int | None = None,
 ) -> IndexResult:
-    failures_root = failures_root or (Path.home() / ".context_insight" / "failures")
+    failures_root = failures_root or (Path.home() / ".blastmap" / "failures")
     progress = progress or NullProgressReporter()
     hints = detector.collect_hints(root)
     total_units = 1 + len(hints.endpoints) + (1 if hints.persistence else 0) + (1 if hints.messaging else 0)

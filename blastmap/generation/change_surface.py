@@ -15,9 +15,9 @@ import re
 import sqlite3
 from pathlib import Path
 
-from context_insight.db import repository
-from context_insight.generation.backend_base import LLMBackend
-from context_insight.generation.llm_harness import generate_with_retry, load_prompt, load_schema
+from blastmap.db import repository
+from blastmap.generation.backend_base import LLMBackend
+from blastmap.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 
 MAX_CANDIDATES = 10
 MAX_LISTED_PER_SERVICE = 8
@@ -224,11 +224,11 @@ def analyze_change_surface(
     candidates_block, evidence_by_service = _build_context(conn, candidates)
     prompt = _render_prompt(task, candidates_block)
     schema = load_schema("change_surface")
-    failures_dir = Path.home() / ".context_insight" / "failures"
+    failures_dir = Path.home() / ".blastmap" / "failures"
 
-    result = generate_with_retry(backend, prompt, schema, Path.home() / ".context_insight", failures_dir, "change-surface")
+    result = generate_with_retry(backend, prompt, schema, Path.home() / ".blastmap", failures_dir, "change-surface")
     if result is None:
-        return _empty_result("change surface synthesis failed; see ~/.context_insight/failures")
+        return _empty_result("change surface synthesis failed; see ~/.blastmap/failures")
 
     known = set(candidates)
     primary = _filter_known(conn, result.get("primary", []), known, evidence_by_service)
