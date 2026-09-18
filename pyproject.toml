@@ -1,8 +1,25 @@
 [project]
 name = "blastmap"
 version = "1.2.0"
-description = "Tritura microsserviços em documentação semântica enxuta, servida a agentes via MCP."
+description = "Task-aware change intelligence for AI coding agents, served via MCP."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
+authors = [
+    { name = "Manoel Medeiros" },
+]
+keywords = ["mcp", "ai-agents", "microservices", "change-intelligence", "architecture"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Software Development :: Quality Assurance",
+    "Environment :: Console",
+]
 dependencies = [
     "mcp>=2.0.0",
     "jsonschema>=4.21.0",
@@ -15,7 +32,15 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.6.0",
     "vulture>=2.11",
+    "bandit>=1.7.9",
+    "pip-audit>=2.7.0",
+    "build>=1.2.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/manorfm/blastmap"
+Repository = "https://github.com/manorfm/blastmap"
+Issues = "https://github.com/manorfm/blastmap/issues"
 
 [project.scripts]
 blastmap = "blastmap.cli:main"
@@ -41,3 +66,11 @@ relative_files = true
 
 [tool.coverage.report]
 exclude_lines = ["if __name__ == .__main__.:"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "verify", "benchmark", ".venv"]
+# B404/B603/B607: subprocess is used deliberately (invoking claude/codex/git via
+# PATH, never shell=True) to shell out to the LLM CLI backends and to git — that's
+# the whole point of generation/*_backend.py and discovery/hashing.py, not a risk
+# to flag on every run. Everything else stays active.
+skips = ["B404", "B603", "B607"]

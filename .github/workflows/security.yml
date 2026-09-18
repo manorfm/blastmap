@@ -1,0 +1,52 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so a newly disclosed dependency CVE surfaces even with no push.
+    - cron: "0 6 * * 1"
+
+jobs:
+  sast:
+    name: SAST (bandit) + dependency scan (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install blastmap with dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Static analysis (bandit)
+        run: bandit -c pyproject.toml -r blastmap
+
+      - name: Dependency vulnerability scan (pip-audit)
+        run: pip-audit
+
+  dast:
+    name: DAST (live MCP server over stdio, adversarial inputs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install blastmap with dev dependencies
+        run: pip install -e ".[dev]"
+
+      # tests/test_dast_adversarial_inputs.py spins up the real blastmap MCP
+      # server as a subprocess (stdio) and drives it with SQL-injection,
+      # prompt-injection, FTS5-syntax and oversized/malformed payloads over a
+      # real client session — a dynamic test of the running process, not a
+      # source-code scan. No claude/codex CLI needed: only the read-only tools
+      # are exercised (find_change_surface needs a real LLM backend and has its
+      # own dedicated unit coverage for the same mitigations instead).
+      - name: Dynamic adversarial-input test
+        run: pytest tests/test_dast_adversarial_inputs.py -v

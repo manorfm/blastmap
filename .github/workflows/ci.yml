@@ -31,3 +31,22 @@ jobs:
         run: |
           python -m coverage run -m pytest tests/ -v
           python -m coverage report -m
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install blastmap with dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: ruff (unused imports/variables)
+        run: ruff check --select F401,F841 blastmap tests scripts
+
+      - name: vulture (dead code)
+        run: vulture blastmap --min-confidence 80

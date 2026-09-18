@@ -1,0 +1,56 @@
+name: Publish to PyPI
+
+# Fires on a version tag (created by `make release-patch|minor|major`, pushed by
+# hand — see the Makefile and README's "Release process" section). Gated behind
+# a real test run first, so a broken checkout can never reach PyPI.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tooling
+        run: pip install build
+      - name: Build sdist and wheel
+        run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted Publishing (OIDC) — no PYPI_API_TOKEN secret needed. This requires
+    # a one-time setup on pypi.org (Project > Publishing > Add a new publisher)
+    # pointing at this exact repo, workflow filename (publish.yml) and
+    # environment name (pypi) — see README's "Release process" section.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/blastmap/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

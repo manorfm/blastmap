@@ -13,3 +13,8 @@ verify/sample_project.db
 .blastmap/
 .coverage
 .coverage.*
+
+# build/release artifacts (produced by `make build` / CI's publish workflow)
+/dist/
+/build/
+*.bandit
