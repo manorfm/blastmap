@@ -14,10 +14,13 @@ def replace_persistence_entities(
     conn.execute("DELETE FROM persistence_entities WHERE service_id = ?", (service_id,))
     evidence_json = json.dumps(evidence)
     conn.executemany(
-        """INSERT INTO persistence_entities (service_id, name, kind, schema_json, evidence_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO persistence_entities (service_id, name, kind, engine, schema_json, evidence_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
         [
-            (service_id, e["name"], e.get("kind"), json.dumps(e.get("schema_json", {})), evidence_json, now())
+            (
+                service_id, e["name"], e.get("kind"), e.get("engine") or "unknown",
+                json.dumps(e.get("schema_json", {})), evidence_json, now(),
+            )
             for e in entities
         ],
     )
@@ -26,6 +29,7 @@ def replace_persistence_entities(
 
 def list_persistence(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT name, kind, schema_json, evidence_json FROM persistence_entities WHERE service_id = ? ORDER BY name",
+        """SELECT name, kind, engine, schema_json, evidence_json
+           FROM persistence_entities WHERE service_id = ? ORDER BY name""",
         (service_id,),
     ).fetchall()

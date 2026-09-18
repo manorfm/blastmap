@@ -1,4 +1,4 @@
-from context_insight.discovery.integration_heuristics import classify_target_kind
+from context_insight.discovery.integration_heuristics import classify_resource_type, classify_target_kind
 
 
 def test_known_vendor_names_are_classified_external():
@@ -31,3 +31,15 @@ def test_vendor_match_takes_precedence_over_naming_convention():
     # more specific signal than the generic suffix heuristic.
     known = {"payment-service"}
     assert classify_target_kind("stripe-service", known_service_names=known) == "external"
+
+
+def test_classify_resource_type_for_known_vendors():
+    assert classify_resource_type("Stripe API") == "saas"
+    assert classify_resource_type("AWS S3") == "storage"
+    assert classify_resource_type("Firebase Auth") == "db_managed"
+    assert classify_resource_type("some generic AWS service") == "compute"
+
+
+def test_classify_resource_type_is_unknown_for_unrecognized_names():
+    assert classify_resource_type("some_random_thing_xyz") == "unknown"
+    assert classify_resource_type("") == "unknown"

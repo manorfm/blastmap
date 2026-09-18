@@ -52,7 +52,11 @@ class FakeOrchestratorBackend:
         if kind == "service_overview":
             return {"short_desc": "Fake short description.", "long_desc": "Fake long description."}
         if kind == "persistence":
-            return {"entities": [{"name": "fake_table", "kind": "sql_table", "fields": [{"field": "id", "type_desc": "string"}]}]}
+            return {
+                "entities": [
+                    {"name": "fake_table", "kind": "sql_table", "engine": "postgres", "fields": [{"field": "id", "type_desc": "string"}]}
+                ]
+            }
         if kind == "messaging":
             return {"messages": [{"direction": "publishes", "channel": "fake_channel", "provider": "kafka", "shape": [], "description": "fake"}]}
         if kind == "component":
@@ -65,6 +69,7 @@ class FakeOrchestratorBackend:
             "calls": [{
                 "to_service_name": "payments-service", "call_kind": "http", "reason": "fake reason",
                 "data_needed": ["amount"], "purpose_kind": "data_fetch", "confidence": 0.8, "target_kind": "internal",
+                "resource_type": "not_applicable",
             }],
             "validations": [{"kind": "authorization", "description": "fake auth rule"}],
         }

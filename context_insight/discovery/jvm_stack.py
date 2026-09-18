@@ -14,10 +14,21 @@ from context_insight.discovery.scan_helpers import (
     ENDPOINT_AFTER,
     ENDPOINT_BEFORE,
     component_hint_for,
+    engine_hint_from_manifest,
     excerpt_around,
     find_matches,
     resolve_local_calls,
 )
+
+_MANIFEST_FILES = ("pom.xml", "build.gradle", "build.gradle.kts")
+_ENGINE_DRIVER_KEYWORDS = {
+    "postgresql": "postgres",
+    "mysql-connector": "mysql",
+    "mongodb-driver": "mongodb",
+    "spring-boot-starter-data-mongodb": "mongodb",
+    "lettuce": "redis",
+    "jedis": "redis",
+}
 
 EXTENSIONS = (".java", ".kt")
 
@@ -102,6 +113,7 @@ class JvmSpringDetector:
 
     def collect_hints(self, folder: Path) -> ServiceHints:
         hints = ServiceHints()
+        engine_hint = engine_hint_from_manifest(folder, _MANIFEST_FILES, _ENGINE_DRIVER_KEYWORDS)
         src = folder / "src" / "main"
         scan_root = src if src.is_dir() else folder
 
@@ -179,11 +191,17 @@ class JvmSpringDetector:
 
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _JPA_ENTITY_RE):
             hints.persistence.append(
-                PersistenceHint(kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no))
+                PersistenceHint(
+                    kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no),
+                    engine_hint=engine_hint,
+                )
             )
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _SPRING_DATA_REPO_RE):
             hints.persistence.append(
-                PersistenceHint(kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no))
+                PersistenceHint(
+                    kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no),
+                    engine_hint=engine_hint,
+                )
             )
 
         return hints

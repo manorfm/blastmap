@@ -14,12 +14,23 @@ from context_insight.discovery.scan_helpers import (
     ENDPOINT_AFTER,
     ENDPOINT_BEFORE,
     component_hint_for,
+    engine_hint_from_manifest,
     excerpt_around,
     find_matches,
     first_existing_file,
     provider_from_match,
     resolve_local_calls,
 )
+
+_MANIFEST_FILES = ("go.mod",)
+_ENGINE_DRIVER_KEYWORDS = {
+    "lib/pq": "postgres",
+    "jackc/pgx": "postgres",
+    "go-sql-driver/mysql": "mysql",
+    "mongo-driver": "mongodb",
+    "go-redis": "redis",
+    "redigo": "redis",
+}
 
 EXTENSIONS = (".go",)
 
@@ -78,6 +89,7 @@ class GoDetector:
 
     def collect_hints(self, folder: Path) -> ServiceHints:
         hints = ServiceHints()
+        engine_hint = engine_hint_from_manifest(folder, _MANIFEST_FILES, _ENGINE_DRIVER_KEYWORDS)
 
         entry = first_existing_file(folder, ("main.go",))
         if entry is None:
@@ -122,11 +134,17 @@ class GoDetector:
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _GORM_MODEL_RE):
             hints.persistence.append(
-                PersistenceHint(kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no))
+                PersistenceHint(
+                    kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no),
+                    engine_hint=engine_hint,
+                )
             )
         for path, line_no, match in find_matches(folder, EXTENSIONS, _SQL_QUERY_RE):
             hints.persistence.append(
-                PersistenceHint(kind="sql_table", name_hint="?", excerpt=excerpt_around(path, folder, line_no))
+                PersistenceHint(
+                    kind="sql_table", name_hint="?", excerpt=excerpt_around(path, folder, line_no),
+                    engine_hint=engine_hint,
+                )
             )
 
         return hints

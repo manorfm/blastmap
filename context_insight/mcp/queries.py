@@ -30,6 +30,7 @@ def _fmt_call(c: sqlite3.Row) -> dict:
         "data_needed": json.loads(c["data_needed"] or "[]"),
         "purpose_kind": c["purpose_kind"],
         "target_kind": c["target_kind"],
+        "resource_type": c["resource_type"],
     }
 
 
@@ -72,7 +73,7 @@ def describe_service(conn: sqlite3.Connection, service: str) -> dict:
         "components": [
             {"name": c["name"], "file_path": c["file_path"], "summary": c["summary"]} for c in components
         ],
-        "persists": [{"name": p["name"], "kind": p["kind"]} for p in persistence],
+        "persists": [{"name": p["name"], "kind": p["kind"], "engine": p["engine"]} for p in persistence],
         "messages": [
             {
                 "direction": m["direction"], "channel": m["channel"], "provider": m["provider"],
@@ -120,7 +121,10 @@ def describe_persistence(conn: sqlite3.Connection, service: str) -> dict:
     entities = persistence_repo.list_persistence(conn, row["id"])
     return {
         "entities": [
-            {"name": e["name"], "kind": e["kind"], "schema_json": json.loads(e["schema_json"] or "[]")}
+            {
+                "name": e["name"], "kind": e["kind"], "engine": e["engine"],
+                "schema_json": json.loads(e["schema_json"] or "[]"),
+            }
             for e in entities
         ]
     }

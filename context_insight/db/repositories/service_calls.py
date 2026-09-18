@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from context_insight.discovery.integration_heuristics import classify_target_kind
+from context_insight.discovery.integration_heuristics import classify_resource_type, classify_target_kind
 
 from ._util import now
 
@@ -18,8 +18,8 @@ def replace_calls_for_api(
     conn.executemany(
         """INSERT INTO service_calls
            (from_service_id, from_api_id, to_service_name, call_kind, reason, data_needed,
-            purpose_kind, confidence, target_kind, evidence_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            purpose_kind, confidence, target_kind, resource_type, evidence_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 from_service_id,
@@ -31,6 +31,7 @@ def replace_calls_for_api(
                 c.get("purpose_kind"),
                 c.get("confidence"),
                 c.get("target_kind", "unknown"),
+                c.get("resource_type") or "not_applicable",
                 evidence_json,
                 now(),
             )
@@ -87,13 +88,26 @@ def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | N
         if kind != "unknown":
             conn.execute("UPDATE service_calls SET target_kind = ? WHERE id = ?", (kind, row["id"]))
 
+    # Same fallback posture as target_kind: only fills a gap the LLM itself left
+    # unresolved ('not_applicable'/'unknown'), and only for calls that ended up
+    # 'external' — resource_type is meaningless for internal/unknown targets.
+    unresolved_resource_type = conn.execute(
+        f"""SELECT id, to_service_name FROM service_calls
+            WHERE target_kind = 'external' AND resource_type IN ('not_applicable', 'unknown'){scope_sql}""",
+        scope_params,
+    ).fetchall()
+    for row in unresolved_resource_type:
+        resource_type = classify_resource_type(row["to_service_name"])
+        if resource_type != "unknown":
+            conn.execute("UPDATE service_calls SET resource_type = ? WHERE id = ?", (resource_type, row["id"]))
+
     conn.commit()
 
 
 def list_calls_for_service(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
         """SELECT to_service_name, call_kind, reason, data_needed, purpose_kind, confidence,
-                  target_kind, evidence_json
+                  target_kind, resource_type, evidence_json
            FROM service_calls WHERE from_service_id = ? ORDER BY to_service_name""",
         (service_id,),
     ).fetchall()
@@ -102,7 +116,7 @@ def list_calls_for_service(conn: sqlite3.Connection, service_id: int) -> list[sq
 def list_calls_for_api(conn: sqlite3.Connection, api_id: int) -> list[sqlite3.Row]:
     return conn.execute(
         """SELECT to_service_name, call_kind, reason, data_needed, purpose_kind, confidence,
-                  target_kind, evidence_json
+                  target_kind, resource_type, evidence_json
            FROM service_calls WHERE from_api_id = ? ORDER BY to_service_name""",
         (api_id,),
     ).fetchall()

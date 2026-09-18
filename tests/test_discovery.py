@@ -74,6 +74,18 @@ def test_python_celery_task_is_tagged_as_an_abstracted_provider(tmp_path: Path):
     assert celery_hints[0].direction == "consumes"
 
 
+def test_python_persistence_engine_hint_comes_from_the_manifest_driver(tmp_path: Path):
+    (tmp_path / "requirements.txt").write_text("fastapi\nsqlalchemy\npsycopg2-binary\n")
+    (tmp_path / "main.py").write_text(
+        "from sqlalchemy.orm import declarative_base\nBase = declarative_base()\n\n"
+        "class Order(Base):\n    __tablename__ = 'orders'\n"
+    )
+
+    hints = PythonDetector().collect_hints(tmp_path)
+
+    assert hints.persistence[0].engine_hint == "postgres"
+
+
 def test_node_ts_detector_matches_and_finds_hints():
     folder = SAMPLE_ROOT / "payments-service"
     detector = NodeTsDetector()

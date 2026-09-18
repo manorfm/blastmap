@@ -9,6 +9,17 @@ Use ONLY the evidence below.
 Model/entity/migration excerpts found in this service:
 $persistence_excerpts
 
+Best-effort database engine guess, usually from the service's dependency manifest
+rather than the model/entity definition itself (a starting point only — verify against
+the actual evidence, it can be wrong):
+$engine_hints
+
+Configuration/manifest files found in this service, which may reveal the concrete
+engine an ORM model doesn't name on its own:
+$config_evidence
+
 Return the list of entities/tables this service persists, with their fields (field name
-plus a short type/meaning description) as visible in the evidence. Skip anything not
-clearly shown rather than guessing.
+plus a short type/meaning description) as visible in the evidence, and the concrete
+database engine (postgres, mysql, mongodb, dynamodb, redis, elasticsearch, sqlite, or
+"unknown" if nothing above resolves it — never guess). Skip anything not clearly shown
+rather than guessing.

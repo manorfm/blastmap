@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from context_insight.discovery.scan_helpers import collect_config_excerpts
+from context_insight.discovery.scan_helpers import collect_config_excerpts, engine_hint_from_manifest
 
 
 def test_collect_config_excerpts_finds_known_config_files(tmp_path: Path):
@@ -24,3 +24,19 @@ def test_collect_config_excerpts_truncates_large_files(tmp_path: Path):
     excerpts = collect_config_excerpts(tmp_path)
 
     assert len(excerpts[0].text) == 4_000
+
+
+def test_engine_hint_from_manifest_matches_a_known_driver(tmp_path: Path):
+    (tmp_path / "requirements.txt").write_text("fastapi\npsycopg2-binary==2.9\n")
+
+    engine = engine_hint_from_manifest(tmp_path, ("requirements.txt",), {"psycopg2": "postgres", "pymysql": "mysql"})
+
+    assert engine == "postgres"
+
+
+def test_engine_hint_from_manifest_returns_none_when_no_driver_found(tmp_path: Path):
+    (tmp_path / "requirements.txt").write_text("fastapi\n")
+
+    engine = engine_hint_from_manifest(tmp_path, ("requirements.txt",), {"psycopg2": "postgres"})
+
+    assert engine is None

@@ -172,10 +172,22 @@ def _render_api_detail_prompt(name: str, stack: str, endpoint: EndpointHint, hin
     )
 
 
-def _render_persistence_prompt(name: str, stack: str, hints: ServiceHints) -> str:
+def _persistence_needs_config_evidence(hints: ServiceHints) -> bool:
+    """An ORM model/entity definition (SQLAlchemy, JPA, GORM) rarely names its own
+    engine — true whenever at least one entity has no manifest-derived engine_hint."""
+    return any(p.engine_hint is None for p in hints.persistence)
+
+
+def _render_persistence_prompt(name: str, stack: str, hints: ServiceHints, config_excerpts: list[CodeExcerpt]) -> str:
     excerpts = [p.excerpt for p in hints.persistence]
+    engine_hints = "\n".join(
+        f"- {p.name_hint} ({p.excerpt.file_path}:{p.excerpt.start_line}): {p.engine_hint or 'unknown'}"
+        for p in hints.persistence
+    ) or "(none found)"
+    config_evidence = _join_excerpts(config_excerpts) if config_excerpts else "(none found)"
     return load_prompt("persistence").substitute(
-        service_name=name, stack=stack, persistence_excerpts=_join_excerpts(excerpts)
+        service_name=name, stack=stack, persistence_excerpts=_join_excerpts(excerpts),
+        engine_hints=engine_hints, config_evidence=config_evidence,
     )
 
 
@@ -332,15 +344,19 @@ def index_service(
     if hints.persistence:
         if force or is_new or (changed & persistence_files) or (removed & persistence_files):
             progress.unit_started(name, "persistence")
-            prompt = _render_persistence_prompt(name, detector.id, hints)
+            persistence_config_excerpts = (
+                collect_config_excerpts(root) if _persistence_needs_config_evidence(hints) else []
+            )
+            prompt = _render_persistence_prompt(name, detector.id, hints, persistence_config_excerpts)
             result = generate_with_retry(
                 backend, prompt, load_schema("persistence"), root, failures_root, f"{name}-persistence"
             )
             if result:
                 entities = [
-                    {"name": e["name"], "kind": e["kind"], "schema_json": e["fields"]} for e in result["entities"]
+                    {"name": e["name"], "kind": e["kind"], "engine": e["engine"], "schema_json": e["fields"]}
+                    for e in result["entities"]
                 ]
-                evidence = _evidence_from_excerpts([p.excerpt for p in hints.persistence])
+                evidence = _evidence_from_excerpts([p.excerpt for p in hints.persistence] + persistence_config_excerpts)
                 persistence_repo.replace_persistence_entities(conn, service_id, entities, evidence)
                 llm_calls += 1
                 progress.unit_finished(name, "persistence", "ok")

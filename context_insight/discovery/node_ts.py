@@ -15,12 +15,25 @@ from context_insight.discovery.scan_helpers import (
     ENDPOINT_AFTER,
     ENDPOINT_BEFORE,
     component_hint_for,
+    engine_hint_from_manifest,
     excerpt_around,
     find_matches,
     first_existing_file,
     provider_from_match,
     resolve_local_calls,
 )
+
+_MANIFEST_FILES = ("package.json",)
+_ENGINE_DRIVER_KEYWORDS = {
+    "\"pg\"": "postgres",
+    "mysql2": "mysql",
+    "\"mysql\"": "mysql",
+    "mongoose": "mongodb",
+    "mongodb": "mongodb",
+    "ioredis": "redis",
+    "\"redis\"": "redis",
+}
+_PRISMA_PROVIDER_TO_ENGINE = {"postgresql": "postgres", "mysql": "mysql", "mongodb": "mongodb", "sqlite": "sqlite"}
 
 EXTENSIONS = (".js", ".ts")
 
@@ -48,6 +61,7 @@ _QUEUE_CONSUME_RE = re.compile(
 
 _ENTITY_RE = re.compile(r"@Entity\s*\(\s*['\"`]?([^'\"`)]*)['\"`]?\s*\)")
 _PRISMA_MODEL_RE = re.compile(r"^model\s+(\w+)\s*\{", re.MULTILINE)
+_PRISMA_DATASOURCE_RE = re.compile(r"datasource\s+\w+\s*\{[^}]*provider\s*=\s*\"(\w+)\"", re.DOTALL)
 _MONGOOSE_SCHEMA_RE = re.compile(r"new\s+(?:mongoose\.)?Schema\s*\(")
 _SEQUELIZE_DEFINE_RE = re.compile(r"\.define\s*\(\s*['\"`]([^'\"`]+)['\"`]")
 
@@ -92,6 +106,7 @@ class NodeTsDetector:
 
     def collect_hints(self, folder: Path) -> ServiceHints:
         hints = ServiceHints()
+        engine_hint = engine_hint_from_manifest(folder, _MANIFEST_FILES, _ENGINE_DRIVER_KEYWORDS)
 
         entry = first_existing_file(folder, ("src/main.ts", "src/app.ts", "main.ts", "app.ts", "server.js", "index.js"))
         if entry:
@@ -130,23 +145,37 @@ class NodeTsDetector:
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _ENTITY_RE):
             hints.persistence.append(
-                PersistenceHint(kind="sql_table", name_hint=match.group(1) or "?", excerpt=excerpt_around(path, folder, line_no))
+                PersistenceHint(
+                    kind="sql_table", name_hint=match.group(1) or "?", excerpt=excerpt_around(path, folder, line_no),
+                    engine_hint=engine_hint,
+                )
             )
         for path, line_no, match in find_matches(folder, EXTENSIONS, _MONGOOSE_SCHEMA_RE):
             hints.persistence.append(
-                PersistenceHint(kind="document", name_hint="?", excerpt=excerpt_around(path, folder, line_no))
+                PersistenceHint(
+                    kind="document", name_hint="?", excerpt=excerpt_around(path, folder, line_no),
+                    engine_hint="mongodb",  # unambiguous: this is Mongoose's own schema constructor
+                )
             )
         for path, line_no, match in find_matches(folder, EXTENSIONS, _SEQUELIZE_DEFINE_RE):
             hints.persistence.append(
-                PersistenceHint(kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no))
+                PersistenceHint(
+                    kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no),
+                    engine_hint=engine_hint,
+                )
             )
         prisma_schema = folder / "prisma" / "schema.prisma"
         if prisma_schema.is_file():
             text = prisma_schema.read_text(encoding="utf-8", errors="ignore")
+            datasource_match = _PRISMA_DATASOURCE_RE.search(text)
+            prisma_engine = _PRISMA_PROVIDER_TO_ENGINE.get(datasource_match.group(1)) if datasource_match else None
             for match in _PRISMA_MODEL_RE.finditer(text):
                 line_no = text.count("\n", 0, match.start()) + 1
                 hints.persistence.append(
-                    PersistenceHint(kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(prisma_schema, folder, line_no))
+                    PersistenceHint(
+                        kind="sql_table", name_hint=match.group(1),
+                        excerpt=excerpt_around(prisma_schema, folder, line_no), engine_hint=prisma_engine,
+                    )
                 )
 
         return hints

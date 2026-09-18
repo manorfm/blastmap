@@ -44,6 +44,10 @@ class PersistenceHint:
     kind: str  # 'sql_table' | 'document' | 'cache' | 'other'
     name_hint: str
     excerpt: CodeExcerpt
+    # Best-effort engine guess (e.g. 'postgres', 'mongodb'), usually from the service's
+    # dependency manifest rather than the model/entity definition itself, which rarely
+    # names an engine. Only a hint fed to the LLM, same posture as MessagingHint.provider_hint.
+    engine_hint: str | None = None
 
 
 @dataclass

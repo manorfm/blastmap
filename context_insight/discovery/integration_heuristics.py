@@ -16,24 +16,40 @@ from __future__ import annotations
 
 import re
 
-# Lowercase substrings of common third-party vendor/SaaS names. Best-effort and
-# deliberately small — a false negative just falls through to "unknown", which is
-# always safe; a false positive here would wrongly label an internal service external,
-# so keep this to genuinely unambiguous vendor brand names only.
-_KNOWN_VENDORS = (
-    "stripe", "twilio", "sendgrid", "mailgun", "paypal", "braintree", "plaid",
-    "aws", "amazon s3", "s3", "azure", "gcp", "google cloud", "firebase",
-    "slack", "github", "gitlab", "salesforce", "hubspot", "zendesk", "shopify",
-    "datadog", "segment", "mixpanel", "sentry", "auth0", "okta", "cloudflare",
-    "algolia", "elasticsearch cloud", "openai", "anthropic",
-)
+# Lowercase substrings of common third-party vendor/SaaS names, mapped to the kind of
+# resource they are (used for both target_kind='external' and resource_type). Best-
+# effort and deliberately small — a false negative just falls through to "unknown",
+# which is always safe; a false positive here would wrongly label an internal service
+# external, so keep this to genuinely unambiguous vendor brand names only.
+_VENDOR_RESOURCE_TYPES = {
+    "stripe": "saas", "twilio": "saas", "sendgrid": "saas", "mailgun": "saas",
+    "paypal": "saas", "braintree": "saas", "plaid": "saas", "slack": "saas",
+    "github": "saas", "gitlab": "saas", "salesforce": "saas", "hubspot": "saas",
+    "zendesk": "saas", "shopify": "saas", "datadog": "saas", "segment": "saas",
+    "mixpanel": "saas", "sentry": "saas", "auth0": "saas", "okta": "saas",
+    "cloudflare": "saas", "algolia": "saas", "openai": "saas", "anthropic": "saas",
+    "amazon s3": "storage", "s3": "storage",
+    "firebase": "db_managed", "elasticsearch cloud": "db_managed",
+    "aws": "compute", "azure": "compute", "gcp": "compute", "google cloud": "compute",
+}
 
 _SUFFIX_RE = re.compile(r"[-_]([a-z]+)$")
 
 
 def _matches_known_vendor(name: str) -> bool:
     lowered = name.lower()
-    return any(vendor in lowered for vendor in _KNOWN_VENDORS)
+    return any(vendor in lowered for vendor in _VENDOR_RESOURCE_TYPES)
+
+
+def classify_resource_type(name: str) -> str:
+    """Best-effort resource kind (queue/storage/compute/saas/db_managed/other) for a
+    call already classified 'external' — same vendor list as classify_target_kind,
+    used only when the LLM's own per-call judgment came back 'unknown'/absent."""
+    lowered = (name or "").lower()
+    for vendor, resource_type in _VENDOR_RESOURCE_TYPES.items():
+        if vendor in lowered:
+            return resource_type
+    return "unknown"
 
 
 def _matches_naming_convention(name: str, known_service_names: set[str]) -> bool:

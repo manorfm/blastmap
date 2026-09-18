@@ -64,9 +64,14 @@
             "type": "string",
             "enum": ["internal", "external", "unknown"],
             "description": "internal: another service of this same system/architecture (e.g. a bare service name, an internal hostname or env var like PAYMENTS_SERVICE_URL, a service-discovery/RPC client). external: a third-party vendor/SaaS (a vendor SDK import like stripe/twilio/boto3, a public vendor API domain, vendor-specific auth). unknown: can't tell from the evidence."
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": ["queue", "storage", "compute", "saas", "db_managed", "other", "not_applicable"],
+            "description": "Only when target_kind is 'external': what kind of resource it is (queue: SQS/SNS/pub-sub; storage: S3/blob storage; compute: a generic cloud API not fitting another bucket; saas: a third-party product like Stripe/Twilio; db_managed: a managed database/auth service like Firebase/DynamoDB; other: external but none of these fit). Use 'not_applicable' when target_kind is 'internal' or 'unknown'."
           }
         },
-        "required": ["to_service_name", "call_kind", "reason", "data_needed", "purpose_kind", "confidence", "target_kind"],
+        "required": ["to_service_name", "call_kind", "reason", "data_needed", "purpose_kind", "confidence", "target_kind", "resource_type"],
         "additionalProperties": false
       }
     },

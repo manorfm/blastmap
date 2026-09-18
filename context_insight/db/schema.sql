@@ -62,15 +62,26 @@ CREATE TABLE IF NOT EXISTS service_calls (
     purpose_kind    TEXT CHECK (purpose_kind IN ('validation', 'data_fetch', 'enrichment', 'notification', 'other')),
     confidence      REAL,
     target_kind     TEXT CHECK (target_kind IN ('internal', 'external', 'unknown')) DEFAULT 'unknown',
+    -- Only meaningful when target_kind = 'external': what kind of resource it is.
+    -- Same precedence as target_kind — LLM judgment on real code first, the
+    -- deterministic vendor-keyword list (integration_heuristics.classify_resource_type)
+    -- only fills gaps left 'unknown'.
+    resource_type   TEXT CHECK (resource_type IN ('queue', 'storage', 'compute', 'saas', 'db_managed', 'other', 'not_applicable')) DEFAULT 'not_applicable',
     evidence_json   TEXT,
     updated_at      TEXT NOT NULL
 );
 
+-- `engine` is the concrete database (postgres, mysql, mongodb, dynamodb, redis,
+-- elasticsearch, sqlite), inferred by the LLM the same way messages.provider is —
+-- an ORM model/entity definition (SQLAlchemy, JPA, GORM) rarely names its own engine,
+-- so this leans on the service's dependency manifest and config files as evidence.
+-- 'unknown' means neither resolved it; never a guess.
 CREATE TABLE IF NOT EXISTS persistence_entities (
     id            INTEGER PRIMARY KEY,
     service_id    INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
     name          TEXT NOT NULL,
     kind          TEXT CHECK (kind IN ('sql_table', 'document', 'cache', 'other')),
+    engine        TEXT NOT NULL DEFAULT 'unknown',
     schema_json   TEXT,
     evidence_json TEXT,
     updated_at    TEXT NOT NULL,

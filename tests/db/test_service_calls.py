@@ -83,6 +83,54 @@ def test_target_kind_is_persisted_and_ground_truth_overrides_llm_guess(tmp_path:
     assert calls_after["shipping-service"] == "internal"  # unchanged, still a heuristic guess
 
 
+def test_resource_type_is_persisted_from_the_llm_result(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    checkout_id = services_repo.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
+    api_id = apis_repo.upsert_api(conn, checkout_id, "POST", "/checkout", "s", "d", [], EVIDENCE)
+    service_calls_repo.replace_calls_for_api(
+        conn, checkout_id, api_id,
+        [{
+            "to_service_name": "Stripe API", "call_kind": "http", "reason": "charge card",
+            "data_needed": [], "purpose_kind": "data_fetch", "confidence": 0.9,
+            "target_kind": "external", "resource_type": "saas",
+        }],
+        EVIDENCE,
+    )
+
+    calls = service_calls_repo.list_calls_for_api(conn, api_id)
+    assert calls[0]["resource_type"] == "saas"
+
+
+def test_resource_type_fallback_only_fills_external_calls_the_llm_left_unresolved(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    checkout_id = services_repo.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
+    api_id = apis_repo.upsert_api(conn, checkout_id, "POST", "/checkout", "s", "d", [], EVIDENCE)
+    service_calls_repo.replace_calls_for_api(
+        conn, checkout_id, api_id,
+        [
+            {
+                # LLM already resolved it — the vendor heuristic must never override this.
+                "to_service_name": "AWS S3", "call_kind": "http", "reason": "upload receipt",
+                "data_needed": [], "purpose_kind": "other", "confidence": 0.9,
+                "target_kind": "external", "resource_type": "compute",
+            },
+            {
+                # LLM couldn't tell (or the field was absent) — fallback should fill it.
+                "to_service_name": "Twilio SMS", "call_kind": "http", "reason": "send code",
+                "data_needed": [], "purpose_kind": "notification", "confidence": 0.7,
+                "target_kind": "external",
+            },
+        ],
+        EVIDENCE,
+    )
+
+    service_calls_repo.reconcile_service_call_targets(conn)
+
+    calls = {c["to_service_name"]: c["resource_type"] for c in service_calls_repo.list_calls_for_api(conn, api_id)}
+    assert calls["AWS S3"] == "compute"  # untouched, LLM's own call stands
+    assert calls["Twilio SMS"] == "saas"  # filled in by the vendor-keyword fallback
+
+
 def test_reconcile_scoped_to_one_service_leaves_other_services_rows_untouched(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     # "gatewaytarget" deliberately has no "-service"/"-svc" suffix, so the naming-

@@ -142,6 +142,29 @@ def collect_config_excerpts(folder: Path) -> list[CodeExcerpt]:
     return excerpts
 
 
+def engine_hint_from_manifest(folder: Path, manifest_names: tuple[str, ...], driver_keywords: dict[str, str]) -> str | None:
+    """Best-effort database engine guess from the service's own dependency manifest
+    (requirements.txt, package.json, pom.xml, go.mod, ...) — an ORM model/entity
+    definition (SQLAlchemy, JPA, GORM) rarely names its engine, but the driver package a
+    project depends on almost always does, and declaring a dependency is a much stronger,
+    cheaper signal than scanning source text for it. `driver_keywords` maps a substring
+    to look for -> the engine it implies (e.g. {"psycopg2": "postgres"}); the first match
+    found, in the order given, wins.
+    """
+    for name in manifest_names:
+        path = folder / name
+        if not path.is_file():
+            continue
+        text = read_text(path)
+        if not text:
+            continue
+        lowered = text.lower()
+        for keyword, engine in driver_keywords.items():
+            if keyword.lower() in lowered:
+                return engine
+    return None
+
+
 def provider_from_match(match: re.Match[str], exclude: str = "channel") -> str | None:
     """Which named alternative fired in a regex built from `(?P<name>...)` branches —
     used instead of a side lookup table (matched text -> provider) so the provider tag
