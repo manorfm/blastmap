@@ -185,11 +185,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_backend_args(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--backend", choices=["claude", "codex"], default=None)
-        p.add_argument("--model", default=None)
+        p.add_argument("--backend", choices=["claude", "codex"], default=None, help="LLM backend to shell out to headless (default: whichever CLI is on PATH)")
+        p.add_argument("--model", default=None, help="Override the backend's default model")
         p.add_argument("--claude-bare", action="store_true", help="Use ANTHROPIC_API_KEY billing instead of the Claude Code subscription session")
         p.add_argument("--codex-api-key", action="store_true", help="Use CODEX_API_KEY billing instead of the ChatGPT subscription session")
-        p.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+        p.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
 
     p_index = sub.add_parser(
         "index", help="Index a monorepo root or a single service repo",
@@ -201,7 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_index.add_argument("path")
+    p_index.add_argument("path", help="A single service's root, or a monorepo root containing several")
     p_index.add_argument("--service", default=None, help="Override the inferred service name (only valid for a single-service path)")
     p_index.add_argument("--repository-name", default=None, help="Explicit repository name; avoids collisions when indexing several repos into one shared DB")
     p_index.add_argument("--force", action="store_true", help="Regenerate everything, ignoring file-hash skip")
@@ -213,13 +213,13 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="example:\n  context-insight update orders-service\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_update.add_argument("service")
-    p_update.add_argument("--force", action="store_true")
+    p_update.add_argument("service", help="Exact name shown by `context-insight list`")
+    p_update.add_argument("--force", action="store_true", help="Regenerate everything, ignoring file-hash skip")
     add_backend_args(p_update)
     p_update.set_defaults(func=_cmd_update)
 
     p_list = sub.add_parser("list", help="List indexed services")
-    p_list.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    p_list.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
     p_list.set_defaults(func=_cmd_list)
 
     p_status = sub.add_parser(
@@ -227,8 +227,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="examples:\n  context-insight status\n  context-insight status orders-service\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_status.add_argument("service", nargs="?", default=None)
-    p_status.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    p_status.add_argument("service", nargs="?", default=None, help="Show one service's indexing history instead of the whole DB's")
+    p_status.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
     p_status.set_defaults(func=_cmd_status)
 
     p_export = sub.add_parser(
@@ -240,10 +240,10 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_export.add_argument("format", choices=["md", "mermaid"])
-    p_export.add_argument("--out", default="docs")
-    p_export.add_argument("--service", default=None)
-    p_export.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    p_export.add_argument("format", choices=["md", "mermaid"], help="md: human-readable docs; mermaid: topology.mmd + one er.mmd per service")
+    p_export.add_argument("--out", default="docs", help="Output directory (default: docs)")
+    p_export.add_argument("--service", default=None, help="Export only this service instead of every indexed one")
+    p_export.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
     p_export.set_defaults(func=_cmd_export)
 
     p_analyze = sub.add_parser(
@@ -256,7 +256,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_analyze.add_argument("task")
+    p_analyze.add_argument("task", help="Free-text engineering task/epic, e.g. \"Add support for Pix in checkout\"")
     p_analyze.add_argument("--hint-services", nargs="+", default=None, help="Anchor the search on these services even without a keyword match")
     add_backend_args(p_analyze)
     p_analyze.set_defaults(func=_cmd_analyze)
@@ -269,11 +269,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_verify.add_argument("run_id", type=int)
+    p_verify.add_argument("run_id", type=int, help="run_id from a prior find_change_surface/analyze response")
     p_verify.add_argument("--repository", required=True, help="Repository name, as shown by `context-insight list`/`--repository-name` at index time")
     p_verify.add_argument("--since", required=True, help="Commit the run was made against; actual changes are `git diff --since..HEAD`")
     p_verify.add_argument("--record-feedback", action="store_true", help="Auto-record confirmed/rejected feedback for the predicted services")
-    p_verify.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    p_verify.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
     p_verify.set_defaults(func=_cmd_verify)
 
     p_serve = sub.add_parser(
@@ -285,7 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_serve.add_argument("--transport", choices=["stdio"], default="stdio")
+    p_serve.add_argument("--transport", choices=["stdio"], default="stdio", help="MCP transport (only stdio is supported today)")
     add_backend_args(p_serve)  # find_change_surface is the only tool that uses a backend
     p_serve.set_defaults(func=_cmd_serve)
 

@@ -1,6 +1,7 @@
 """Exercises the CLI commands directly (not via subprocess), faking only backend
 resolution so `index`/`update` never shell out to a real `claude`/`codex` CLI.
 """
+import argparse
 from pathlib import Path
 
 import pytest
@@ -168,6 +169,16 @@ def test_export_command_writes_mermaid_diagrams(tmp_path: Path, capsys):
     assert (out_dir / "topology.mmd").exists()
     assert "graph TD" in (out_dir / "topology.mmd").read_text()
     assert "wrote" in capsys.readouterr().out
+
+
+def test_every_subcommand_argument_documents_itself():
+    parser = cli.build_parser()
+    subparsers_action = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    for command, subparser in subparsers_action.choices.items():
+        for action in subparser._actions:
+            if isinstance(action, argparse._HelpAction):
+                continue
+            assert action.help, f"{command}'s {action.dest!r} argument has no --help text"
 
 
 def test_help_leads_with_the_index_ask_verify_mental_model(capsys):

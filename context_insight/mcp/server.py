@@ -15,7 +15,7 @@ from context_insight.mcp import queries
 
 def build_server(db_path: Path | None = None, backend: LLMBackend | None = None) -> MCPServer:
     mcp = MCPServer("context-insight")
-    # Only find_change_surface uses a backend; the other 6 tools are pure SQLite
+    # Only find_change_surface uses a backend; the other 13 tools are pure SQLite
     # reads and never touch it. Resolved once here rather than per-call since
     # constructing a backend is cheap (no subprocess runs until .generate() is called).
     resolved_backend = backend or resolve_backend(None)
@@ -48,12 +48,15 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
     @mcp.tool()
     def describe_service(service: str) -> dict:
         """Full picture of one microservice: description, why it calls other services/queues
-        (with the business reason and data needed), its APIs as one-liners, and what it
-        persists/publishes by name only (use describe_persistence/describe_messages for the
-        full field-level schema). Includes freshness (indexed commit vs. the repository's
-        current commit, and whether that means this knowledge may be stale). Call this
-        once you know which service is relevant. Next: describe_api for a specific
-        endpoint's contract, or get_relationships to see who else depends on it."""
+        (with the business reason, data needed, and target_kind/resource_type when the
+        target is external), its components (classes/controllers/modules, each with a
+        summary), its APIs as one-liners, and what it persists/publishes by name only
+        (use describe_persistence/describe_messages for the full field-level schema,
+        including engine/provider). Includes freshness (indexed commit vs. the
+        repository's current commit, and whether that means this knowledge may be
+        stale). Call this once you know which service is relevant. Next: describe_api
+        for a specific endpoint's contract, or get_relationships to see who else
+        depends on it."""
         with closing(_conn()) as conn:
             return queries.describe_service(conn, service)
 
@@ -77,19 +80,21 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
     @mcp.tool()
     def describe_persistence(service: str) -> dict:
         """Full field-level schema of everything one microservice persists (tables/
-        documents/caches) — describe_service only names these, this returns the
-        actual fields. Call this before changing anything that reads or writes
-        this service's storage."""
+        documents/caches), including the concrete engine (postgres/mysql/mongodb/
+        dynamodb/redis/elasticsearch/sqlite/unknown) — describe_service only names
+        these, this returns the actual fields. Call this before changing anything
+        that reads or writes this service's storage."""
         with closing(_conn()) as conn:
             return queries.describe_persistence(conn, service)
 
     @mcp.tool()
     def describe_messages(service: str) -> dict:
         """Full field-level shape of async messages one microservice publishes/
-        consumes — describe_service only names the channels, this returns the
-        actual payload shape. Call this before changing an event's contract; then
-        check get_relationships/find_change_surface's contracts_at_risk for who
-        else consumes it."""
+        consumes, including the concrete broker (kafka/rabbitmq/sqs/sns/service_bus/
+        activemq/nats/unknown) — describe_service only names the channels, this
+        returns the actual payload shape. Call this before changing an event's
+        contract; then check get_relationships/find_change_surface's
+        contracts_at_risk for who else consumes it."""
         with closing(_conn()) as conn:
             return queries.describe_messages(conn, service)
 

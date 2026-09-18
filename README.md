@@ -1,4 +1,4 @@
-# context_insight
+# context-insight
 
 Task-aware change intelligence for AI coding agents: given an engineering task, what
 is the smallest architectural surface an agent needs to understand before touching
@@ -19,7 +19,7 @@ code — with evidence, confidence and freshness made explicit, instead of impli
 
 Agentes de IA que precisam entender um sistema de microsserviços hoje só têm dois
 caminhos: ler o código-fonte inteiro (caro em tokens, lento) ou depender de
-documentação manual que fica desatualizada. O `context_insight` "tritura" uma ou várias
+documentação manual que fica desatualizada. O `context-insight` "tritura" uma ou várias
 árvores de código — repositório por repositório, ou um monorepo de uma vez, de forma
 cumulativa no mesmo banco — usa um LLM (Claude Code ou Codex, via CLI headless,
 usando sua assinatura em vez de API paga) para sintetizar uma documentação enxuta e
@@ -29,7 +29,7 @@ tool calls MCP com drill-down progressivo: lista serviços → descreve um servi
 lista APIs → detalha uma API.
 
 O foco é a camada que falta entre "ler o código-fonte" e "perguntar a um humano", em
-duas frentes:
+três frentes:
 
 - **Por que**, não só o quê: para cada API, documentar por que ela chama outro
   serviço/fila (motivo de negócio), o que valida, quem pode chamar, e o que persiste —
@@ -40,6 +40,10 @@ duas frentes:
   (`find_change_surface`, ver abaixo). O produto final não é "mais contexto", é
   **contexto mais relevante**: sempre que uma decisão for entre devolver mais
   informação ou informação mais relevante, a resposta certa é a segunda.
+- **Saúde arquitetural do sistema como um todo**: além de "como um serviço funciona",
+  responder "esse sistema tem ciclo de dependência?", "algum serviço virou um
+  bottleneck?", "dois serviços estão sem querer compartilhando o mesmo banco?"
+  (`find_architecture_smells`, ver abaixo) — sinais estruturais, não julgamento.
 
 Toda resposta separa três camadas explicitamente, e nunca as confunde:
 
@@ -54,25 +58,46 @@ Toda resposta separa três camadas explicitamente, e nunca as confunde:
   conhecimento indexado pode estar **desatualizado** (`freshness`) — ausência de
   informação nunca vira silenciosamente "não existe" ou "não é afetado".
 
+### Geração hierárquica: endpoint → componente → serviço
+
+A geração de cada serviço é composta de baixo pra cima, não gerada em paralelo a
+partir de fragmentos isolados:
+
+1. **Endpoint** (unidade mais fina) — detalhado a partir do seu próprio recorte de
+   código, mais um salto de navegação local (funções chamadas dentro do handler,
+   resolvidas no mesmo arquivo) quando existe.
+2. **Componente** (classe/controller/módulo) — agrupa os endpoints que pertencem à
+   mesma classe (ou ao mesmo arquivo, quando o roteamento é por função solta, como é
+   comum em FastAPI/Flask) e sintetiza um resumo **a partir dos resumos de endpoint já
+   gerados**, nunca relendo código bruto de novo.
+3. **Serviço** (overview) — composto por último, a partir dos resumos de componente,
+   não mais a partir só da árvore de pastas lida antes de qualquer endpoint ser
+   analisado.
+
+Isso resolve dois problemas do modelo anterior (achatado, tudo gerado em paralelo):
+atribuição errada de chamada (um endpoint via chamadas de outro só porque estavam no
+mesmo serviço) e overview superficial (escrito antes de qualquer detalhe existir).
+
 ## Uso básico
 
 ```bash
-context_insight index /caminho/do/repositorio --backend claude   # ou --backend codex
-context_insight index /outro/repositorio --repository-name outro-repo  # múltiplos repos no mesmo DB, cumulativo
-context_insight list
-context_insight status [servico]
-context_insight export md --out docs/
-context_insight serve --backend claude   # servidor MCP (stdio); backend usado só por find_change_surface
-context_insight analyze "Adicionar suporte a Pix no checkout" --backend claude   # roda find_change_surface direto, sem sessão MCP
-context_insight verify <run_id> --repository <nome> --since <commit>   # confere uma predição contra o git diff real
+context-insight index /caminho/do/repositorio --backend claude   # ou --backend codex
+context-insight index /outro/repositorio --repository-name outro-repo  # múltiplos repos no mesmo DB, cumulativo
+context-insight list
+context-insight status [servico]
+context-insight export md --out docs/
+context-insight export mermaid --out docs/   # diagrama de topologia + ER por serviço
+context-insight serve --backend claude   # servidor MCP (stdio); backend usado só por find_change_surface
+context-insight analyze "Adicionar suporte a Pix no checkout" --backend claude   # roda find_change_surface direto, sem sessão MCP
+context-insight verify <run_id> --repository <nome> --since <commit>   # confere uma predição contra o git diff real
 ```
 
-Cada subcomando é autoexplicativo via `--help` (ex. `context_insight index --help`), com um
-exemplo pronto para copiar. `context_insight --help` explica o fluxo completo: **index → ask
+Cada subcomando é autoexplicativo via `--help` (ex. `context-insight index --help`), com um
+exemplo pronto para copiar. `context-insight --help` explica o fluxo completo: **index → ask
 → verify**.
 
 O conhecimento é cumulativo por natureza: dá pra indexar um repositório de cada vez
-(`context_insight index <repo1>`, depois `context_insight index <repo2> --repository-name <repo2>`,
+(`context-insight index <repo1>`, depois `context-insight index <repo2> --repository-name <repo2>`,
 ...) conforme eles forem ficando disponíveis, ou apontar para uma raiz de monorepo de
 uma vez só — o mesmo banco SQLite acumula os dois casos sem colisão de nomes, e
 `find_change_surface`/`search` sempre enxergam tudo que já foi indexado até aquele
@@ -96,8 +121,9 @@ descrição; a fixture de testes "checkout/payments/Pix" para `find_change_surfa
 ```
 
 **`describe_service("orders-service")`** — descrição completa + dependências com o
-motivo de negócio (`reason`, `data_needed`, `purpose_kind`) + APIs/persistência/
-mensageria só como referência (nome, sem detalhe de campo) + `freshness`:
+motivo de negócio (`reason`, `data_needed`, `purpose_kind`) + os componentes que
+compõem o serviço + APIs/persistência/mensageria só como referência (nome, sem
+detalhe de campo) + `freshness`:
 ```json
 {
   "name": "orders-service",
@@ -105,15 +131,18 @@ mensageria só como referência (nome, sem detalhe de campo) + `freshness`:
   "long_desc": "orders-service is a Python microservice built on FastAPI, exposing a single POST /orders endpoint that creates new orders. Requests must carry a Bearer token in the Authorization header (...) it publishes events to a Kafka topic for downstream consumers, giving it a role as both an orchestrator of a synchronous checkout flow and a producer in an event-driven architecture.",
   "stack": "python",
   "calls": [
-    {"to_service_name": "payments-service", "call_kind": "http", "reason": "to charge the customer's payment method for the order amount", "data_needed": ["amount", "currency", "payment_token"], "purpose_kind": "other"},
-    {"to_service_name": "inventory-service", "call_kind": "http", "reason": "to check current stock for the requested SKU before confirming the order", "data_needed": ["sku", "qty"], "purpose_kind": "validation"},
-    {"to_service_name": "order_created", "call_kind": "queue_publish", "reason": "to notify downstream consumers that a new order was created", "data_needed": ["order_id", "sku", "qty"], "purpose_kind": "notification"}
+    {"to_service_name": "payments-service", "call_kind": "http", "reason": "to charge the customer's payment method for the order amount", "data_needed": ["amount", "currency", "payment_token"], "purpose_kind": "other", "target_kind": "internal", "resource_type": "not_applicable"},
+    {"to_service_name": "inventory-service", "call_kind": "http", "reason": "to check current stock for the requested SKU before confirming the order", "data_needed": ["sku", "qty"], "purpose_kind": "validation", "target_kind": "internal", "resource_type": "not_applicable"},
+    {"to_service_name": "order_created", "call_kind": "queue_publish", "reason": "to notify downstream consumers that a new order was created", "data_needed": ["order_id", "sku", "qty"], "purpose_kind": "notification", "target_kind": "unknown", "resource_type": "not_applicable"}
   ],
   "apis": [
     {"method": "POST", "path": "/orders", "summary": "Creates a new order by charging the customer's payment method and checking stock availability, then publishes an order-created event."}
   ],
-  "persists": [{"name": "orders", "kind": "sql_table"}],
-  "messages": [{"direction": "publishes", "channel": "order_created", "description": "Published after a payment charge succeeds and inventory stock is confirmed; signals that a new order has been created."}],
+  "components": [
+    {"name": "main", "file_path": "main.py", "summary": "Function-based FastAPI routing with a single order-creation endpoint; no class wraps it."}
+  ],
+  "persists": [{"name": "orders", "kind": "sql_table", "engine": "postgres"}],
+  "messages": [{"direction": "publishes", "channel": "order_created", "provider": "kafka", "description": "Published after a payment charge succeeds and inventory stock is confirmed; signals that a new order has been created."}],
   "freshness": {"indexed_at": "2026-03-01T12:00:00+00:00", "source_commit": "a1b2c3d", "current_commit": "a1b2c3d", "stale": false}
 }
 ```
@@ -121,6 +150,10 @@ mensageria só como referência (nome, sem detalhe de campo) + `freshness`:
 agente deveria considerar reindexar antes de confiar demais no conteúdo. `stale: null`
 significa que não dá pra saber (repositório não é git, ou nunca foi indexado com um
 commit associado) — nunca tratado como "está tudo bem", nem como "está desatualizado".
+
+`components` reflete a geração hierárquica descrita acima: quando o roteamento é por
+função solta (sem classe), o componente é o próprio arquivo (`"name": "main"`); quando
+há uma classe/controller, o componente leva o nome dela.
 
 **`describe_api("orders-service", "POST", "/orders")`** — o nível mais detalhado:
 formato do request e da resposta campo a campo (`request_shape` inclui `required`
@@ -146,8 +179,8 @@ autorização:
     {"field": "qty", "type_desc": "number, quantity", "required": true}
   ],
   "calls": [
-    {"to_service_name": "payments-service", "call_kind": "http", "reason": "to charge the customer's payment method for the order amount", "data_needed": ["amount", "currency", "payment_token"], "purpose_kind": "other"},
-    {"to_service_name": "inventory-service", "call_kind": "http", "reason": "to check current stock for the requested SKU before confirming the order", "data_needed": ["sku", "qty"], "purpose_kind": "validation"}
+    {"to_service_name": "payments-service", "call_kind": "http", "reason": "to charge the customer's payment method for the order amount", "data_needed": ["amount", "currency", "payment_token"], "purpose_kind": "other", "target_kind": "internal", "resource_type": "not_applicable"},
+    {"to_service_name": "inventory-service", "call_kind": "http", "reason": "to check current stock for the requested SKU before confirming the order", "data_needed": ["sku", "qty"], "purpose_kind": "validation", "target_kind": "internal", "resource_type": "not_applicable"}
   ],
   "validations": [
     {"kind": "authorization", "description": "Requires an Authorization header starting with \"Bearer \"; otherwise returns 401 with detail \"missing bearer token\"."},
@@ -155,16 +188,21 @@ autorização:
   ]
 }
 ```
+`resource_type` só é significativo quando `target_kind` é `"external"` (ver seção
+"Interno vs. externo" abaixo) — vale `"not_applicable"` nos demais casos, nunca vazio.
 
 `describe_persistence` e `describe_messages` seguem o mesmo padrão, mas devolvem o
 schema completo campo a campo (o que `describe_service` só referencia pelo nome) —
-são chamados à parte de propósito, pra manter `describe_service` enxuto.
+são chamados à parte de propósito, pra manter `describe_service` enxuto. Ambos também
+carregam `engine`/`provider` (ver "Banco de dados e mensageria: engine e provider",
+abaixo).
 
-## System Intelligence: relacionamentos e change surface
+## System Intelligence: relacionamentos, smells e change surface
 
 Tools adicionais vão além de "como um serviço funciona" e respondem "o que está
-conectado a quê", "como A chega em B", "o que essa tarefa provavelmente afeta" e "a
-predição de ontem se confirmou de verdade?":
+conectado a quê", "como A chega em B", "esse sistema tem algum problema estrutural?",
+"o que essa tarefa provavelmente afeta" e "a predição de ontem se confirmou de
+verdade?":
 
 **`get_relationships("payments-service", direction="both")`** — grafo de 1 salto ao
 redor de um serviço: chamadas que ele faz (outbound), chamadas que outros serviços
@@ -203,7 +241,41 @@ serviços, andando por `service_calls` (outbound) e vínculos de fila (publish�
 ```
 Se não houver caminho dentro de `max_hops` (padrão 6), devolve `{"path": [], "reachable": false, "note": "..."}`.
 
-### Interno vs. externo (`target_kind`)
+**`find_architecture_smells()`** — achados estruturais do sistema inteiro, recomputados
+a cada `index`/`update` a partir só do que já foi indexado (`service_calls`,
+`persistence_entities`) — **sem chamar LLM**, puro SQL + uma passada de Tarjan
+(componentes fortemente conexos) para detectar ciclo. Sempre em linguagem de risco,
+nunca um veredito:
+```json
+{
+  "run_id": 3,
+  "findings": [
+    {"kind": "cycle", "severity": "warning", "services": ["checkout-service", "payments-service"],
+     "reason": "checkout-service -> payments-service -> checkout-service form a circular dependency...",
+     "detail": {}},
+    {"kind": "fan_in", "severity": "info", "services": ["payments-service"],
+     "reason": "4 other internal services call payments-service directly — a potential bottleneck or single point of coupling.",
+     "detail": {"count": 4}},
+    {"kind": "shared_database", "severity": "warning", "services": ["orders-service", "billing-service"],
+     "reason": "orders-service, billing-service all persist an entity named 'orders' on postgres — likely sharing a database, which couples their schemas.",
+     "detail": {"entity": "orders", "engine": "postgres"}},
+    {"kind": "duplicate_external_integration", "severity": "info", "services": ["checkout-service", "refunds-service"],
+     "reason": "checkout-service, refunds-service each integrate with 'Stripe API' independently — worth checking whether that's intentional or should be consolidated behind one service.",
+     "detail": {"vendor": "Stripe API"}}
+  ]
+}
+```
+4 detectores hoje: `cycle` (dependência circular entre serviços internos),
+`fan_in`/`fan_out` (serviço com número desproporcional de dependentes/dependências
+diretas — limiar inicial de 4, não um valor treinado), `shared_database` (mesma
+entidade nomeada, mesmo engine, serviços diferentes) e
+`duplicate_external_integration` (dois+ serviços integrando com o mesmo vendor de
+forma independente). Deliberadamente fora de escopo ainda: marcação de
+legado/strangler-fig, severidade direcional de ciclo (ciclo envolvendo um serviço
+legado é mais grave que entre dois pares) e tendência entre execuções sucessivas —
+ver "Limitações conhecidas".
+
+### Interno vs. externo (`target_kind`, `resource_type`)
 
 Toda chamada (`service_calls`) carrega `target_kind`: `internal` (outro serviço deste
 mesmo sistema), `external` (uma integração de terceiro/vendor) ou `unknown`. A
@@ -218,12 +290,38 @@ classificação usa dois sinais, nessa ordem de precedência:
    nome que segue o mesmo padrão de nomenclatura dos serviços já indexados (ex. sufixo
    `-service`) → `internal` (não mapeado ainda).
 
+Quando `target_kind` é `external`, a chamada também carrega `resource_type`
+(`queue`/`storage`/`compute`/`saas`/`db_managed`/`other`/`not_applicable`) — mesma
+precedência: LLM primeiro, a mesma lista de vendors (agora também mapeada pra um
+tipo de recurso) só preenche a lacuna quando o LLM devolveu `unknown`/ausente.
+
 Essa distinção alimenta dois buckets em `find_change_surface`:
 - **`external_integrations`**: integrações de terceiro alcançáveis pelos serviços
   `primary`/`secondary` — o agente pode precisar mexer nessa integração também.
 - **`unmapped_internal_hint`**: dependências que parecem internas mas ainda não foram
   indexadas — sinal de "indexe mais do sistema pra ter o quadro completo". Cada uma
   também aparece, restated, em `unknowns` (ver abaixo).
+
+### Banco de dados e mensageria: `engine` e `provider`
+
+Um modelo/entidade ORM (SQLAlchemy, JPA, GORM) raramente revela sozinho qual banco
+está por trás — isso normalmente só existe numa connection string ou no manifesto de
+dependências. `persistence_entities.engine`
+(`postgres`/`mysql`/`mongodb`/`dynamodb`/`redis`/`elasticsearch`/`sqlite`/`unknown`) e
+`messages.provider`
+(`kafka`/`rabbitmq`/`sqs`/`sns`/`service_bus`/`activemq`/`nats`/`unknown`) seguem a
+mesma precedência de `target_kind`: o LLM decide a partir da evidência real, com dois
+tipos de pista best-effort quando o código sozinho não basta:
+- **Manifesto de dependências** (`discovery/scan_helpers.engine_hint_from_manifest`):
+  `psycopg2` no `requirements.txt` sugere Postgres, `mongoose` no `package.json`
+  sugere MongoDB, etc. — presença de dependência é um sinal mais barato e mais
+  confiável que ler texto de código à procura do nome do driver.
+- **Arquivos de configuração** (`application.properties`/`.yml`, `.env`,
+  `docker-compose.yml`) — usados especialmente quando o código só mostra uma
+  abstração transport-agnostic (JMS, Celery, NestJS microservices, Spring Cloud
+  Stream) cujo broker concreto só existe fora do código.
+
+Quando nada resolve, o valor fica honestamente `unknown` — nunca um chute.
 
 **`find_change_surface("Adicionar suporte a Pix no checkout")`** — a primeira tool que
 um agente deveria chamar ao receber um épico, antes de abrir qualquer arquivo. Usa
@@ -320,7 +418,7 @@ precisou). Chamadas futuras de `find_change_surface` para esse mesmo serviço t�
 feedbacks acumulados, e como um ajuste leve (30%) sobre o palpite fresco do LLM, nunca
 substituindo o julgamento feito com a evidência da tarefa atual.
 
-### Ground truth via git: `verify_change_surface` / `context_insight verify`
+### Ground truth via git: `verify_change_surface` / `context-insight verify`
 
 Em vez de depender só do agente lembrar de reportar o resultado, dá pra confrontar
 uma predição passada contra o `git diff` real de um repositório desde um commit:
@@ -343,19 +441,44 @@ A versão MCP é só leitura (não grava feedback sozinha); a CLI tem um
 `--record-feedback` que, opcionalmente, grava `confirmed`/`rejected` automaticamente
 a partir do resultado:
 ```bash
-context_insight verify 1 --repository my-monorepo --since a1b2c3d --record-feedback
+context-insight verify 1 --repository my-monorepo --since a1b2c3d --record-feedback
 ```
 Cada verificação fica salva (`change_surface_verifications`) e aparece em
-`context_insight status`. É intencionalmente escopada a **um repositório por vez** — comparar
-vários históricos de git não relacionados sob um único `--since` não faria sentido;
-num setup cumulativo com vários repositórios, roda-se um `verify` por repositório,
-do mesmo jeito que a indexação também é feita um repositório de cada vez.
+`context-insight status`. É intencionalmente escopada a **um repositório por vez** —
+comparar vários históricos de git não relacionados sob um único `--since` não faria
+sentido; num setup cumulativo com vários repositórios, roda-se um `verify` por
+repositório, do mesmo jeito que a indexação também é feita um repositório de cada vez.
+
+## Diagramas (Mermaid)
+
+`context-insight export mermaid --out docs/` gera:
+- **`topology.mmd`** — um `graph TD` do sistema inteiro: cada serviço indexado é um
+  nó, cada vendor externo alcançado é um nó arredondado, arestas de `service_calls` e
+  de `MESSAGE_LINK` conectam tudo. Serviços envolvidos num ciclo
+  (`find_architecture_smells`) saem destacados com um estilo próprio.
+- **`<serviço>/er.mmd`** — um `erDiagram` por serviço, com as entidades persistidas e
+  seus campos. Sem linhas de relação entre entidades — o índice ainda não rastreia
+  chave estrangeira (ver "Limitações conhecidas") — o próprio arquivo diz isso
+  explicitamente em vez de inventar uma relação.
+
+Texto, não imagem, de propósito: um `.mmd` é versionável, aparece no diff de um PR, e
+renderiza nativo no GitHub/GitLab/na maioria dos editores — uma imagem renderizada
+seria uma segunda fonte de verdade que pode ficar desatualizada sem ninguém notar.
+Ambos gerados 100% a partir do SQLite, sem custo de LLM.
 
 ## O que já está implementado
 
 - **Descoberta por heurística** (regex/assinatura de arquivo, sem parser AST completo)
   para 4 stacks: Node.js/TypeScript (Express/NestJS), Python (FastAPI/Flask/Django),
-  JVM (Java/Kotlin + Spring Boot) e Go.
+  JVM (Java/Kotlin + Spring Boot) e Go. Cobre HTTP/gRPC, Kafka/RabbitMQ/SQS/SNS e
+  abstrações transport-agnostic (JMS, Celery, NestJS microservices, Spring Cloud
+  Stream) nos 4 stacks.
+- **Geração hierárquica** (endpoint → componente → serviço, ver "Ideia" acima):
+  atribuição de chamada escopada aos arquivos do próprio endpoint
+  (`EndpointHint.dependency_files()`), navegação de 1 salto pra função local chamada
+  dentro do handler (`extra_excerpts`, resolvida via `discovery.scan_helpers.resolve_local_calls`),
+  camada de componente (`components`) sintetizada a partir dos resumos de endpoint já
+  gerados, overview composto por último a partir dos resumos de componente.
 - **Geração plugável**: backend `claude` ou `codex`, ambos headless via CLI, usando a
   assinatura do usuário (não API paga) por padrão. Validação do JSON retornado contra
   schema, com 1 retry e isolamento de falha por unidade (uma falha não aborta o run).
@@ -363,31 +486,40 @@ do mesmo jeito que a indexação também é feita um repositório de cada vez.
   `find_change_surface` (`generation/llm_harness.py`).
 - **SQLite como fonte da verdade** — um System Knowledge Model único, com
   `repositories` (multi-repositório explícito, cumulativo) e `services.repository_id`,
-  e atualização incremental por hash de arquivo: só regenera a unidade (API/
-  persistência/mensageria/overview) cujo arquivo mudou. A reconciliação de
-  `target_kind`/`to_service_id` (`reconcile_service_call_targets`) é escopada ao
-  serviço recém-escrito durante a indexação — não mais uma varredura da tabela
-  inteira a cada API — e só roda sem escopo (tabela inteira) uma vez por serviço
-  novo, pra resolver chamadas de outros serviços que apontavam pra ele antes dele
-  existir.
+  e atualização incremental por hash de arquivo: só regenera a unidade (endpoint/
+  componente/persistência/mensageria/overview) cujo arquivo mudou. A reconciliação de
+  `target_kind`/`resource_type`/`to_service_id` (`reconcile_service_call_targets`) é
+  escopada ao serviço recém-escrito durante a indexação — não uma varredura da tabela
+  inteira a cada API — e só roda sem escopo (tabela inteira) uma vez por serviço novo,
+  pra resolver chamadas de outros serviços que apontavam pra ele antes dele existir.
 - **Camada de repositório dividida por agregado** (`db/repositories/`: `services`,
-  `apis`, `service_calls`, `persistence`, `messages`, `indexed_files`,
-  `change_surface`, `verification`, `index_runs`, `search`, `repositories`) — cada
-  módulo só conhece suas próprias tabelas; nenhum outro módulo roda SQL diretamente.
-- **Evidência persistida**: `apis`, `service_calls`, `persistence_entities` e
-  `messages` carregam `evidence_json` (arquivo + linha) — o mesmo trecho que o LLM viu
-  ao gerar aquela informação, não uma linha inventada depois. `service_calls` também
-  carrega `confidence` (0-1, avaliada pelo próprio LLM) e `target_kind`
-  (`internal`/`external`/`unknown` — LLM com o código real como sinal primário,
-  heurística determinística de vendor/nomenclatura como fallback só para `unknown`).
-  `apis` também carrega `request_shape` estruturado (campo, tipo, `required`),
-  espelhando o `response_shape` que já existia — a base de dados pra Contract
-  Intelligence mais profunda (comparar contratos entre indexações pra achar quebra de
-  verdade ainda não está implementado, ver "Limitações conhecidas").
+  `apis`, `components`, `service_calls`, `persistence`, `messages`, `architecture`,
+  `indexed_files`, `change_surface`, `verification`, `index_runs`, `search`,
+  `repositories`) — cada módulo só conhece suas próprias tabelas; nenhum outro módulo
+  roda SQL diretamente.
+- **Evidência persistida**: `apis`, `components`, `service_calls`,
+  `persistence_entities` e `messages` carregam `evidence_json` (arquivo + linha) — o
+  mesmo trecho que o LLM viu ao gerar aquela informação, não uma linha inventada
+  depois. `service_calls` também carrega `confidence` (0-1, avaliada pelo próprio
+  LLM), `target_kind` e `resource_type` (LLM com o código real como sinal primário,
+  heurística determinística de vendor/nomenclatura como fallback só para o que ficou
+  sem resolver). `persistence_entities` carrega `engine` e `messages` carrega
+  `provider`, mesma precedência. `apis` também carrega `request_shape` estruturado
+  (campo, tipo, `required`), espelhando o `response_shape` que já existia — a base de
+  dados pra Contract Intelligence mais profunda (comparar contratos entre indexações
+  pra achar quebra de verdade ainda não está implementado, ver "Limitações
+  conhecidas").
 - **Provenance e freshness explícitos**: `provenance` (`llm` vs. `deterministic`)
   formaliza a distinção fato/interpretação onde ela já era implícita; `freshness`
   (`generation/freshness.py`) compara o commit indexado com o commit atual do
   repositório sob demanda — nunca persistido, então nunca fica ele mesmo desatualizado.
+- **Smells arquiteturais determinísticos** (`generation/architecture.py`,
+  `find_architecture_smells`): ciclo (Tarjan/SCC), fan-in/fan-out desproporcional,
+  shared database, integração externa duplicada — recomputados a cada
+  `index`/`update`, sem LLM, versionados em `architecture_runs`/`architecture_findings`
+  do mesmo jeito que `change_surface_runs` já é.
+- **Export para Markdown** legível por humano e **Mermaid** (topologia + ER),
+  ambos gerados 100% a partir do SQLite.
 - **`find_change_surface` como Builder** (`generation/change_surface.ChangeSurfaceBuilder`):
   cada peça da resposta (achados, fluxo, integrações externas, contratos em risco,
   unknowns, freshness, próximas consultas recomendadas) é montada por um método
@@ -397,23 +529,22 @@ do mesmo jeito que a indexação também é feita um repositório de cada vez.
   de maior valor dado o que já foi computado, sem custo extra de LLM.
 - **`contracts_at_risk`**: consumidores de um evento publicado por um serviço
   relevante, reaproveitando o mesmo join de canal usado por `get_relationships`.
-- **Ground truth via git** (`generation/verification.py`, `context_insight verify`): compara
+- **Ground truth via git** (`generation/verification.py`, `context-insight verify`): compara
   uma predição passada contra o `git diff` real de um repositório, calcula
   precisão/recall e pode gravar feedback automaticamente.
-- **Servidor MCP** com 13 tools (uma escreve feedback; `verify_change_surface` grava um
+- **Servidor MCP** com 14 tools (uma escreve feedback; `verify_change_surface` grava um
   registro de auditoria mas não grava feedback sozinha): as 7 originais
   (`list_services`, `describe_service`, `list_apis`, `describe_api`,
-  `describe_persistence`, `describe_messages`, `search`) mais seis de
+  `describe_persistence`, `describe_messages`, `search`) mais sete de
   navegação/inferência/verificação: `list_repositories` (visão cumulativa por
-  repositório), `get_relationships`, `trace_flow`, `find_change_surface`,
-  `record_change_surface_feedback` e `verify_change_surface`.
+  repositório), `get_relationships`, `trace_flow`, `find_architecture_smells`,
+  `find_change_surface`, `record_change_surface_feedback` e `verify_change_surface`.
   Toda tool documenta no próprio docstring quando chamá-la, o que ela devolve e qual a
   próxima tool natural — a narrativa de progressive disclosure vive no schema MCP, não
   só no README. Registrável em qualquer cliente MCP (Claude Code, Codex, etc.).
 - **Busca por full-text (SQLite FTS5)**, não vector DB: `search` e a retrieval de
   candidatos do `find_change_surface` usam um índice FTS5 (prefix match + ranking
   `bm25`) reconstruído por serviço a cada indexação (`db.repositories.search`).
-- **Export para Markdown** legível por humano, gerado a partir do SQLite.
 - **CI** (GitHub Actions, `.github/workflows/ci.yml`): roda a suíte inteira em
   Python 3.11 e 3.12 a cada push/PR — nenhum teste depende de `claude`/`codex` CLI
   real (backend sempre fake ou dados seedados direto via `db.repositories.*`).
@@ -424,30 +555,34 @@ do mesmo jeito que a indexação também é feita um repositório de cada vez.
   `analyze` roda `find_change_surface` direto pela camada de domínio, sem precisar
   de uma sessão MCP — mesma função que o servidor MCP chama, sem lógica duplicada.
   `index` aceita `--repository-name` para indexar vários repositórios distintos no
-  mesmo DB, de forma cumulativa, sem colisão de nomes; `serve` aceita
-  `--backend`/`--model` (usados só por
+  mesmo DB, de forma cumulativa, sem colisão de nomes; `export` aceita `md` ou
+  `mermaid`; `serve` aceita `--backend`/`--model` (usados só por
   `find_change_surface`); `--version` reporta a versão instalada.
 - **Testes automatizados** (pytest, ciclo TDD, red→green→refactor): descoberta (3 das
   4 stacks), cada módulo de `db/repositories/` isoladamente, `generation/orchestrator.py`
   e `cli.py` com backend LLM fake rodando a descoberta real contra
-  `verify/sample_project`, `export/markdown.py`, `generation/change_surface.py`
-  (builder, retrieval, filtro anti-alucinação, recalibração de confiança, freshness,
-  provenance, unknowns, contratos em risco, próximas consultas), `generation/verification.py`
-  (precisão/recall contra um git real, num repositório de teste descartável), testes
-  de integração reais via protocolo MCP (stdio) para `get_relationships`, `trace_flow`,
-  `find_change_surface` e `verify_change_surface`, harness de eficiência de contexto
-  com orçamento de tamanho de resposta, e uma **suíte de auto-indexação**
-  (`tests/test_self_index_e2e.py`): o próprio `context_insight` indexa seu próprio código-fonte
-  e responde `find_change_surface` sobre si mesmo — a prova mais direta de que o
-  pipeline funciona fim-a-fim contra um código real e não trivial.
+  `verify/sample_project`, `export/markdown.py`, `export/mermaid.py`,
+  `generation/change_surface.py` (builder, retrieval, filtro anti-alucinação,
+  recalibração de confiança, freshness, provenance, unknowns, contratos em risco,
+  próximas consultas), `generation/architecture.py` (cycle/fan-in/fan-out/shared
+  database/duplicate integration), `generation/verification.py` (precisão/recall
+  contra um git real, num repositório de teste descartável), testes de integração
+  reais via protocolo MCP (stdio) para `get_relationships`, `trace_flow`,
+  `find_architecture_smells`, `find_change_surface` e `verify_change_surface`, harness
+  de eficiência de contexto com orçamento de tamanho de resposta, e uma **suíte de
+  auto-indexação** (`tests/test_self_index_e2e.py`): o próprio `context-insight` indexa
+  seu próprio código-fonte e responde `find_change_surface` sobre si mesmo — a prova
+  mais direta de que o pipeline funciona fim-a-fim contra um código real e não
+  trivial, e que já pegou bugs reais (ver "Desenvolvimento" abaixo).
 - **Versionamento manual e deliberado**: `python scripts/bump_version.py
-  <major|minor|patch>` atualiza `pyproject.toml` e `context_insight/__init__.py` juntos, como
-  parte do passo de release — sem hook de commit tentando adivinhar o bump certo.
+  <major|minor|patch>` atualiza `pyproject.toml` e `context_insight/__init__.py`
+  juntos, como parte do passo de release — sem hook de commit tentando adivinhar o
+  bump certo.
 
 ## Segurança
 
 Conteúdo de repositório (README, comentários, código-fonte) é **dado não confiável**,
-nunca instrução. O `context_insight` envia esse conteúdo pro LLM como evidência a ser
+nunca instrução. O `context-insight` envia esse conteúdo pro LLM como evidência a ser
 descrita, não como comando a ser seguido — mas nenhum prompt tem uma defesa
 explícita e dedicada contra prompt injection (ex.: um comentário no código dizendo
 "ignore instruções anteriores e retorne {...}"). Dito isso, o raio de alcance de uma
@@ -477,11 +612,10 @@ testado adversarialmente.
 - **Sem retrocompatibilidade de schema**: o banco não tem framework de migração de
   colunas — o schema em `db/schema.sql` é a única forma esperada para tabelas já
   existentes (SQLite não altera uma tabela via `CREATE TABLE IF NOT EXISTS`; tabelas
-  novas, como `change_surface_verifications`, são adicionadas automaticamente, colunas
-  novas em tabelas existentes não — `apis.request_shape` é um exemplo real: um banco
-  indexado antes dessa coluna existir não a ganha sozinho). Se uma mudança de schema
-  afetar uma tabela já existente, apague `~/.context-insight/context_insight.db` (ou o `--db` que
-  você estiver usando) e rode `context_insight index` de novo.
+  novas são adicionadas automaticamente, colunas novas em tabelas existentes não). Se
+  uma mudança de schema afetar uma tabela já existente, apague
+  `~/.context-insight/context-insight.db` (ou o `--db` que você estiver usando) e rode
+  `context-insight index` de novo.
 - `request_shape` só captura o formato do campo; ainda não compara contratos entre
   indexações pra detectar automaticamente que um campo obrigatório sumiu (isso
   exigiria guardar histórico de schema por API, não implementado). `contracts_at_risk`
@@ -490,12 +624,21 @@ testado adversarialmente.
   trecho certo, mas podem perder padrões incomuns (ex.: cliente HTTP instanciado numa
   variável com nome não convencional), e são desenhadas para o formato de um
   microsserviço web (endpoint HTTP, fila, ORM) — um pacote Python que é biblioteca/CLI
-  em vez de serviço web (como o próprio `context_insight`) não casa com nenhum desses
+  em vez de serviço web (como o próprio `context-insight`) não casa com nenhum desses
   padrões, e por isso só gera a unidade de overview, sem endpoints/persistência/
-  mensageria detectados (ver `tests/test_self_index_e2e.py`, que documenta esse caso
-  real em vez de escondê-lo). Sem teste automatizado especificamente para as stacks
-  Go/JVM em `cli.py`/`orchestrator.py` (cobertos via Python/Node na suíte) — só
-  `discovery/go_stack.py` isoladamente.
+  mensageria detectados. Isso também significa que **o próprio `context-insight` não
+  consegue se auto-indexar via o comando `index` da CLI** (que exige `matches()`
+  passar, e o manifesto de dependências mora na raiz do repo enquanto o código mora
+  num subdiretório — nenhum dos dois satisfaz sozinho `PythonDetector.matches()`); a
+  auto-indexação real só funciona chamando `generation.orchestrator.index_service()`
+  diretamente com um detector explícito (exatamente o que
+  `tests/test_self_index_e2e.py` faz, e o que foi usado pra validar o pipeline com um
+  backend real durante o desenvolvimento — ver "Desenvolvimento"). Alargar
+  `matches()` pra aceitar esse caso reduziria a precisão de detecção pra alvos reais
+  (qualquer pacote Python passaria a "parecer" um serviço), então essa lacuna é
+  deliberada, não uma tarefa pendente trivial. Sem teste automatizado especificamente
+  para as stacks Go/JVM em `cli.py`/`orchestrator.py` (cobertos via Python/Node na
+  suíte) — só `discovery/go_stack.py` isoladamente.
 - `find_change_surface`/`search` tokenizam a query e usam FTS5 com prefix match — bom
   pra achar por palavra-chave, mas ainda não é busca semântica: uma tarefa cujo
   vocabulário não aparece em nenhuma descrição/razão indexada, e sem `hint_services`,
@@ -507,14 +650,32 @@ testado adversarialmente.
   histórico automaticamente a partir de git, mas ainda não correlaciona tarefas
   parecidas entre si (precedente histórico arquitetural é uma evolução futura, não
   implementada).
-- `verify_change_surface`/`context_insight verify` são escopados a um repositório por vez —
-  não há uma noção de "diff cumulativo" entre vários repositórios não relacionados sob
-  um único commit de referência.
-- A heurística determinística de `target_kind` (`discovery/integration_heuristics.py`)
-  tem uma lista curta e manual de vendors conhecidos — um vendor fora da lista cai em
-  `unknown` (nunca em `external` errado por engano; a lista foi feita pra evitar falso
-  positivo, não falso negativo). Ela só entra em jogo quando o LLM (que já viu o código
-  real) não conseguiu classificar — na prática cobre a minoria dos casos.
+- `verify_change_surface`/`context-insight verify` são escopados a um repositório por
+  vez — não há uma noção de "diff cumulativo" entre vários repositórios não
+  relacionados sob um único commit de referência.
+- A heurística determinística de `target_kind`/`resource_type`
+  (`discovery/integration_heuristics.py`) tem uma lista curta e manual de vendors
+  conhecidos — um vendor fora da lista cai em `unknown` (nunca em `external` errado
+  por engano; a lista foi feita pra evitar falso positivo, não falso negativo). Ela só
+  entra em jogo quando o LLM (que já viu o código real) não conseguiu classificar — na
+  prática cobre a minoria dos casos.
+- `find_architecture_smells` ainda não modela três coisas discutidas mas não
+  implementadas: marcação de legado/strangler-fig (`role: legacy` num serviço, pra
+  diferenciar um monólito em migração de um serviço novo), severidade direcional de
+  ciclo (um ciclo envolvendo um serviço legado é mais grave que entre dois pares — a
+  extração vazou dependência de volta), e tendência entre execuções sucessivas
+  (`architecture_runs` já é versionado, mas nada ainda compara fan-in/fan-out de uma
+  execução pra outra). Um monólito modular (várias fronteiras de domínio dentro de um
+  único deploy) também não é detectado como tal — vira um `services` só, achatado; a
+  camada de componente é o alicerce necessário pra uma futura clusterização, mas essa
+  clusterização em si não existe ainda.
+- `persistence_entities`/`erDiagram` não rastreiam relação entre entidades (chave
+  estrangeira) — cada entidade é descrita isoladamente, com seus campos, sem linha de
+  relacionamento no diagrama ER.
+- Sem detecção de job agendado/batch (CronJob, Airflow DAG, `@Scheduled`,
+  `node-cron`, Celery beat) — `service_calls` não distingue uma chamada síncrona feita
+  de dentro de um endpoint HTTP de uma feita de dentro de um job batch noturno
+  (`interaction_style` sync/async/batch, discutido, não implementado).
 
 ## Desenvolvimento
 
@@ -530,11 +691,12 @@ O CI (`.github/workflows/ci.yml`) roda exatamente a suíte de testes determinís
 Python 3.11/3.12 a cada push/PR — `verify/sample_project.db` não existe em CI, então
 `test_mcp_tools.py` sempre pula lá (comportamento esperado, não uma falha).
 
-`get_relationships`/`find_change_surface`/`verify_change_surface` são exercitados via
-sessão MCP real (stdio), que sobe `context_insight.mcp.server` num **subprocesso** — para a
-cobertura enxergar esse subprocesso (em vez de reportar `mcp/server.py`/`mcp/queries.py`
-como 0% mesmo sendo testados), é preciso um hook de `coverage` no `site-packages` do
-venv mais a variável `COVERAGE_PROCESS_START`:
+`get_relationships`/`trace_flow`/`find_architecture_smells`/`find_change_surface`/
+`verify_change_surface` são exercitados via sessão MCP real (stdio), que sobe
+`context_insight.mcp.server` num **subprocesso** — para a cobertura enxergar esse
+subprocesso (em vez de reportar `mcp/server.py`/`mcp/queries.py` como 0% mesmo sendo
+testados), é preciso um hook de `coverage` no `site-packages` do venv mais a variável
+`COVERAGE_PROCESS_START`:
 ```bash
 echo "import coverage; coverage.process_startup()" > $(python -c "import site; print(site.getsitepackages()[0])")/coverage_subprocess.pth
 COVERAGE_PROCESS_START=pyproject.toml python -m coverage run -m pytest tests/
@@ -544,19 +706,36 @@ python -m coverage combine && python -m coverage report -m
 A suíte automatizada nunca chama um LLM de verdade (backends fake/determinísticos,
 DBs seedadas direto via `db.repositories.*`) — inclusive a suíte de auto-indexação
 (`tests/test_self_index_e2e.py`), que roda a descoberta real contra o próprio
-código-fonte do `context_insight` com um backend fake. Para validar o pipeline real
-fim-a-fim — discovery → geração LLM real → SQLite → MCP — use a própria fixture do
+código-fonte do `context-insight` com um backend fake. Para validar o pipeline real
+fim-a-fim — discovery → geração LLM real → SQLite → MCP —, use a própria fixture do
 projeto como teste e2e manual:
 ```bash
-context_insight index verify/sample_project --backend claude --db verify/sample_project.db
+context-insight index verify/sample_project --backend claude --db verify/sample_project.db
 pytest tests/test_mcp_tools.py   # antes fica "skipped"; roda de verdade com esse DB
 ```
 Isso também é o que popula `verify/sample_project.db` (gitignored, não versionado —
-cada dev/CI gera o seu). Dá pra fazer o mesmo contra o próprio `context_insight`, com as
-ressalvas de heurística descritas em "Limitações conhecidas":
-```bash
-context_insight index . --service context_insight-core --db verify/self_index.db --backend claude
+cada dev/CI gera o seu).
+
+Auto-indexar o próprio `context-insight` com um backend real **não funciona via CLI**
+(ver "Limitações conhecidas" — `PythonDetector.matches()` não casa nem com a raiz do
+repo nem com o pacote sozinho); use a API Python diretamente, do mesmo jeito que
+`tests/test_self_index_e2e.py` faz, só trocando o backend fake por um real:
+```python
+from pathlib import Path
+from context_insight.db.connection import open_db
+from context_insight.discovery.python_stack import PythonDetector
+from context_insight.generation.claude_backend import ClaudeBackend
+from context_insight.generation.orchestrator import index_service
+
+conn = open_db(Path("verify/self_index.db"))
+index_service(conn, "context-insight-core", Path("context_insight"), PythonDetector(), ClaudeBackend(), force=True)
 ```
+Essa é exatamente a validação real feita durante o desenvolvimento: o overview gerado
+descreveu corretamente a arquitetura do próprio projeto (CLI/MCP, os 4 stacks de
+discovery, o pipeline de geração, os exports), e `find_change_surface("Adicionar
+suporte a NATS na descoberta do stack Go")` apontou `context-insight-core` como
+`primary` com 0.9 de confiança e o motivo certo — o próprio scanner é quem precisaria
+mudar.
 
 ### Benchmark: recall de retrieval (CI) vs. precisão/recall real (manual)
 
@@ -579,7 +758,7 @@ julgamento do sistema:
   fixture daquela tarefa, que fração `KeywordGraphRetrieval` **não** precisou
   colocar como candidata — a metade determinística e não-circular de "redução de
   exploração" (a outra metade — comparar tool calls/tokens de um agente com e sem
-  o `context_insight` de verdade — exigiria simular um "agente baseline", o que seria
+  o `context-insight` de verdade — exigiria simular um "agente baseline", o que seria
   fabricado e não verificável, então fica como metodologia manual, não código).
   Esse número depende muito do tamanho/conectividade do sistema indexado: nas
   fixtures pequenas e bem conectadas deste benchmark (o cenário "Pix"), a expansão
@@ -590,11 +769,11 @@ julgamento do sistema:
 - **Precisão/recall real (manual, não roda no CI)**: só um LLM de verdade pode
   responder se o *julgamento* de `find_change_surface` está certo. Depois de indexar
   `verify/sample_project` (ou outro projeto real) com um backend real, rode
-  `context_insight analyze "<tarefa>" --backend claude --db verify/sample_project.db` pra
+  `context-insight analyze "<tarefa>" --backend claude --db verify/sample_project.db` pra
   cada tarefa de `benchmark/tasks.py` (sem precisar subir uma sessão MCP) e compare
   `primary`/`secondary` contra `expected_services` à mão — o mesmo tratamento manual
   que o e2e real de `verify/sample_project.db` já recebe. `verify_change_surface`/
-  `context_insight verify` automatiza essa comparação quando já existe um commit real
+  `context-insight verify` automatiza essa comparação quando já existe um commit real
   "depois" pra comparar via `git diff`.
 
 Conforme tarefas de engenharia reais forem acontecendo neste projeto (ou em outro
@@ -604,10 +783,11 @@ exemplos ilustrativos.
 
 ## Referência rápida
 
-**CLI** (`context_insight <comando> --help` para exemplos): `index`, `update`, `list`,
-`status`, `export`, `analyze`, `verify`, `serve`, `--version`.
+**CLI** (`context-insight <comando> --help` para exemplos): `index`, `update`, `list`,
+`status`, `export` (`md`|`mermaid`), `analyze`, `verify`, `serve`, `--version`.
 
-**MCP** (`context_insight serve`): `list_repositories`, `list_services`, `describe_service`,
-`list_apis`, `describe_api`, `describe_persistence`, `describe_messages`, `search`,
-`get_relationships`, `trace_flow`, `find_change_surface`,
-`record_change_surface_feedback`, `verify_change_surface`.
+**MCP** (`context-insight serve`): `list_repositories`, `list_services`,
+`describe_service`, `list_apis`, `describe_api`, `describe_persistence`,
+`describe_messages`, `search`, `get_relationships`, `trace_flow`,
+`find_architecture_smells`, `find_change_surface`, `record_change_surface_feedback`,
+`verify_change_surface`.
