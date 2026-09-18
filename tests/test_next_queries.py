@@ -3,11 +3,11 @@ computed into a small, ranked list of MCP tool calls worth making next — purel
 already-indexed data, no extra LLM call and no extra SQL beyond what's already read."""
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import apis as apis_repo
-from blastmap.db.repositories import messages as messages_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.generation.next_queries import NextQueryRecommender
+from context_insight.db.connection import open_db
+from context_insight.db.repositories import apis as apis_repo
+from context_insight.db.repositories import messages as messages_repo
+from context_insight.db.repositories import services as services_repo
+from context_insight.generation.next_queries import NextQueryRecommender
 
 
 def _seed_service_with_api(conn, name: str) -> int:

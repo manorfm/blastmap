@@ -3,11 +3,11 @@
 import subprocess
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import search as search_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.generation import change_surface
-from blastmap.mcp import queries
+from context_insight.db.connection import open_db
+from context_insight.db.repositories import search as search_repo
+from context_insight.db.repositories import services as services_repo
+from context_insight.generation import change_surface
+from context_insight.mcp import queries
 
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
 

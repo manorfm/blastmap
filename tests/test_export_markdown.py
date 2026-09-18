@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import apis as apis_repo
-from blastmap.db.repositories import messages as messages_repo
-from blastmap.db.repositories import persistence as persistence_repo
-from blastmap.db.repositories import service_calls as service_calls_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.export.markdown import export_markdown
+from context_insight.db.connection import open_db
+from context_insight.db.repositories import apis as apis_repo
+from context_insight.db.repositories import messages as messages_repo
+from context_insight.db.repositories import persistence as persistence_repo
+from context_insight.db.repositories import service_calls as service_calls_repo
+from context_insight.db.repositories import services as services_repo
+from context_insight.export.markdown import export_markdown
 
 
 def _seed(conn):

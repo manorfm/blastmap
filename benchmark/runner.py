@@ -1,4 +1,4 @@
-"""Runs candidate retrieval (blastmap.generation.retrieval.KeywordGraphRetrieval)
+"""Runs candidate retrieval (context_insight.generation.retrieval.KeywordGraphRetrieval)
 against every benchmark task and reports recall — see benchmark/__init__.py for why
 this is deliberately recall-only, with no LLM call and no precision claim."""
 from __future__ import annotations
@@ -6,8 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from blastmap.db.repositories import services as services_repo
-from blastmap.generation.retrieval import KeywordGraphRetrieval
+from context_insight.db.repositories import services as services_repo
+from context_insight.generation.retrieval import KeywordGraphRetrieval
 
 from benchmark.tasks import BenchmarkTask
 

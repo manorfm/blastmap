@@ -1,0 +1,298 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import context_insight
+from context_insight.cli_progress import RichProgressReporter
+from context_insight.config import resolve_backend
+from context_insight.db.connection import DEFAULT_DB_PATH, open_db
+from context_insight.db.repositories import index_runs as index_runs_repo
+from context_insight.db.repositories import indexed_files as indexed_files_repo
+from context_insight.db.repositories import services as services_repo
+from context_insight.db.repositories import verification as verification_repo
+from context_insight.export.markdown import export_markdown
+from context_insight.generation import change_surface
+from context_insight.generation.backend_base import GenerationError
+from context_insight.generation.orchestrator import DiscoveryError, index_path, index_service
+from context_insight.generation.verification import verify_change_surface
+
+
+def _cmd_index(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    try:
+        with RichProgressReporter() as progress:
+            results = index_path(
+                conn, Path(args.path), backend, service_override=args.service, force=args.force,
+                progress=progress, repository_name=args.repository_name,
+            )
+    except (DiscoveryError, GenerationError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    for r in results:
+        print(f"{r.service_name}: status={r.status} files_changed={r.files_changed} llm_calls={r.llm_calls}")
+    return 0 if all(r.status == "ok" for r in results) else 1
+
+
+def _cmd_update(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    row = services_repo.get_service_by_name(conn, args.service)
+    if row is None:
+        print(f"error: unknown service {args.service!r} (run `context-insight list`)", file=sys.stderr)
+        return 1
+    root = Path(row["root_path"])
+    if not root.is_dir():
+        print(
+            f"error: root path for {args.service!r} no longer exists: {root}\n"
+            f"       re-run `context-insight index <newpath> --service {args.service}` instead.",
+            file=sys.stderr,
+        )
+        return 1
+    from context_insight.discovery.registry import detector_for
+
+    detector = detector_for(root)
+    if detector is None:
+        print(f"error: {root} no longer matches any known stack", file=sys.stderr)
+        return 1
+    backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    with RichProgressReporter() as progress:
+        result = index_service(conn, args.service, root, detector, backend, force=args.force, progress=progress)
+    print(f"{result.service_name}: status={result.status} files_changed={result.files_changed} llm_calls={result.llm_calls}")
+    return 0 if result.status == "ok" else 1
+
+
+def _cmd_list(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    rows = services_repo.list_services(conn)
+    if not rows:
+        print("(nenhum serviço indexado ainda)")
+        return 0
+    for r in rows:
+        print(f"{r['name']:<30} stack={r['stack'] or '?':<14} apis={r['api_count']:<3} {r['short_desc'] or ''}")
+    return 0
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    if args.service:
+        row = services_repo.get_service_by_name(conn, args.service)
+        if row is None:
+            print(f"error: unknown service {args.service!r}", file=sys.stderr)
+            return 1
+        hashes = indexed_files_repo.get_indexed_file_hashes(conn, row["id"])
+        print(f"service: {row['name']} ({row['stack']}) — {row['root_path']}")
+        print(f"last_commit: {row['last_commit']}")
+        print(f"indexed files: {len(hashes)}")
+        for run in index_runs_repo.recent_index_runs(conn, row["id"], limit=5):
+            print(
+                f"  run#{run['id']} {run['started_at']} status={run['status']} backend={run['backend']} "
+                f"files_changed={run['files_changed']} llm_calls={run['llm_calls']} notes={run['notes']}"
+            )
+    else:
+        services = services_repo.list_services(conn)
+        print(f"services indexed: {len(services)}")
+        for run in index_runs_repo.recent_index_runs(conn, limit=10):
+            svc = services_repo.get_service_by_id(conn, run["service_id"]) if run["service_id"] else None
+            name = svc["name"] if svc else "?"
+            print(
+                f"  run#{run['id']} service={name} status={run['status']} backend={run['backend']} "
+                f"files_changed={run['files_changed']} llm_calls={run['llm_calls']}"
+            )
+        verifications = verification_repo.latest_verifications(conn, limit=5)
+        if verifications:
+            print("recent change surface verifications:")
+            for v in verifications:
+                print(
+                    f"  run#{v['run_id']} repository={v['repository']} since={v['since_commit']} "
+                    f"precision={v['precision']} recall={v['recall']}"
+                )
+    return 0
+
+
+def _cmd_export(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    written = export_markdown(conn, Path(args.out), service_filter=args.service)
+    print(f"wrote {len(written)} files under {args.out}")
+    return 0
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    result = change_surface.analyze_change_surface(conn, args.task, backend, hint_services=args.hint_services)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    result = verify_change_surface(conn, args.run_id, args.repository, args.since, record_feedback=args.record_feedback)
+    if "error" in result:
+        print(f"error: {result['error']}", file=sys.stderr)
+        return 1
+    print(f"predicted: {result['predicted']}")
+    print(f"actual:    {result['actual']}")
+    print(f"true_positives:  {result['true_positives']}")
+    print(f"false_positives: {result['false_positives']}")
+    print(f"false_negatives: {result['false_negatives']}")
+    print(f"precision: {result['precision']}")
+    print(f"recall:    {result['recall']}")
+    if args.record_feedback:
+        print("feedback recorded for true/false positives")
+    return 0
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    from context_insight.mcp.server import build_server
+
+    backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    server = build_server(args.db, backend=backend)
+    server.run()
+    return 0
+
+
+_TOP_LEVEL_EPILOG = """\
+The context-insight workflow is index -> ask -> verify:
+
+  1. index   Point it at a repo (or several) so it builds a System Knowledge Model.
+  2. ask     Register it as an MCP server (`serve`) and have an agent call
+             find_change_surface with an engineering task/epic, before it opens
+             any file, to get the likely blast radius with evidence + confidence.
+  3. verify  Once the change ships, check whether the prediction was right
+             against the real git diff, closing the feedback loop.
+
+Examples:
+  context-insight index ~/code/my-monorepo --repository-name my-monorepo
+  context-insight serve --backend claude
+  context-insight verify 3 --repository my-monorepo --since a1b2c3d
+
+Run `context-insight <command> --help` for a runnable example of any single command.
+"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="context-insight", epilog=_TOP_LEVEL_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--version", action="version", version=f"context-insight {context_insight.__version__}")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def add_backend_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--backend", choices=["claude", "codex"], default=None)
+        p.add_argument("--model", default=None)
+        p.add_argument("--claude-bare", action="store_true", help="Use ANTHROPIC_API_KEY billing instead of the Claude Code subscription session")
+        p.add_argument("--codex-api-key", action="store_true", help="Use CODEX_API_KEY billing instead of the ChatGPT subscription session")
+        p.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+
+    p_index = sub.add_parser(
+        "index", help="Index a monorepo root or a single service repo",
+        epilog=(
+            "examples:\n"
+            "  context-insight index ~/code/orders-service\n"
+            "  context-insight index ~/code/my-monorepo --repository-name my-monorepo\n"
+            "  context-insight index . --service custom-name --force\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_index.add_argument("path")
+    p_index.add_argument("--service", default=None, help="Override the inferred service name (only valid for a single-service path)")
+    p_index.add_argument("--repository-name", default=None, help="Explicit repository name; avoids collisions when indexing several repos into one shared DB")
+    p_index.add_argument("--force", action="store_true", help="Regenerate everything, ignoring file-hash skip")
+    add_backend_args(p_index)
+    p_index.set_defaults(func=_cmd_index)
+
+    p_update = sub.add_parser(
+        "update", help="Re-index one already-known service by name",
+        epilog="example:\n  context-insight update orders-service\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_update.add_argument("service")
+    p_update.add_argument("--force", action="store_true")
+    add_backend_args(p_update)
+    p_update.set_defaults(func=_cmd_update)
+
+    p_list = sub.add_parser("list", help="List indexed services")
+    p_list.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    p_list.set_defaults(func=_cmd_list)
+
+    p_status = sub.add_parser(
+        "status", help="Show indexing status/history, and recent change surface verifications",
+        epilog="examples:\n  context-insight status\n  context-insight status orders-service\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_status.add_argument("service", nargs="?", default=None)
+    p_status.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    p_status.set_defaults(func=_cmd_status)
+
+    p_export = sub.add_parser(
+        "export", help="Export the database to Markdown",
+        epilog="example:\n  context-insight export md --out docs/\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_export.add_argument("format", choices=["md"])
+    p_export.add_argument("--out", default="docs")
+    p_export.add_argument("--service", default=None)
+    p_export.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    p_export.set_defaults(func=_cmd_export)
+
+    p_analyze = sub.add_parser(
+        "analyze", help="Run find_change_surface for a task and print the result as JSON",
+        epilog=(
+            "examples:\n"
+            "  context-insight analyze \"Add support for Pix in checkout\"\n"
+            "  context-insight analyze \"Add support for Pix in checkout\" --backend claude --db verify/sample_project.db\n"
+            "  context-insight analyze \"xyz internal cleanup\" --hint-services notification-service\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_analyze.add_argument("task")
+    p_analyze.add_argument("--hint-services", nargs="+", default=None, help="Anchor the search on these services even without a keyword match")
+    add_backend_args(p_analyze)
+    p_analyze.set_defaults(func=_cmd_analyze)
+
+    p_verify = sub.add_parser(
+        "verify", help="Compare a past find_change_surface run against what a repository's commits actually changed",
+        epilog=(
+            "example:\n"
+            "  context-insight verify 3 --repository my-monorepo --since a1b2c3d --record-feedback\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_verify.add_argument("run_id", type=int)
+    p_verify.add_argument("--repository", required=True, help="Repository name, as shown by `context-insight list`/`--repository-name` at index time")
+    p_verify.add_argument("--since", required=True, help="Commit the run was made against; actual changes are `git diff --since..HEAD`")
+    p_verify.add_argument("--record-feedback", action="store_true", help="Auto-record confirmed/rejected feedback for the predicted services")
+    p_verify.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
+    p_verify.set_defaults(func=_cmd_verify)
+
+    p_serve = sub.add_parser(
+        "serve", help="Run the MCP server (stdio)",
+        epilog=(
+            "example (register with an MCP client, e.g. Claude Code/Codex):\n"
+            "  context-insight serve --backend claude\n"
+            "  context-insight serve --db ~/.context-insight/context-insight.db --backend codex\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_serve.add_argument("--transport", choices=["stdio"], default="stdio")
+    add_backend_args(p_serve)  # find_change_surface is the only tool that uses a backend
+    p_serve.set_defaults(func=_cmd_serve)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("\ncancelado pelo usuário (Ctrl+C)", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

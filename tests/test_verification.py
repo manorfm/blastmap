@@ -5,11 +5,11 @@ auto-record feedback for the services the run actually mentioned.
 import subprocess
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import change_surface as change_surface_repo
-from blastmap.db.repositories import repositories as repositories_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.generation import verification
+from context_insight.db.connection import open_db
+from context_insight.db.repositories import change_surface as change_surface_repo
+from context_insight.db.repositories import repositories as repositories_repo
+from context_insight.db.repositories import services as services_repo
+from context_insight.generation import verification
 
 SAMPLE_RESULT = {
     "primary": [

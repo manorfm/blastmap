@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import messages as messages_repo
-from blastmap.db.repositories import services as services_repo
+from context_insight.db.connection import open_db
+from context_insight.db.repositories import messages as messages_repo
+from context_insight.db.repositories import services as services_repo
 
 EVIDENCE = [{"file": "main.py", "start_line": 10, "end_line": 20}]
 

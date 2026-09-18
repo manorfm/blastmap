@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import apis as apis_repo
-from blastmap.db.repositories import repositories as repositories_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.discovery.registry import detector_for
-from blastmap.discovery.walker import discover_services
-from blastmap.generation.backend_base import GenerationError
-from blastmap.generation.orchestrator import DiscoveryError, index_path, index_service
+from context_insight.db.connection import open_db
+from context_insight.db.repositories import apis as apis_repo
+from context_insight.db.repositories import repositories as repositories_repo
+from context_insight.db.repositories import services as services_repo
+from context_insight.discovery.registry import detector_for
+from context_insight.discovery.walker import discover_services
+from context_insight.generation.backend_base import GenerationError
+from context_insight.generation.orchestrator import DiscoveryError, index_path, index_service
 
 SAMPLE_ROOT = Path(__file__).resolve().parent.parent / "verify" / "sample_project"
 
