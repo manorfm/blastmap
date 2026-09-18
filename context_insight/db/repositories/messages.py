@@ -40,6 +40,23 @@ def list_messages(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row
     ).fetchall()
 
 
+def list_all_message_links(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every publisher/consumer pair connected through a shared channel name, once each
+    — the topology diagram's message-link edge set (export/mermaid.py). Direction-
+    constrained in SQL (m1 = publishes, m2 = consumes) so a pair never appears twice."""
+    return conn.execute(
+        """
+        SELECT DISTINCT m1.channel AS channel, s1.name AS publisher, s2.name AS consumer
+        FROM messages m1
+        JOIN messages m2 ON m2.channel = m1.channel AND m2.service_id != m1.service_id
+                         AND m1.direction = 'publishes' AND m2.direction = 'consumes'
+        JOIN services s1 ON s1.id = m1.service_id
+        JOIN services s2 ON s2.id = m2.service_id
+        ORDER BY channel, publisher, consumer
+        """
+    ).fetchall()
+
+
 def list_message_links(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     """Other services connected to this one through a shared channel name.
 

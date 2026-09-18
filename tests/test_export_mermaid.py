@@ -1,0 +1,123 @@
+from pathlib import Path
+
+from context_insight.db.connection import open_db
+from context_insight.db.repositories import apis as apis_repo
+from context_insight.db.repositories import messages as messages_repo
+from context_insight.db.repositories import persistence as persistence_repo
+from context_insight.db.repositories import service_calls as service_calls_repo
+from context_insight.db.repositories import services as services_repo
+from context_insight.export.mermaid import export_mermaid, generate_er_diagram, generate_topology_diagram
+from context_insight.generation.architecture import recompute_architecture_view
+
+EVIDENCE = [{"file": "main.py", "start_line": 1, "end_line": 5}]
+
+
+def _seed_topology(conn):
+    orders_id = services_repo.ensure_service(conn, "orders-service", "/tmp/orders", "python")
+    payments_id = services_repo.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
+    notif_id = services_repo.ensure_service(conn, "notification-service", "/tmp/notif", "python")
+    api_id = apis_repo.upsert_api(conn, orders_id, "POST", "/orders", "s", "d", [], EVIDENCE)
+    service_calls_repo.replace_calls_for_api(
+        conn, orders_id, api_id,
+        [
+            {"to_service_name": "payments-service", "call_kind": "http", "reason": "charge",
+             "data_needed": [], "purpose_kind": "data_fetch", "confidence": 0.9, "target_kind": "unknown"},
+            {"to_service_name": "Stripe API", "call_kind": "http", "reason": "vendor charge",
+             "data_needed": [], "purpose_kind": "other", "confidence": 0.8, "target_kind": "external",
+             "resource_type": "saas"},
+        ],
+        EVIDENCE,
+    )
+    service_calls_repo.reconcile_service_call_targets(conn)
+    messages_repo.replace_messages(
+        conn, orders_id, [{"direction": "publishes", "channel": "order_created", "shape_json": {}, "description": "d"}], EVIDENCE,
+    )
+    messages_repo.replace_messages(
+        conn, notif_id, [{"direction": "consumes", "channel": "order_created", "shape_json": {}, "description": "d"}], EVIDENCE,
+    )
+    return orders_id, payments_id, notif_id
+
+
+def test_generate_topology_diagram_includes_services_and_edges(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    _seed_topology(conn)
+
+    diagram = generate_topology_diagram(conn)
+
+    assert diagram.startswith("graph TD")
+    assert "orders-service" in diagram
+    assert "payments-service" in diagram
+    assert "notification-service" in diagram
+    assert "Stripe API" in diagram
+    assert "order_created" in diagram
+
+
+def test_generate_topology_diagram_highlights_cycle_services(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    a_id = services_repo.ensure_service(conn, "a-service", "/tmp/a", "python")
+    b_id = services_repo.ensure_service(conn, "b-service", "/tmp/b", "python")
+    a_api = apis_repo.upsert_api(conn, a_id, "GET", "/a", "s", "d", [], EVIDENCE)
+    b_api = apis_repo.upsert_api(conn, b_id, "GET", "/b", "s", "d", [], EVIDENCE)
+    service_calls_repo.replace_calls_for_api(
+        conn, a_id, a_api,
+        [{"to_service_name": "b-service", "call_kind": "http", "reason": "r", "data_needed": [],
+          "purpose_kind": "other", "confidence": 0.9, "target_kind": "unknown"}],
+        EVIDENCE,
+    )
+    service_calls_repo.replace_calls_for_api(
+        conn, b_id, b_api,
+        [{"to_service_name": "a-service", "call_kind": "http", "reason": "r", "data_needed": [],
+          "purpose_kind": "other", "confidence": 0.9, "target_kind": "unknown"}],
+        EVIDENCE,
+    )
+    service_calls_repo.reconcile_service_call_targets(conn)
+    recompute_architecture_view(conn)
+
+    diagram = generate_topology_diagram(conn)
+
+    assert "classDef cycle" in diagram
+    assert "cycle" in diagram.lower()
+
+
+def test_generate_er_diagram_lists_entity_fields(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    orders_id = services_repo.ensure_service(conn, "orders-service", "/tmp/orders", "python")
+    persistence_repo.replace_persistence_entities(
+        conn, orders_id,
+        [{
+            "name": "orders", "kind": "sql_table", "engine": "postgres",
+            "schema_json": [{"field": "order_id", "type_desc": "string, order id"}, {"field": "total", "type_desc": "number"}],
+        }],
+        EVIDENCE,
+    )
+
+    diagram = generate_er_diagram(conn, "orders-service")
+
+    assert diagram.startswith("erDiagram")
+    assert "orders {" in diagram
+    assert "order_id" in diagram
+    assert "total" in diagram
+
+
+def test_generate_er_diagram_for_unknown_service(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    assert generate_er_diagram(conn, "does-not-exist") is None
+
+
+def test_export_mermaid_writes_topology_and_er_files(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    orders_id, _payments_id, _notif_id = _seed_topology(conn)
+    persistence_repo.replace_persistence_entities(
+        conn, orders_id,
+        [{"name": "orders", "kind": "sql_table", "engine": "postgres",
+          "schema_json": [{"field": "order_id", "type_desc": "string"}]}],
+        EVIDENCE,
+    )
+    out_dir = tmp_path / "docs"
+
+    written = export_mermaid(conn, out_dir)
+
+    assert out_dir / "topology.mmd" in written
+    assert (out_dir / "topology.mmd").exists()
+    assert (out_dir / "orders-service" / "er.mmd").exists()
+    assert not (out_dir / "payments-service").exists()  # no persistence, nothing written

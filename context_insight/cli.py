@@ -14,6 +14,7 @@ from context_insight.db.repositories import indexed_files as indexed_files_repo
 from context_insight.db.repositories import services as services_repo
 from context_insight.db.repositories import verification as verification_repo
 from context_insight.export.markdown import export_markdown
+from context_insight.export.mermaid import export_mermaid
 from context_insight.generation import change_surface
 from context_insight.generation.backend_base import GenerationError
 from context_insight.generation.orchestrator import DiscoveryError, index_path, index_service
@@ -114,7 +115,10 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 def _cmd_export(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
-    written = export_markdown(conn, Path(args.out), service_filter=args.service)
+    if args.format == "mermaid":
+        written = export_mermaid(conn, Path(args.out), service_filter=args.service)
+    else:
+        written = export_markdown(conn, Path(args.out), service_filter=args.service)
     print(f"wrote {len(written)} files under {args.out}")
     return 0
 
@@ -228,11 +232,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(func=_cmd_status)
 
     p_export = sub.add_parser(
-        "export", help="Export the database to Markdown",
-        epilog="example:\n  context-insight export md --out docs/\n",
+        "export", help="Export the database to Markdown or Mermaid diagrams",
+        epilog=(
+            "examples:\n"
+            "  context-insight export md --out docs/\n"
+            "  context-insight export mermaid --out docs/\n"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_export.add_argument("format", choices=["md"])
+    p_export.add_argument("format", choices=["md", "mermaid"])
     p_export.add_argument("--out", default="docs")
     p_export.add_argument("--service", default=None)
     p_export.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)

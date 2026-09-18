@@ -131,6 +131,46 @@ def test_resource_type_fallback_only_fills_external_calls_the_llm_left_unresolve
     assert calls["Twilio SMS"] == "saas"  # filled in by the vendor-keyword fallback
 
 
+def test_list_internal_edges_returns_resolved_service_pairs(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    a_id = services_repo.ensure_service(conn, "a-service", "/tmp/a", "python")
+    services_repo.ensure_service(conn, "b-service", "/tmp/b", "python")
+    api_id = apis_repo.upsert_api(conn, a_id, "GET", "/a", "s", "d", [], EVIDENCE)
+    service_calls_repo.replace_calls_for_api(
+        conn, a_id, api_id,
+        [{"to_service_name": "b-service", "call_kind": "http", "reason": "fetch data",
+          "data_needed": [], "purpose_kind": "data_fetch", "confidence": 0.9, "target_kind": "unknown"}],
+        EVIDENCE,
+    )
+    service_calls_repo.reconcile_service_call_targets(conn)
+
+    edges = service_calls_repo.list_internal_edges(conn)
+
+    assert len(edges) == 1
+    assert edges[0]["from_name"] == "a-service"
+    assert edges[0]["to_name"] == "b-service"
+
+
+def test_list_external_edges_returns_vendor_targets(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    a_id = services_repo.ensure_service(conn, "a-service", "/tmp/a", "python")
+    api_id = apis_repo.upsert_api(conn, a_id, "GET", "/a", "s", "d", [], EVIDENCE)
+    service_calls_repo.replace_calls_for_api(
+        conn, a_id, api_id,
+        [{"to_service_name": "Stripe API", "call_kind": "http", "reason": "charge",
+          "data_needed": [], "purpose_kind": "other", "confidence": 0.9,
+          "target_kind": "external", "resource_type": "saas"}],
+        EVIDENCE,
+    )
+
+    edges = service_calls_repo.list_external_edges(conn)
+
+    assert len(edges) == 1
+    assert edges[0]["from_name"] == "a-service"
+    assert edges[0]["to_service_name"] == "Stripe API"
+    assert edges[0]["resource_type"] == "saas"
+
+
 def test_reconcile_scoped_to_one_service_leaves_other_services_rows_untouched(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     # "gatewaytarget" deliberately has no "-service"/"-svc" suffix, so the naming-

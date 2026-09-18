@@ -157,3 +157,28 @@ def list_unmapped_internal_calls(conn: sqlite3.Connection, service_id: int) -> l
            ORDER BY to_service_name""",
         (service_id,),
     ).fetchall()
+
+
+def list_internal_edges(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every resolved service-to-service edge in the whole system — the topology
+    diagram's internal edge set (export/mermaid.py)."""
+    return conn.execute(
+        """SELECT DISTINCT s1.name AS from_name, s2.name AS to_name, sc.call_kind, sc.reason
+           FROM service_calls sc
+           JOIN services s1 ON s1.id = sc.from_service_id
+           JOIN services s2 ON s2.id = sc.to_service_id
+           WHERE sc.target_kind = 'internal'
+           ORDER BY from_name, to_name"""
+    ).fetchall()
+
+
+def list_external_edges(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every service-to-vendor edge in the whole system — the topology diagram's
+    external edge set (export/mermaid.py)."""
+    return conn.execute(
+        """SELECT DISTINCT s.name AS from_name, sc.to_service_name, sc.resource_type
+           FROM service_calls sc
+           JOIN services s ON s.id = sc.from_service_id
+           WHERE sc.target_kind = 'external'
+           ORDER BY from_name, to_service_name"""
+    ).fetchall()

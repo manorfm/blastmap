@@ -157,6 +157,19 @@ def test_export_command_writes_markdown(tmp_path: Path, capsys):
     assert "wrote" in capsys.readouterr().out
 
 
+def test_export_command_writes_mermaid_diagrams(tmp_path: Path, capsys):
+    db_path = tmp_path / "test.db"
+    cli._cmd_index(_parse(["index", str(SAMPLE_ROOT), "--db", str(db_path)]))
+    out_dir = tmp_path / "docs"
+
+    exit_code = cli._cmd_export(_parse(["export", "mermaid", "--out", str(out_dir), "--db", str(db_path)]))
+
+    assert exit_code == 0
+    assert (out_dir / "topology.mmd").exists()
+    assert "graph TD" in (out_dir / "topology.mmd").read_text()
+    assert "wrote" in capsys.readouterr().out
+
+
 def test_help_leads_with_the_index_ask_verify_mental_model(capsys):
     try:
         cli.main(["--help"])
