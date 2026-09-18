@@ -24,8 +24,9 @@ def main() -> int:
     width = max(len(r.task_id) for r in report.results)
     for r in report.results:
         status = "ok" if not r.missing else f"MISSING {sorted(r.missing)}"
-        print(f"{r.task_id:<{width}}  recall={r.recall:.2f}  {status}")
+        print(f"{r.task_id:<{width}}  recall={r.recall:.2f}  reduction={r.reduction_ratio:.2f}  {status}")
     print(f"\naggregate recall: {report.aggregate_recall:.2f} over {len(report.results)} tasks")
+    print(f"aggregate reduction: {report.aggregate_reduction_ratio:.2f} (fraction of the system NOT surfaced as a candidate)")
     return 0 if report.aggregate_recall == 1.0 else 1
 
 

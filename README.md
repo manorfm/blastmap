@@ -546,7 +546,19 @@ julgamento do sistema:
   um corpus real de tarefas passadas) cobrindo padrões diferentes de alcance: match
   direto por palavra-chave, expansão de 1 e 2 saltos via chamada, expansão via
   vínculo de mensageria, e ancoragem só por `hint_services`. Rode
-  `python scripts/run_benchmark_report.py` pra ver a tabela.
+  `python scripts/run_benchmark_report.py` pra ver a tabela. O mesmo relatório
+  também mostra `reduction_ratio` por tarefa: de todos os serviços indexados na
+  fixture daquela tarefa, que fração `KeywordGraphRetrieval` **não** precisou
+  colocar como candidata — a metade determinística e não-circular de "redução de
+  exploração" (a outra metade — comparar tool calls/tokens de um agente com e sem
+  o `blastmap` de verdade — exigiria simular um "agente baseline", o que seria
+  fabricado e não verificável, então fica como metodologia manual, não código).
+  Esse número depende muito do tamanho/conectividade do sistema indexado: nas
+  fixtures pequenas e bem conectadas deste benchmark (o cenário "Pix"), a expansão
+  de 2 saltos naturalmente alcança o sistema inteiro e a redução fica em 0 — não é
+  regressão, é o tamanho real da fixture. A fixture "catalog" (dois componentes
+  desconectados) mostra redução de verdade. Leia o número como "quanto esse cenário
+  específico reduziu", não como um teto do que o sistema consegue em produção.
 - **Precisão/recall real (manual, não roda no CI)**: só um LLM de verdade pode
   responder se o *julgamento* de `find_change_surface` está certo. Depois de indexar
   `verify/sample_project` (ou outro projeto real) com um backend real, rode
