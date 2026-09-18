@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from context_insight.db.connection import open_db
+from blastmap.db.connection import open_db
 
 
 def test_schema_initializes(tmp_path: Path):

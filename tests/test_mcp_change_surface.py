@@ -14,18 +14,18 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from context_insight.db.connection import open_db
+from blastmap.db.connection import open_db
 from tests.mcp_test_helpers import content_json, server_params
 
 
 def test_server_module_cli_exposes_backend_selection():
-    """python -m context_insight.mcp.server is the entry point real MCP clients (Claude
+    """python -m blastmap.mcp.server is the entry point real MCP clients (Claude
     Desktop, etc.) configure directly — it must expose --backend/--model itself and not
-    only through `context_insight serve`, or find_change_surface is silently stuck on
+    only through `blastmap serve`, or find_change_surface is silently stuck on
     whatever DEFAULT_BACKEND happens to be.
     """
     result = subprocess.run(
-        [sys.executable, "-m", "context_insight.mcp.server", "--help"],
+        [sys.executable, "-m", "blastmap.mcp.server", "--help"],
         capture_output=True, text=True, timeout=10,
     )
     assert "--backend" in result.stdout

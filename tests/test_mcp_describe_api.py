@@ -2,10 +2,10 @@
 response_shape treatment (see db/repositories/apis.py upsert_api)."""
 from pathlib import Path
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import apis as apis_repo
-from context_insight.db.repositories import services as services_repo
-from context_insight.mcp import queries
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import services as services_repo
+from blastmap.mcp import queries
 
 
 def test_describe_api_includes_request_shape(tmp_path: Path):

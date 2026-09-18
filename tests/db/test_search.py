@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import apis as apis_repo
-from context_insight.db.repositories import search as search_repo
-from context_insight.db.repositories import service_calls as service_calls_repo
-from context_insight.db.repositories import services as services_repo
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import search as search_repo
+from blastmap.db.repositories import service_calls as service_calls_repo
+from blastmap.db.repositories import services as services_repo
 
 
 def test_search_finds_service_api_and_relationship(tmp_path: Path):

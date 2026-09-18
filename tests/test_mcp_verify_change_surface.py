@@ -7,10 +7,10 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import change_surface as change_surface_repo
-from context_insight.db.repositories import repositories as repositories_repo
-from context_insight.db.repositories import services as services_repo
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import change_surface as change_surface_repo
+from blastmap.db.repositories import repositories as repositories_repo
+from blastmap.db.repositories import services as services_repo
 
 from tests.mcp_test_helpers import content_json, server_params
 

@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import repositories as repositories_repo
-from context_insight.db.repositories import services as services_repo
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import repositories as repositories_repo
+from blastmap.db.repositories import services as services_repo
 
 
 def test_ensure_service_and_overview(tmp_path: Path):

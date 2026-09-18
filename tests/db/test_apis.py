@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import apis as apis_repo
-from context_insight.db.repositories import services as services_repo
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import services as services_repo
 
 
 def test_prune_apis_not_in(tmp_path: Path):

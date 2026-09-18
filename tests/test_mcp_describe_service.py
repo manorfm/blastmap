@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import components as components_repo
-from context_insight.db.repositories import services as services_repo
-from context_insight.mcp import queries
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import components as components_repo
+from blastmap.db.repositories import services as services_repo
+from blastmap.mcp import queries
 
 
 def test_describe_service_includes_its_components(tmp_path: Path):

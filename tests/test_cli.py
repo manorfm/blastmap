@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from context_insight import cli
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import repositories as repositories_repo
-from context_insight.db.repositories import services as services_repo
+from blastmap import cli
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import repositories as repositories_repo
+from blastmap.db.repositories import services as services_repo
 from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
 
 
@@ -124,8 +124,8 @@ def test_status_command_global(tmp_path: Path, capsys):
 
 
 def test_status_command_global_shows_recent_verifications(tmp_path: Path, capsys):
-    from context_insight.db.repositories import change_surface as change_surface_repo
-    from context_insight.db.repositories import verification as verification_repo
+    from blastmap.db.repositories import change_surface as change_surface_repo
+    from blastmap.db.repositories import verification as verification_repo
 
     db_path = tmp_path / "test.db"
     conn = open_db(db_path)
@@ -196,18 +196,18 @@ def test_index_help_includes_a_runnable_example(capsys):
     except SystemExit:
         pass
     out = capsys.readouterr().out
-    assert "context-insight index" in out
+    assert "blastmap index" in out
 
 
 def test_version_flag_prints_the_installed_version(capsys):
-    import context_insight
+    import blastmap
 
     try:
         cli.main(["--version"])
     except SystemExit:
         pass
     out = capsys.readouterr().out
-    assert context_insight.__version__ in out
+    assert blastmap.__version__ in out
 
 
 def test_analyze_command_prints_change_surface_json(tmp_path: Path, capsys, monkeypatch):
@@ -219,7 +219,7 @@ def test_analyze_command_prints_change_surface_json(tmp_path: Path, capsys, monk
     conn = open_db(db_path)
     service_id = services_repo.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
     services_repo.update_service_overview(conn, service_id, "Owns the checkout entry point.", "L")
-    from context_insight.db.repositories import search as search_repo
+    from blastmap.db.repositories import search as search_repo
 
     search_repo.rebuild_search_index(conn)
 
@@ -273,8 +273,8 @@ def test_main_dispatches_to_list_command(tmp_path: Path, capsys):
 def test_verify_command_reports_precision_and_recall(tmp_path: Path, capsys):
     import subprocess
 
-    from context_insight.db.repositories import change_surface as change_surface_repo
-    from context_insight.db.repositories import repositories as repositories_repo
+    from blastmap.db.repositories import change_surface as change_surface_repo
+    from blastmap.db.repositories import repositories as repositories_repo
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

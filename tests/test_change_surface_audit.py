@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import change_surface as repository
-from context_insight.mcp import queries
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import change_surface as repository
+from blastmap.mcp import queries
 
 SAMPLE_RESULT = {
     "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9, "evidence": []}],

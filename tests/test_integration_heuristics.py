@@ -1,4 +1,4 @@
-from context_insight.discovery.integration_heuristics import classify_resource_type, classify_target_kind
+from blastmap.discovery.integration_heuristics import classify_resource_type, classify_target_kind
 
 
 def test_known_vendor_names_are_classified_external():

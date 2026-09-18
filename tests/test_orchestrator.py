@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import apis as apis_repo
-from context_insight.db.repositories import components as components_repo
-from context_insight.db.repositories import repositories as repositories_repo
-from context_insight.db.repositories import services as services_repo
-from context_insight.discovery.registry import detector_for
-from context_insight.discovery.walker import discover_services
-from context_insight.generation.backend_base import GenerationError
-from context_insight.generation.orchestrator import DiscoveryError, index_path, index_service
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import components as components_repo
+from blastmap.db.repositories import repositories as repositories_repo
+from blastmap.db.repositories import services as services_repo
+from blastmap.discovery.registry import detector_for
+from blastmap.discovery.walker import discover_services
+from blastmap.generation.backend_base import GenerationError
+from blastmap.generation.orchestrator import DiscoveryError, index_path, index_service
 
 SAMPLE_ROOT = Path(__file__).resolve().parent.parent / "verify" / "sample_project"
 
@@ -91,7 +91,7 @@ class RecordingOrchestratorBackend(FakeOrchestratorBackend):
 
 
 def test_message_provider_is_persisted_from_the_llm_result(tmp_path: Path):
-    from context_insight.db.repositories import messages as messages_repo
+    from blastmap.db.repositories import messages as messages_repo
 
     conn = open_db(tmp_path / "test.db")
     index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend())

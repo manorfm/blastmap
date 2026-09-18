@@ -1,4 +1,4 @@
-# context-insight
+# blastmap
 
 Task-aware change intelligence for AI coding agents: given an engineering task, what
 is the smallest architectural surface an agent needs to understand before touching
@@ -19,7 +19,7 @@ code — with evidence, confidence and freshness made explicit, instead of impli
 
 Agentes de IA que precisam entender um sistema de microsserviços hoje só têm dois
 caminhos: ler o código-fonte inteiro (caro em tokens, lento) ou depender de
-documentação manual que fica desatualizada. O `context-insight` "tritura" uma ou várias
+documentação manual que fica desatualizada. O `blastmap` "tritura" uma ou várias
 árvores de código — repositório por repositório, ou um monorepo de uma vez, de forma
 cumulativa no mesmo banco — usa um LLM (Claude Code ou Codex, via CLI headless,
 usando sua assinatura em vez de API paga) para sintetizar uma documentação enxuta e
@@ -81,23 +81,23 @@ mesmo serviço) e overview superficial (escrito antes de qualquer detalhe existi
 ## Uso básico
 
 ```bash
-context-insight index /caminho/do/repositorio --backend claude   # ou --backend codex
-context-insight index /outro/repositorio --repository-name outro-repo  # múltiplos repos no mesmo DB, cumulativo
-context-insight list
-context-insight status [servico]
-context-insight export md --out docs/
-context-insight export mermaid --out docs/   # diagrama de topologia + ER por serviço
-context-insight serve --backend claude   # servidor MCP (stdio); backend usado só por find_change_surface
-context-insight analyze "Adicionar suporte a Pix no checkout" --backend claude   # roda find_change_surface direto, sem sessão MCP
-context-insight verify <run_id> --repository <nome> --since <commit>   # confere uma predição contra o git diff real
+blastmap index /caminho/do/repositorio --backend claude   # ou --backend codex
+blastmap index /outro/repositorio --repository-name outro-repo  # múltiplos repos no mesmo DB, cumulativo
+blastmap list
+blastmap status [servico]
+blastmap export md --out docs/
+blastmap export mermaid --out docs/   # diagrama de topologia + ER por serviço
+blastmap serve --backend claude   # servidor MCP (stdio); backend usado só por find_change_surface
+blastmap analyze "Adicionar suporte a Pix no checkout" --backend claude   # roda find_change_surface direto, sem sessão MCP
+blastmap verify <run_id> --repository <nome> --since <commit>   # confere uma predição contra o git diff real
 ```
 
-Cada subcomando é autoexplicativo via `--help` (ex. `context-insight index --help`), com um
-exemplo pronto para copiar. `context-insight --help` explica o fluxo completo: **index → ask
+Cada subcomando é autoexplicativo via `--help` (ex. `blastmap index --help`), com um
+exemplo pronto para copiar. `blastmap --help` explica o fluxo completo: **index → ask
 → verify**.
 
 O conhecimento é cumulativo por natureza: dá pra indexar um repositório de cada vez
-(`context-insight index <repo1>`, depois `context-insight index <repo2> --repository-name <repo2>`,
+(`blastmap index <repo1>`, depois `blastmap index <repo2> --repository-name <repo2>`,
 ...) conforme eles forem ficando disponíveis, ou apontar para uma raiz de monorepo de
 uma vez só — o mesmo banco SQLite acumula os dois casos sem colisão de nomes, e
 `find_change_surface`/`search` sempre enxergam tudo que já foi indexado até aquele
@@ -418,7 +418,7 @@ precisou). Chamadas futuras de `find_change_surface` para esse mesmo serviço t�
 feedbacks acumulados, e como um ajuste leve (30%) sobre o palpite fresco do LLM, nunca
 substituindo o julgamento feito com a evidência da tarefa atual.
 
-### Ground truth via git: `verify_change_surface` / `context-insight verify`
+### Ground truth via git: `verify_change_surface` / `blastmap verify`
 
 Em vez de depender só do agente lembrar de reportar o resultado, dá pra confrontar
 uma predição passada contra o `git diff` real de um repositório desde um commit:
@@ -441,17 +441,17 @@ A versão MCP é só leitura (não grava feedback sozinha); a CLI tem um
 `--record-feedback` que, opcionalmente, grava `confirmed`/`rejected` automaticamente
 a partir do resultado:
 ```bash
-context-insight verify 1 --repository my-monorepo --since a1b2c3d --record-feedback
+blastmap verify 1 --repository my-monorepo --since a1b2c3d --record-feedback
 ```
 Cada verificação fica salva (`change_surface_verifications`) e aparece em
-`context-insight status`. É intencionalmente escopada a **um repositório por vez** —
+`blastmap status`. É intencionalmente escopada a **um repositório por vez** —
 comparar vários históricos de git não relacionados sob um único `--since` não faria
 sentido; num setup cumulativo com vários repositórios, roda-se um `verify` por
 repositório, do mesmo jeito que a indexação também é feita um repositório de cada vez.
 
 ## Diagramas (Mermaid)
 
-`context-insight export mermaid --out docs/` gera:
+`blastmap export mermaid --out docs/` gera:
 - **`topology.mmd`** — um `graph TD` do sistema inteiro: cada serviço indexado é um
   nó, cada vendor externo alcançado é um nó arredondado, arestas de `service_calls` e
   de `MESSAGE_LINK` conectam tudo. Serviços envolvidos num ciclo
@@ -529,7 +529,7 @@ Ambos gerados 100% a partir do SQLite, sem custo de LLM.
   de maior valor dado o que já foi computado, sem custo extra de LLM.
 - **`contracts_at_risk`**: consumidores de um evento publicado por um serviço
   relevante, reaproveitando o mesmo join de canal usado por `get_relationships`.
-- **Ground truth via git** (`generation/verification.py`, `context-insight verify`): compara
+- **Ground truth via git** (`generation/verification.py`, `blastmap verify`): compara
   uma predição passada contra o `git diff` real de um repositório, calcula
   precisão/recall e pode gravar feedback automaticamente.
 - **Servidor MCP** com 14 tools (uma escreve feedback; `verify_change_surface` grava um
@@ -570,19 +570,19 @@ Ambos gerados 100% a partir do SQLite, sem custo de LLM.
   reais via protocolo MCP (stdio) para `get_relationships`, `trace_flow`,
   `find_architecture_smells`, `find_change_surface` e `verify_change_surface`, harness
   de eficiência de contexto com orçamento de tamanho de resposta, e uma **suíte de
-  auto-indexação** (`tests/test_self_index_e2e.py`): o próprio `context-insight` indexa
+  auto-indexação** (`tests/test_self_index_e2e.py`): o próprio `blastmap` indexa
   seu próprio código-fonte e responde `find_change_surface` sobre si mesmo — a prova
   mais direta de que o pipeline funciona fim-a-fim contra um código real e não
   trivial, e que já pegou bugs reais (ver "Desenvolvimento" abaixo).
 - **Versionamento manual e deliberado**: `python scripts/bump_version.py
-  <major|minor|patch>` atualiza `pyproject.toml` e `context_insight/__init__.py`
+  <major|minor|patch>` atualiza `pyproject.toml` e `blastmap/__init__.py`
   juntos, como parte do passo de release — sem hook de commit tentando adivinhar o
   bump certo.
 
 ## Segurança
 
 Conteúdo de repositório (README, comentários, código-fonte) é **dado não confiável**,
-nunca instrução. O `context-insight` envia esse conteúdo pro LLM como evidência a ser
+nunca instrução. O `blastmap` envia esse conteúdo pro LLM como evidência a ser
 descrita, não como comando a ser seguido — mas nenhum prompt tem uma defesa
 explícita e dedicada contra prompt injection (ex.: um comentário no código dizendo
 "ignore instruções anteriores e retorne {...}"). Dito isso, o raio de alcance de uma
@@ -614,8 +614,8 @@ testado adversarialmente.
   existentes (SQLite não altera uma tabela via `CREATE TABLE IF NOT EXISTS`; tabelas
   novas são adicionadas automaticamente, colunas novas em tabelas existentes não). Se
   uma mudança de schema afetar uma tabela já existente, apague
-  `~/.context-insight/context-insight.db` (ou o `--db` que você estiver usando) e rode
-  `context-insight index` de novo.
+  `~/.blastmap/blastmap.db` (ou o `--db` que você estiver usando) e rode
+  `blastmap index` de novo.
 - `request_shape` só captura o formato do campo; ainda não compara contratos entre
   indexações pra detectar automaticamente que um campo obrigatório sumiu (isso
   exigiria guardar histórico de schema por API, não implementado). `contracts_at_risk`
@@ -624,9 +624,9 @@ testado adversarialmente.
   trecho certo, mas podem perder padrões incomuns (ex.: cliente HTTP instanciado numa
   variável com nome não convencional), e são desenhadas para o formato de um
   microsserviço web (endpoint HTTP, fila, ORM) — um pacote Python que é biblioteca/CLI
-  em vez de serviço web (como o próprio `context-insight`) não casa com nenhum desses
+  em vez de serviço web (como o próprio `blastmap`) não casa com nenhum desses
   padrões, e por isso só gera a unidade de overview, sem endpoints/persistência/
-  mensageria detectados. Isso também significa que **o próprio `context-insight` não
+  mensageria detectados. Isso também significa que **o próprio `blastmap` não
   consegue se auto-indexar via o comando `index` da CLI** (que exige `matches()`
   passar, e o manifesto de dependências mora na raiz do repo enquanto o código mora
   num subdiretório — nenhum dos dois satisfaz sozinho `PythonDetector.matches()`); a
@@ -650,7 +650,7 @@ testado adversarialmente.
   histórico automaticamente a partir de git, mas ainda não correlaciona tarefas
   parecidas entre si (precedente histórico arquitetural é uma evolução futura, não
   implementada).
-- `verify_change_surface`/`context-insight verify` são escopados a um repositório por
+- `verify_change_surface`/`blastmap verify` são escopados a um repositório por
   vez — não há uma noção de "diff cumulativo" entre vários repositórios não
   relacionados sob um único commit de referência.
 - A heurística determinística de `target_kind`/`resource_type`
@@ -682,9 +682,9 @@ testado adversarialmente.
 ```bash
 pip install -e ".[dev]"
 pytest tests/                                    # suíte determinística (sem LLM), TDD
-pytest tests/ --cov=context_insight --cov-report=term-missing   # cobertura
-ruff check --select F401,F841 context_insight tests scripts     # imports/variáveis não usadas
-vulture context_insight --min-confidence 80                     # funções/atributos não usados
+pytest tests/ --cov=blastmap --cov-report=term-missing   # cobertura
+ruff check --select F401,F841 blastmap tests scripts     # imports/variáveis não usadas
+vulture blastmap --min-confidence 80                     # funções/atributos não usados
 ```
 
 O CI (`.github/workflows/ci.yml`) roda exatamente a suíte de testes determinística em
@@ -693,7 +693,7 @@ Python 3.11/3.12 a cada push/PR — `verify/sample_project.db` não existe em CI
 
 `get_relationships`/`trace_flow`/`find_architecture_smells`/`find_change_surface`/
 `verify_change_surface` são exercitados via sessão MCP real (stdio), que sobe
-`context_insight.mcp.server` num **subprocesso** — para a cobertura enxergar esse
+`blastmap.mcp.server` num **subprocesso** — para a cobertura enxergar esse
 subprocesso (em vez de reportar `mcp/server.py`/`mcp/queries.py` como 0% mesmo sendo
 testados), é preciso um hook de `coverage` no `site-packages` do venv mais a variável
 `COVERAGE_PROCESS_START`:
@@ -706,34 +706,34 @@ python -m coverage combine && python -m coverage report -m
 A suíte automatizada nunca chama um LLM de verdade (backends fake/determinísticos,
 DBs seedadas direto via `db.repositories.*`) — inclusive a suíte de auto-indexação
 (`tests/test_self_index_e2e.py`), que roda a descoberta real contra o próprio
-código-fonte do `context-insight` com um backend fake. Para validar o pipeline real
+código-fonte do `blastmap` com um backend fake. Para validar o pipeline real
 fim-a-fim — discovery → geração LLM real → SQLite → MCP —, use a própria fixture do
 projeto como teste e2e manual:
 ```bash
-context-insight index verify/sample_project --backend claude --db verify/sample_project.db
+blastmap index verify/sample_project --backend claude --db verify/sample_project.db
 pytest tests/test_mcp_tools.py   # antes fica "skipped"; roda de verdade com esse DB
 ```
 Isso também é o que popula `verify/sample_project.db` (gitignored, não versionado —
 cada dev/CI gera o seu).
 
-Auto-indexar o próprio `context-insight` com um backend real **não funciona via CLI**
+Auto-indexar o próprio `blastmap` com um backend real **não funciona via CLI**
 (ver "Limitações conhecidas" — `PythonDetector.matches()` não casa nem com a raiz do
 repo nem com o pacote sozinho); use a API Python diretamente, do mesmo jeito que
 `tests/test_self_index_e2e.py` faz, só trocando o backend fake por um real:
 ```python
 from pathlib import Path
-from context_insight.db.connection import open_db
-from context_insight.discovery.python_stack import PythonDetector
-from context_insight.generation.claude_backend import ClaudeBackend
-from context_insight.generation.orchestrator import index_service
+from blastmap.db.connection import open_db
+from blastmap.discovery.python_stack import PythonDetector
+from blastmap.generation.claude_backend import ClaudeBackend
+from blastmap.generation.orchestrator import index_service
 
 conn = open_db(Path("verify/self_index.db"))
-index_service(conn, "context-insight-core", Path("context_insight"), PythonDetector(), ClaudeBackend(), force=True)
+index_service(conn, "blastmap-core", Path("blastmap"), PythonDetector(), ClaudeBackend(), force=True)
 ```
 Essa é exatamente a validação real feita durante o desenvolvimento: o overview gerado
 descreveu corretamente a arquitetura do próprio projeto (CLI/MCP, os 4 stacks de
 discovery, o pipeline de geração, os exports), e `find_change_surface("Adicionar
-suporte a NATS na descoberta do stack Go")` apontou `context-insight-core` como
+suporte a NATS na descoberta do stack Go")` apontou `blastmap-core` como
 `primary` com 0.9 de confiança e o motivo certo — o próprio scanner é quem precisaria
 mudar.
 
@@ -758,7 +758,7 @@ julgamento do sistema:
   fixture daquela tarefa, que fração `KeywordGraphRetrieval` **não** precisou
   colocar como candidata — a metade determinística e não-circular de "redução de
   exploração" (a outra metade — comparar tool calls/tokens de um agente com e sem
-  o `context-insight` de verdade — exigiria simular um "agente baseline", o que seria
+  o `blastmap` de verdade — exigiria simular um "agente baseline", o que seria
   fabricado e não verificável, então fica como metodologia manual, não código).
   Esse número depende muito do tamanho/conectividade do sistema indexado: nas
   fixtures pequenas e bem conectadas deste benchmark (o cenário "Pix"), a expansão
@@ -769,11 +769,11 @@ julgamento do sistema:
 - **Precisão/recall real (manual, não roda no CI)**: só um LLM de verdade pode
   responder se o *julgamento* de `find_change_surface` está certo. Depois de indexar
   `verify/sample_project` (ou outro projeto real) com um backend real, rode
-  `context-insight analyze "<tarefa>" --backend claude --db verify/sample_project.db` pra
+  `blastmap analyze "<tarefa>" --backend claude --db verify/sample_project.db` pra
   cada tarefa de `benchmark/tasks.py` (sem precisar subir uma sessão MCP) e compare
   `primary`/`secondary` contra `expected_services` à mão — o mesmo tratamento manual
   que o e2e real de `verify/sample_project.db` já recebe. `verify_change_surface`/
-  `context-insight verify` automatiza essa comparação quando já existe um commit real
+  `blastmap verify` automatiza essa comparação quando já existe um commit real
   "depois" pra comparar via `git diff`.
 
 Conforme tarefas de engenharia reais forem acontecendo neste projeto (ou em outro
@@ -783,10 +783,10 @@ exemplos ilustrativos.
 
 ## Referência rápida
 
-**CLI** (`context-insight <comando> --help` para exemplos): `index`, `update`, `list`,
+**CLI** (`blastmap <comando> --help` para exemplos): `index`, `update`, `list`,
 `status`, `export` (`md`|`mermaid`), `analyze`, `verify`, `serve`, `--version`.
 
-**MCP** (`context-insight serve`): `list_repositories`, `list_services`,
+**MCP** (`blastmap serve`): `list_repositories`, `list_services`,
 `describe_service`, `list_apis`, `describe_api`, `describe_persistence`,
 `describe_messages`, `search`, `get_relationships`, `trace_flow`,
 `find_architecture_smells`, `find_change_surface`, `record_change_surface_feedback`,

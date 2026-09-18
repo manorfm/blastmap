@@ -8,8 +8,8 @@ from pathlib import Path
 
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
 
-from context_insight.db.repositories import services as services_repo
-from context_insight.generation import change_surface
+from blastmap.db.repositories import services as services_repo
+from blastmap.generation import change_surface
 
 # Budget: find_change_surface's whole point is a small, progressive-disclosure
 # response an agent can act on without pulling in a service's full documentation —

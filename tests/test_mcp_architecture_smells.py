@@ -7,11 +7,11 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import apis as apis_repo
-from context_insight.db.repositories import service_calls as service_calls_repo
-from context_insight.db.repositories import services as services_repo
-from context_insight.generation.architecture import recompute_architecture_view
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import apis as apis_repo
+from blastmap.db.repositories import service_calls as service_calls_repo
+from blastmap.db.repositories import services as services_repo
+from blastmap.generation.architecture import recompute_architecture_view
 
 from tests.mcp_test_helpers import content_json, server_params
 

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from context_insight.db.connection import open_db
-from context_insight.db.repositories import architecture as architecture_repo
+from blastmap.db.connection import open_db
+from blastmap.db.repositories import architecture as architecture_repo
 
 
 def test_start_run_and_record_finding(tmp_path: Path):

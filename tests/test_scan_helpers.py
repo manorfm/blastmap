@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from context_insight.discovery.scan_helpers import collect_config_excerpts, engine_hint_from_manifest
+from blastmap.discovery.scan_helpers import collect_config_excerpts, engine_hint_from_manifest
 
 
 def test_collect_config_excerpts_finds_known_config_files(tmp_path: Path):
