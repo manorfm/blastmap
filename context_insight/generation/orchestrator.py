@@ -20,6 +20,7 @@ from context_insight.discovery.base import CodeExcerpt, EndpointHint, ServiceHin
 from context_insight.discovery.hashing import file_hash, git_head_commit
 from context_insight.discovery.scan_helpers import SKIP_DIRS, collect_config_excerpts
 from context_insight.discovery.walker import discover_services
+from context_insight.generation.architecture import recompute_architecture_view
 from context_insight.generation.backend_base import LLMBackend
 from context_insight.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 
@@ -442,6 +443,7 @@ def index_service(
     services_repo.set_service_last_commit(conn, service_id, git_head_commit(root))
     service_calls_repo.reconcile_service_call_targets(conn)
     search_repo.rebuild_search_index_for_service(conn, service_id)
+    recompute_architecture_view(conn)
 
     status = "partial" if had_failure else "ok"
     index_runs_repo.finish_index_run(

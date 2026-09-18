@@ -7,6 +7,7 @@ import sqlite3
 from collections import deque
 
 from context_insight.db.repositories import apis as apis_repo
+from context_insight.db.repositories import architecture as architecture_repo
 from context_insight.db.repositories import change_surface as change_surface_repo
 from context_insight.db.repositories import components as components_repo
 from context_insight.db.repositories import messages as messages_repo
@@ -264,6 +265,26 @@ def trace_flow(conn: sqlite3.Connection, from_service: str, to_service: str, max
                 queue.append((hop["to"], new_path))
 
     return {"path": [], "reachable": False, "note": f"no path found within {max_hops} hops"}
+
+
+def find_architecture_smells(conn: sqlite3.Connection) -> dict:
+    run_id = architecture_repo.latest_run_id(conn)
+    if run_id is None:
+        return {"findings": [], "run_id": None, "note": "no architecture run yet — index at least one service first"}
+    findings = architecture_repo.list_findings(conn, run_id)
+    return {
+        "run_id": run_id,
+        "findings": [
+            {
+                "kind": f["kind"],
+                "severity": f["severity"],
+                "services": json.loads(f["services_json"]),
+                "detail": json.loads(f["detail_json"] or "{}"),
+                "reason": f["reason"],
+            }
+            for f in findings
+        ],
+    }
 
 
 def find_change_surface(

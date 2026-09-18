@@ -128,6 +128,27 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.trace_flow(conn, from_service, to_service, max_hops)
 
     @mcp.tool()
+    def find_architecture_smells() -> dict:
+        """Deterministic, whole-graph structural findings computed purely from already-
+        indexed facts (service_calls, persistence_entities) — no LLM call, recomputed
+        after every index/update. Reports: cycle (a circular dependency among internal
+        services — A depends on B depends on ... depends on A), fan_in/fan_out (a
+        service with an unusually high number of direct internal dependents/
+        dependencies — a bottleneck or orchestrator candidate), shared_database (two or
+        more services persisting a same-named entity on the same engine — likely
+        sharing a database, coupling their schemas), and duplicate_external_integration
+        (two or more services independently integrating with the same third-party
+        vendor). Each finding carries a plain-language reason and the services
+        involved, in risk language ('likely', 'worth checking') — never a confirmed
+        verdict; this describes structure, not a judgment call only a human/LLM
+        synthesis over real evidence could make. Call this for a system-wide health
+        check without reading any source file. Next: get_relationships/trace_flow on a
+        flagged service to see the edges behind a finding, or describe_service to
+        understand why it's shaped that way."""
+        with closing(_conn()) as conn:
+            return queries.find_architecture_smells(conn)
+
+    @mcp.tool()
     def find_change_surface(task: str, hint_services: list[str] | None = None) -> dict:
         """Given a business task/epic description, find which indexed services likely
         need code changes — WITHOUT reading any source file. Call this FIRST when handed
