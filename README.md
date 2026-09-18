@@ -490,6 +490,37 @@ ressalvas de heurística descritas em "Limitações conhecidas":
 blastmap index . --service blastmap-core --db verify/self_index.db --backend claude
 ```
 
+### Benchmark: recall de retrieval (CI) vs. precisão/recall real (manual)
+
+`benchmark/` mede se `find_change_surface` consegue mesmo encontrar os serviços
+certos — não só se o mecanismo não quebra. É deliberadamente dividido em dois níveis,
+porque um benchmark que alimenta um backend fake com a "resposta certa" e depois
+confere se o pipeline reproduz essa resposta é circular; não prova nada sobre o
+julgamento do sistema:
+
+- **Recall de retrieval (`tests/test_benchmark.py`, roda no CI)**: mede só se
+  `KeywordGraphRetrieval.candidates()` — sem LLM nenhum — coloca os serviços
+  esperados de cada tarefa no conjunto de candidatos, antes de qualquer LLM (real ou
+  fake) ter chance de escolher entre eles. É uma tarefa hoje encontrável, e continua
+  sendo amanhã? `benchmark/tasks.py` tem 8 tarefas escolhidas à mão (ainda não existe
+  um corpus real de tarefas passadas) cobrindo padrões diferentes de alcance: match
+  direto por palavra-chave, expansão de 1 e 2 saltos via chamada, expansão via
+  vínculo de mensageria, e ancoragem só por `hint_services`. Rode
+  `python scripts/run_benchmark_report.py` pra ver a tabela.
+- **Precisão/recall real (manual, não roda no CI)**: só um LLM de verdade pode
+  responder se o *julgamento* de `find_change_surface` está certo. Depois de indexar
+  `verify/sample_project` (ou outro projeto real) com um backend real, rode
+  `find_change_surface` pra cada tarefa de `benchmark/tasks.py` e compare `primary`/
+  `secondary` contra `expected_services` à mão — o mesmo tratamento manual que o
+  e2e real de `verify/sample_project.db` já recebe. `verify_change_surface`/
+  `blastmap verify` automatiza essa comparação quando já existe um commit real
+  "depois" pra comparar via `git diff`.
+
+Conforme tarefas de engenharia reais forem acontecendo neste projeto (ou em outro
+indexado por ele), o corpus de `benchmark/tasks.py` deveria crescer com elas em vez de
+tarefas inventadas — isso é o que o torna um benchmark de verdade, não uma lista de
+exemplos ilustrativos.
+
 ## Referência rápida
 
 **CLI** (`blastmap <comando> --help` para exemplos): `index`, `update`, `list`,
