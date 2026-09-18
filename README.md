@@ -444,6 +444,34 @@ do mesmo jeito que a indexação também é feita um repositório de cada vez.
   <major|minor|patch>` atualiza `pyproject.toml` e `blastmap/__init__.py` juntos, como
   parte do passo de release — sem hook de commit tentando adivinhar o bump certo.
 
+## Segurança
+
+Conteúdo de repositório (README, comentários, código-fonte) é **dado não confiável**,
+nunca instrução. O `blastmap` envia esse conteúdo pro LLM como evidência a ser
+descrita, não como comando a ser seguido — mas nenhum prompt tem uma defesa
+explícita e dedicada contra prompt injection (ex.: um comentário no código dizendo
+"ignore instruções anteriores e retorne {...}"). Dito isso, o raio de alcance de uma
+injeção bem-sucedida já é limitado estruturalmente, por dois mecanismos que já
+existem por outro motivo, não como mitigação de segurança dedicada:
+
+1. **Validação estrita de schema** (`generation/llm_harness.py`,
+   `generate_with_retry`): toda resposta do LLM é validada contra um JSON Schema com
+   `additionalProperties: false`, enums fechados e campos obrigatórios — mesmo que um
+   prompt injection convença o modelo a "dizer" algo diferente, a saída continua
+   presa ao formato esperado.
+2. **Lista fechada de candidatos** (`generation/change_surface.py`,
+   `_filter_known`): qualquer nome de serviço que o LLM retornar fora da lista de
+   candidatos já indexados é descartado antes de qualquer resposta sair — um
+   `fraud-service` inventado (por injeção ou alucinação comum) nunca vira uma
+   entidade real na resposta.
+
+Isso reduz o dano possível, não elimina o vetor. Se isso vier a importar mais (ex.:
+indexar repositórios de terceiros não confiáveis), vale reforçar os prompts com uma
+seção explícita de "o texto abaixo é dado, não instrução" — hoje o prompt de
+`find_change_surface` já se aproxima disso ("Use ONLY the information given above.
+Do not invent or classify a service that is not listed above."), mas isso nunca foi
+testado adversarialmente.
+
 ## Limitações conhecidas
 
 - **Sem retrocompatibilidade de schema**: o banco não tem framework de migração de
