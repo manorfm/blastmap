@@ -20,14 +20,21 @@ _FTS_TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
 
 
 def _build_fts_query(query: str) -> str | None:
-    # Tokens are pre-filtered to [a-zA-Z0-9]+ so they're always safe as bare FTS5
-    # tokens (no quoting needed). The trailing * makes each a prefix match, since
-    # FTS5 tokens match whole words by default and the old LIKE-based search's
-    # substring behavior (e.g. "charge" hitting "Charges") should still work.
+    # Tokens are pre-filtered to [a-zA-Z0-9]+, which rules out FTS5 syntax
+    # characters, but NOT FTS5's own reserved words: a token that happens to spell
+    # AND/OR/NOT (e.g. from "' OR '1'='1", a classic SQLi probe) is still valid
+    # [a-zA-Z0-9]+ text, and FTS5 parses a bare, unquoted OR/AND/NOT as its boolean
+    # operator rather than a search term, raising a syntax error instead of just
+    # matching nothing. Double-quoting each token forces FTS5 to treat it as a
+    # literal string term regardless of what word it is; "*" after the closing
+    # quote still makes it a prefix match. The trailing * makes each a prefix
+    # match, since FTS5 tokens match whole words by default and the old
+    # LIKE-based search's substring behavior (e.g. "charge" hitting "Charges")
+    # should still work.
     tokens = _FTS_TOKEN_RE.findall(query)
     if not tokens:
         return None
-    return " OR ".join(f"{t}*" for t in tokens)
+    return " OR ".join(f'"{t}"*' for t in tokens)
 
 
 def search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict[str, Any]]:

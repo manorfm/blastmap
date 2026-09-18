@@ -53,6 +53,20 @@ def test_search_ranks_stronger_matches_first(tmp_path: Path):
     assert names_in_order.index("discount-service") < names_in_order.index("catalog-service")
 
 
+def test_search_handles_a_query_that_looks_like_an_fts5_operator(tmp_path: Path):
+    # "OR"/"AND"/"NOT" are FTS5 boolean operators; a query whose tokens happen to
+    # spell one out as a bare word (e.g. "' OR '1'='1", a classic SQLi probe) must
+    # not reach FTS5's parser unquoted, or it raises sqlite3.OperationalError
+    # instead of just returning a normal (possibly non-empty, via prefix match)
+    # result list (found via DAST, tests/test_dast_adversarial_inputs.py).
+    conn = open_db(tmp_path / "test.db")
+    services_repo.ensure_service(conn, "catalog-service", "/tmp/catalog", "python")
+    search_repo.rebuild_search_index(conn)
+
+    assert search_repo.search(conn, "' OR '1'='1") == []
+    assert search_repo.search(conn, "AND NOT") == []
+
+
 def test_search_index_is_rebuilt_per_service_without_duplicating_others(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     a_id = services_repo.ensure_service(conn, "service-a", "/tmp/a", "python")

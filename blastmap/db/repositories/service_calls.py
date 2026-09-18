@@ -60,29 +60,51 @@ def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | N
     *other* service's previously-dangling calls that named it before it existed —
     that's the one direction that genuinely needs the whole table.
     """
-    scope_sql = " AND from_service_id = ?" if service_id is not None else ""
+    # Two fully-literal query variants (scoped/unscoped) instead of interpolating a
+    # WHERE-clause fragment into an f-string: functionally the same two outcomes as
+    # before, but each statement is now a plain string constant end to end, with the
+    # only variable part passed as a bound parameter — not a pattern a SQL-injection
+    # scanner (or a future reader) has to reason about the safety of.
     scope_params = (service_id,) if service_id is not None else ()
 
-    conn.execute(
-        f"""
-        UPDATE service_calls
-        SET to_service_id = (SELECT id FROM services WHERE services.name = service_calls.to_service_name)
-        WHERE (to_service_id IS NULL
-           OR to_service_id != (SELECT id FROM services WHERE services.name = service_calls.to_service_name))
-           {scope_sql}
-        """,
-        scope_params,
-    )
-    conn.execute(
-        f"UPDATE service_calls SET target_kind = 'internal' WHERE to_service_id IS NOT NULL{scope_sql}",
-        scope_params,
-    )
+    if service_id is not None:
+        conn.execute(
+            """
+            UPDATE service_calls
+            SET to_service_id = (SELECT id FROM services WHERE services.name = service_calls.to_service_name)
+            WHERE (to_service_id IS NULL
+               OR to_service_id != (SELECT id FROM services WHERE services.name = service_calls.to_service_name))
+               AND from_service_id = ?
+            """,
+            scope_params,
+        )
+        conn.execute(
+            "UPDATE service_calls SET target_kind = 'internal' "
+            "WHERE to_service_id IS NOT NULL AND from_service_id = ?",
+            scope_params,
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE service_calls
+            SET to_service_id = (SELECT id FROM services WHERE services.name = service_calls.to_service_name)
+            WHERE (to_service_id IS NULL
+               OR to_service_id != (SELECT id FROM services WHERE services.name = service_calls.to_service_name))
+            """
+        )
+        conn.execute("UPDATE service_calls SET target_kind = 'internal' WHERE to_service_id IS NOT NULL")
 
     known_names = {row["name"] for row in conn.execute("SELECT name FROM services")}
-    unresolved_unknown = conn.execute(
-        f"SELECT id, to_service_name FROM service_calls WHERE to_service_id IS NULL AND target_kind = 'unknown'{scope_sql}",
-        scope_params,
-    ).fetchall()
+    if service_id is not None:
+        unresolved_unknown = conn.execute(
+            "SELECT id, to_service_name FROM service_calls "
+            "WHERE to_service_id IS NULL AND target_kind = 'unknown' AND from_service_id = ?",
+            scope_params,
+        ).fetchall()
+    else:
+        unresolved_unknown = conn.execute(
+            "SELECT id, to_service_name FROM service_calls WHERE to_service_id IS NULL AND target_kind = 'unknown'"
+        ).fetchall()
     for row in unresolved_unknown:
         kind = classify_target_kind(row["to_service_name"], known_names)
         if kind != "unknown":
@@ -91,11 +113,17 @@ def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | N
     # Same fallback posture as target_kind: only fills a gap the LLM itself left
     # unresolved ('not_applicable'/'unknown'), and only for calls that ended up
     # 'external' — resource_type is meaningless for internal/unknown targets.
-    unresolved_resource_type = conn.execute(
-        f"""SELECT id, to_service_name FROM service_calls
-            WHERE target_kind = 'external' AND resource_type IN ('not_applicable', 'unknown'){scope_sql}""",
-        scope_params,
-    ).fetchall()
+    if service_id is not None:
+        unresolved_resource_type = conn.execute(
+            "SELECT id, to_service_name FROM service_calls "
+            "WHERE target_kind = 'external' AND resource_type IN ('not_applicable', 'unknown') AND from_service_id = ?",
+            scope_params,
+        ).fetchall()
+    else:
+        unresolved_resource_type = conn.execute(
+            "SELECT id, to_service_name FROM service_calls "
+            "WHERE target_kind = 'external' AND resource_type IN ('not_applicable', 'unknown')"
+        ).fetchall()
     for row in unresolved_resource_type:
         resource_type = classify_resource_type(row["to_service_name"])
         if resource_type != "unknown":
