@@ -370,12 +370,13 @@ do mesmo jeito que a indexação também é feita um repositório de cada vez.
 - **Ground truth via git** (`generation/verification.py`, `blastmap verify`): compara
   uma predição passada contra o `git diff` real de um repositório, calcula
   precisão/recall e pode gravar feedback automaticamente.
-- **Servidor MCP** com 12 tools (uma escreve feedback; `verify_change_surface` grava um
+- **Servidor MCP** com 13 tools (uma escreve feedback; `verify_change_surface` grava um
   registro de auditoria mas não grava feedback sozinha): as 7 originais
   (`list_services`, `describe_service`, `list_apis`, `describe_api`,
-  `describe_persistence`, `describe_messages`, `search`) mais cinco de
-  navegação/inferência/verificação: `get_relationships`, `trace_flow`,
-  `find_change_surface`, `record_change_surface_feedback` e `verify_change_surface`.
+  `describe_persistence`, `describe_messages`, `search`) mais seis de
+  navegação/inferência/verificação: `list_repositories` (visão cumulativa por
+  repositório), `get_relationships`, `trace_flow`, `find_change_surface`,
+  `record_change_surface_feedback` e `verify_change_surface`.
   Toda tool documenta no próprio docstring quando chamá-la, o que ela devolve e qual a
   próxima tool natural — a narrativa de progressive disclosure vive no schema MCP, não
   só no README. Registrável em qualquer cliente MCP (Claude Code, Codex, etc.).
@@ -526,7 +527,7 @@ exemplos ilustrativos.
 **CLI** (`blastmap <comando> --help` para exemplos): `index`, `update`, `list`,
 `status`, `export`, `verify`, `serve`, `--version`.
 
-**MCP** (`blastmap serve`): `list_services`, `describe_service`, `list_apis`,
-`describe_api`, `describe_persistence`, `describe_messages`, `search`,
+**MCP** (`blastmap serve`): `list_repositories`, `list_services`, `describe_service`,
+`list_apis`, `describe_api`, `describe_persistence`, `describe_messages`, `search`,
 `get_relationships`, `trace_flow`, `find_change_surface`,
 `record_change_surface_feedback`, `verify_change_surface`.

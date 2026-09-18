@@ -48,6 +48,21 @@ def test_ensure_repository_links_to_service(tmp_path: Path):
     assert row["repository_id"] == repo_id
 
 
+def test_list_repositories_includes_service_count(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repo_id = repositories_repo.ensure_repository(conn, "mono-repo", "/tmp/mono-repo")
+    other_repo_id = repositories_repo.ensure_repository(conn, "empty-repo", "/tmp/empty-repo")
+    services_repo.ensure_service(conn, "checkout-service", "/tmp/mono-repo/checkout", "python", repository_id=repo_id)
+    services_repo.ensure_service(conn, "payments-service", "/tmp/mono-repo/payments", "node-ts", repository_id=repo_id)
+
+    repos = {r["name"]: r for r in repositories_repo.list_repositories(conn)}
+
+    assert repos["mono-repo"]["service_count"] == 2
+    assert repos["empty-repo"]["service_count"] == 0
+    assert repos["mono-repo"]["root_path"] == "/tmp/mono-repo"
+    assert other_repo_id > 0
+
+
 def test_list_services_for_repository(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     repo_id = repositories_repo.ensure_repository(conn, "mono-repo", "/tmp/mono-repo")

@@ -26,6 +26,17 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         return open_db(db_path)
 
     @mcp.tool()
+    def list_repositories() -> dict:
+        """Call this to see what's been cumulatively indexed so far, at the
+        repository level — name, root path and how many services came from it.
+        Knowledge here is additive: repositories can be indexed one at a time or as
+        one monorepo, and this reflects everything indexed up to now, not just the
+        last run. Next: list_services for the service-level view, or
+        find_change_surface if you already have a specific engineering task."""
+        with closing(_conn()) as conn:
+            return queries.list_repositories(conn)
+
+    @mcp.tool()
     def list_services() -> dict:
         """Call this first, to see what's indexed: every microservice with a
         one-line description, stack and API count. Next: describe_service on

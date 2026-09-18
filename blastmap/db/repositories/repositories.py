@@ -23,7 +23,13 @@ def ensure_repository(conn: sqlite3.Connection, name: str, root_path: str) -> in
 
 
 def list_repositories(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT * FROM repositories ORDER BY name").fetchall()
+    return conn.execute(
+        """
+        SELECT r.*, (SELECT COUNT(*) FROM services s WHERE s.repository_id = r.id) AS service_count
+        FROM repositories r
+        ORDER BY r.name
+        """
+    ).fetchall()
 
 
 def get_repository_by_name(conn: sqlite3.Connection, name: str) -> sqlite3.Row | None:

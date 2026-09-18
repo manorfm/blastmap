@@ -10,6 +10,7 @@ from blastmap.db.repositories import apis as apis_repo
 from blastmap.db.repositories import change_surface as change_surface_repo
 from blastmap.db.repositories import messages as messages_repo
 from blastmap.db.repositories import persistence as persistence_repo
+from blastmap.db.repositories import repositories as repositories_repo
 from blastmap.db.repositories import search as search_repo
 from blastmap.db.repositories import service_calls as service_calls_repo
 from blastmap.db.repositories import services as services_repo
@@ -28,6 +29,16 @@ def _fmt_call(c: sqlite3.Row) -> dict:
         "data_needed": json.loads(c["data_needed"] or "[]"),
         "purpose_kind": c["purpose_kind"],
         "target_kind": c["target_kind"],
+    }
+
+
+def list_repositories(conn: sqlite3.Connection) -> dict:
+    rows = repositories_repo.list_repositories(conn)
+    return {
+        "repositories": [
+            {"name": r["name"], "root_path": r["root_path"], "service_count": r["service_count"]}
+            for r in rows
+        ]
     }
 
 
