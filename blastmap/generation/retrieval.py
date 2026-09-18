@@ -65,11 +65,17 @@ class KeywordGraphRetrieval:
         return self._expand_candidates(conn, seeds, max_candidates)
 
     def _seed_services(self, conn: sqlite3.Connection, task: str) -> set[str]:
-        seeds: set[str] = set()
-        for keyword in _extract_keywords(task):
-            for r in search_repo.search(conn, keyword, limit=20):
-                seeds.add(r["service"])
-        return seeds
+        keywords = _extract_keywords(task)
+        if not keywords:
+            return set()
+        # search()'s own _build_fts_query already ORs every token in whatever string
+        # it's given into one MATCH query, so passing all keywords at once here
+        # reproduces the same OR-matching semantics as searching each individually,
+        # in one round trip instead of N. The limit scales with keyword count so a
+        # task with several distinct keywords doesn't get capped below what the old
+        # per-keyword loop (limit=20 each) would have found in aggregate.
+        limit = 20 * len(keywords)
+        return {r["service"] for r in search_repo.search(conn, " ".join(keywords), limit=limit)}
 
     def _expand_candidates(self, conn: sqlite3.Connection, seeds: set[str], max_candidates: int) -> list[str]:
         visited: set[str] = set()

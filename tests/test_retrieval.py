@@ -71,6 +71,25 @@ def test_no_seeds_and_no_hints_returns_empty(tmp_path: Path):
     assert candidates == []
 
 
+def test_seeding_issues_one_batched_search_call_not_one_per_keyword(tmp_path: Path, monkeypatch):
+    conn = _seed_db(tmp_path / "retrieval5.db")
+    retrieval = KeywordGraphRetrieval()
+    calls = []
+    real_search = search_repo.search
+
+    def spy(conn_, query, limit=20):
+        calls.append(query)
+        return real_search(conn_, query, limit=limit)
+
+    monkeypatch.setattr(search_repo, "search", spy)
+
+    # Three keywords, each matching a different service by itself.
+    candidates = retrieval.candidates(conn, "checkout payment orders", hint_services=None, max_candidates=10)
+
+    assert len(calls) == 1  # batched into a single FTS5 query, not one per keyword
+    assert {"checkout-service", "payments-service", "order-service"}.issubset(set(candidates))
+
+
 def test_candidates_are_capped_at_max_candidates(tmp_path: Path):
     conn = _seed_db(tmp_path / "retrieval4.db")
     retrieval = KeywordGraphRetrieval()
