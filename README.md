@@ -267,12 +267,15 @@ não fato:
 - **`contracts_at_risk`**: eventos publicados por um serviço `primary`/`secondary` e
   quem mais consome aquele canal — sempre em linguagem de risco ("potentially
   affects", "requires verification"), nunca declarando uma quebra confirmada.
-- **`unknowns`**: toda lacuna explícita da resposta (serviço não mapeado, ou a tarefa
-  inteira não bateu com nada indexado), com `status`, `reason` e `suggestion` — pra um
+- **`unknowns`**: toda lacuna explícita da resposta — serviço não mapeado, a tarefa
+  inteira não bateu com nada indexado, **ou um serviço relevante cujo `freshness`
+  veio `stale`** (o que significa que os motivos de dependência guardados sobre ele
+  também podem estar desatualizados) — com `status`, `reason` e `suggestion` — pra um
   agente poder ramificar em cima disso em vez de inferir "não existe" de uma lista
   vazia.
 - **`freshness`**: por serviço relevante, se o conhecimento indexado pode estar
-  desatualizado (commit indexado vs. commit atual do repositório).
+  desatualizado (commit indexado vs. commit atual do repositório). Um serviço `stale`
+  também gera uma entrada correspondente em `unknowns`.
 - **`recommended_next_queries`**: lista ranqueada de `{tool, arguments, reason}` — as
   próximas chamadas MCP de maior valor dado o que já se sabe (ex.: `describe_api` num
   serviço `primary` sem detalhe carregado, ou `index` numa dependência de

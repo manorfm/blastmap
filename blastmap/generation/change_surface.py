@@ -266,6 +266,24 @@ def _derive_contracts_at_risk(conn: sqlite3.Connection, service_names: set[str])
     return list(contracts.values())
 
 
+def _derive_stale_unknowns(freshness: dict[str, dict]) -> list[dict]:
+    """Freshness is per-service; this is what makes it actionable at the change-
+    surface level: a stale relevant service means its stored dependency reasons
+    (why it calls what, with what data) may themselves be out of date, so an agent
+    shouldn't just trust them silently.
+    """
+    return [
+        {
+            "status": "unknown",
+            "service": name,
+            "reason": f"indexed knowledge for {name} may be stale (new commits since indexing)",
+            "suggestion": f"reindex {name} before trusting its dependency reasons",
+        }
+        for name, f in freshness.items()
+        if f.get("stale") is True
+    ]
+
+
 def _derive_unknowns_from_unmapped(unmapped_internal_hint: list[dict]) -> list[dict]:
     """Every unmapped_internal_hint finding is, by definition, a gap in the System
     Knowledge Model: a dependency that looks internal but was never indexed. Restate
@@ -317,6 +335,8 @@ def analyze_change_surface(
     relevant = set(primary_names) | set(secondary_names)
     unmapped_internal_hint = _derive_dependency_hints(conn, relevant, service_calls_repo.list_unmapped_internal_calls)
     next_queries = NextQueryRecommender().recommend(conn, primary_names, secondary_names, unmapped_internal_hint)
+    freshness = _compute_freshness_for(conn, relevant)
+    unknowns = _derive_unknowns_from_unmapped(unmapped_internal_hint) + _derive_stale_unknowns(freshness)
     response = (
         ChangeSurfaceBuilder()
         .with_findings(primary, secondary, no_change)
@@ -324,8 +344,8 @@ def analyze_change_surface(
         .with_external_integrations(_derive_dependency_hints(conn, relevant, service_calls_repo.list_external_integration_calls))
         .with_unmapped_internal_hint(unmapped_internal_hint)
         .with_contracts_at_risk(_derive_contracts_at_risk(conn, relevant))
-        .with_freshness(_compute_freshness_for(conn, relevant))
-        .with_unknowns(_derive_unknowns_from_unmapped(unmapped_internal_hint))
+        .with_freshness(freshness)
+        .with_unknowns(unknowns)
         .with_recommended_next_queries(next_queries)
         .build()
     )

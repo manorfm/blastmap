@@ -138,9 +138,11 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         integration too) and unmapped_internal_hint (dependencies that look like internal
         services of this same system but haven't been indexed yet — index them for a
         fuller picture). unknowns lists every gap in the answer explicitly (status,
-        reason, suggestion) instead of silently omitting it, and freshness reports,
-        per relevant service, whether its indexed knowledge might be stale (its indexed
-        commit vs. the repository's current commit). recommended_next_queries is a
+        reason, suggestion) instead of silently omitting it — including a relevant
+        service whose freshness came back stale, since its stored dependency reasons
+        may themselves be out of date. freshness reports, per relevant service,
+        whether its indexed knowledge might be stale (its indexed commit vs. the
+        repository's current commit). recommended_next_queries is a
         ranked list of {tool, arguments, reason} — the highest-value MCP tool calls to
         make next given what's already known, computed for free with no extra LLM
         cost; prefer it over exploring blindly. This is a task-specific inference,

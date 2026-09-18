@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from blastmap.db.connection import open_db
+from blastmap.db.repositories import search as search_repo
 from blastmap.db.repositories import services as services_repo
 from blastmap.generation import change_surface
 from blastmap.mcp import queries
@@ -61,3 +62,47 @@ def test_find_change_surface_reports_freshness_per_relevant_service(tmp_path: Pa
 
     assert "checkout-service" in result["freshness"]
     assert "stale" in result["freshness"]["checkout-service"]
+
+
+def test_stale_relevant_service_produces_an_unknowns_entry(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    commit = _init_git_repo(tmp_path)
+    service_id = services_repo.ensure_service(conn, "checkout-service", str(tmp_path), "python")
+    services_repo.set_service_last_commit(conn, service_id, commit)
+    services_repo.update_service_overview(conn, service_id, "Owns checkout.", "Long.")
+    search_repo.rebuild_search_index(conn)
+
+    (tmp_path / "b.txt").write_text("2")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "second"], cwd=tmp_path, check=True)
+
+    backend = FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "checkout task", backend, hint_services=["checkout-service"])
+
+    assert result["freshness"]["checkout-service"]["stale"] is True
+    stale_unknowns = [u for u in result["unknowns"] if u.get("service") == "checkout-service"]
+    assert len(stale_unknowns) == 1
+    assert "stale" in stale_unknowns[0]["reason"] or "may be" in stale_unknowns[0]["reason"]
+
+
+def test_fresh_relevant_service_produces_no_stale_unknowns_entry(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    commit = _init_git_repo(tmp_path)
+    service_id = services_repo.ensure_service(conn, "checkout-service", str(tmp_path), "python")
+    services_repo.set_service_last_commit(conn, service_id, commit)
+    services_repo.update_service_overview(conn, service_id, "Owns checkout.", "Long.")
+    search_repo.rebuild_search_index(conn)
+
+    backend = FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "checkout task", backend, hint_services=["checkout-service"])
+
+    assert result["freshness"]["checkout-service"]["stale"] is False
+    assert result["unknowns"] == []
