@@ -83,6 +83,39 @@ def test_target_kind_is_persisted_and_ground_truth_overrides_llm_guess(tmp_path:
     assert calls_after["shipping-service"] == "internal"  # unchanged, still a heuristic guess
 
 
+def test_reconcile_scoped_to_one_service_leaves_other_services_rows_untouched(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    # "gatewaytarget" deliberately has no "-service"/"-svc" suffix, so the naming-
+    # convention heuristic (discovery/integration_heuristics.py) can't jump in and
+    # classify it before ground truth does — it must stay "unknown" until a real
+    # service of that exact name is indexed.
+    a_id = services_repo.ensure_service(conn, "a-service", "/tmp/a", "python")
+    b_id = services_repo.ensure_service(conn, "b-service", "/tmp/b", "python")
+    a_api = apis_repo.upsert_api(conn, a_id, "GET", "/a", "s", "d", [], EVIDENCE)
+    b_api = apis_repo.upsert_api(conn, b_id, "GET", "/b", "s", "d", [], EVIDENCE)
+    for service_id, api_id in ((a_id, a_api), (b_id, b_api)):
+        service_calls_repo.replace_calls_for_api(
+            conn, service_id, api_id,
+            [{"to_service_name": "gatewaytarget", "call_kind": "http", "reason": "r",
+              "data_needed": [], "purpose_kind": "other", "confidence": 0.5, "target_kind": "unknown"}],
+            EVIDENCE,
+        )
+    # gatewaytarget didn't exist yet when either call was written, so both are dangling.
+
+    services_repo.ensure_service(conn, "gatewaytarget", "/tmp/c", "python")
+    service_calls_repo.reconcile_service_call_targets(conn, service_id=a_id)
+
+    a_calls = {c["to_service_name"]: c["target_kind"] for c in service_calls_repo.list_calls_for_service(conn, a_id)}
+    b_calls = {c["to_service_name"]: c["target_kind"] for c in service_calls_repo.list_calls_for_service(conn, b_id)}
+    assert a_calls["gatewaytarget"] == "internal"  # scoped reconcile resolved a-service's own row
+    assert b_calls["gatewaytarget"] == "unknown"  # untouched: b-service wasn't in scope
+
+    service_calls_repo.reconcile_service_call_targets(conn)  # unscoped: resolves everyone
+
+    b_calls_after = {c["to_service_name"]: c["target_kind"] for c in service_calls_repo.list_calls_for_service(conn, b_id)}
+    assert b_calls_after["gatewaytarget"] == "internal"
+
+
 def test_inbound_calls(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     checkout_id = services_repo.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")

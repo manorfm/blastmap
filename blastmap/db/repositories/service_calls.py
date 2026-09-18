@@ -38,10 +38,10 @@ def replace_calls_for_api(
         ],
     )
     conn.commit()
-    reconcile_service_call_targets(conn)
+    reconcile_service_call_targets(conn, service_id=from_service_id)
 
 
-def reconcile_service_call_targets(conn: sqlite3.Connection) -> None:
+def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | None = None) -> None:
     """Resolve to_service_id by exact name match, then refine target_kind:
 
     - Ground truth wins: any call that resolves to a real indexed service is
@@ -50,20 +50,37 @@ def reconcile_service_call_targets(conn: sqlite3.Connection) -> None:
       LLM couldn't tell from the code alone), fall back to the deterministic
       vendor-name / naming-convention heuristic — never LLM-driven, purely a name
       match against the vendor list and the shape of already-known service names.
+
+    Reconciling one row only ever depends on that row's own to_service_name plus the
+    services table — never on any other service_calls row — so scoping to
+    service_id (this call's own writer) is exact, not an approximation: pass it after
+    writing one service's calls (replace_calls_for_api already does). Call it
+    unscoped (service_id=None) once after a service is newly indexed, to resolve any
+    *other* service's previously-dangling calls that named it before it existed —
+    that's the one direction that genuinely needs the whole table.
     """
+    scope_sql = " AND from_service_id = ?" if service_id is not None else ""
+    scope_params = (service_id,) if service_id is not None else ()
+
     conn.execute(
-        """
+        f"""
         UPDATE service_calls
         SET to_service_id = (SELECT id FROM services WHERE services.name = service_calls.to_service_name)
-        WHERE to_service_id IS NULL
-           OR to_service_id != (SELECT id FROM services WHERE services.name = service_calls.to_service_name)
-        """
+        WHERE (to_service_id IS NULL
+           OR to_service_id != (SELECT id FROM services WHERE services.name = service_calls.to_service_name))
+           {scope_sql}
+        """,
+        scope_params,
     )
-    conn.execute("UPDATE service_calls SET target_kind = 'internal' WHERE to_service_id IS NOT NULL")
+    conn.execute(
+        f"UPDATE service_calls SET target_kind = 'internal' WHERE to_service_id IS NOT NULL{scope_sql}",
+        scope_params,
+    )
 
     known_names = {row["name"] for row in conn.execute("SELECT name FROM services")}
     unresolved_unknown = conn.execute(
-        "SELECT id, to_service_name FROM service_calls WHERE to_service_id IS NULL AND target_kind = 'unknown'"
+        f"SELECT id, to_service_name FROM service_calls WHERE to_service_id IS NULL AND target_kind = 'unknown'{scope_sql}",
+        scope_params,
     ).fetchall()
     for row in unresolved_unknown:
         kind = classify_target_kind(row["to_service_name"], known_names)

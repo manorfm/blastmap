@@ -346,7 +346,12 @@ do mesmo jeito que a indexação também é feita um repositório de cada vez.
 - **SQLite como fonte da verdade** — um System Knowledge Model único, com
   `repositories` (multi-repositório explícito, cumulativo) e `services.repository_id`,
   e atualização incremental por hash de arquivo: só regenera a unidade (API/
-  persistência/mensageria/overview) cujo arquivo mudou.
+  persistência/mensageria/overview) cujo arquivo mudou. A reconciliação de
+  `target_kind`/`to_service_id` (`reconcile_service_call_targets`) é escopada ao
+  serviço recém-escrito durante a indexação — não mais uma varredura da tabela
+  inteira a cada API — e só roda sem escopo (tabela inteira) uma vez por serviço
+  novo, pra resolver chamadas de outros serviços que apontavam pra ele antes dele
+  existir.
 - **Camada de repositório dividida por agregado** (`db/repositories/`: `services`,
   `apis`, `service_calls`, `persistence`, `messages`, `indexed_files`,
   `change_surface`, `verification`, `index_runs`, `search`, `repositories`) — cada
