@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from blastmap.db.repositories import indexed_files as indexed_files_repo
 from blastmap.db.repositories import services as services_repo
 from blastmap.db.repositories import verification as verification_repo
 from blastmap.export.markdown import export_markdown
+from blastmap.generation import change_surface
 from blastmap.generation.backend_base import GenerationError
 from blastmap.generation.orchestrator import DiscoveryError, index_path, index_service
 from blastmap.generation.verification import verify_change_surface
@@ -114,6 +116,14 @@ def _cmd_export(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     written = export_markdown(conn, Path(args.out), service_filter=args.service)
     print(f"wrote {len(written)} files under {args.out}")
+    return 0
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    result = change_surface.analyze_change_surface(conn, args.task, backend, hint_services=args.hint_services)
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -227,6 +237,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.add_argument("--service", default=None)
     p_export.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     p_export.set_defaults(func=_cmd_export)
+
+    p_analyze = sub.add_parser(
+        "analyze", help="Run find_change_surface for a task and print the result as JSON",
+        epilog=(
+            "examples:\n"
+            "  blastmap analyze \"Add support for Pix in checkout\"\n"
+            "  blastmap analyze \"Add support for Pix in checkout\" --backend claude --db verify/sample_project.db\n"
+            "  blastmap analyze \"xyz internal cleanup\" --hint-services notification-service\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_analyze.add_argument("task")
+    p_analyze.add_argument("--hint-services", nargs="+", default=None, help="Anchor the search on these services even without a keyword match")
+    add_backend_args(p_analyze)
+    p_analyze.set_defaults(func=_cmd_analyze)
 
     p_verify = sub.add_parser(
         "verify", help="Compare a past find_change_surface run against what a repository's commits actually changed",

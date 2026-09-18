@@ -63,6 +63,7 @@ blastmap list
 blastmap status [servico]
 blastmap export md --out docs/
 blastmap serve --backend claude   # servidor MCP (stdio); backend usado só por find_change_surface
+blastmap analyze "Adicionar suporte a Pix no checkout" --backend claude   # roda find_change_surface direto, sem sessão MCP
 blastmap verify <run_id> --repository <nome> --since <commit>   # confere uma predição contra o git diff real
 ```
 
@@ -416,12 +417,15 @@ do mesmo jeito que a indexação também é feita um repositório de cada vez.
 - **CI** (GitHub Actions, `.github/workflows/ci.yml`): roda a suíte inteira em
   Python 3.11 e 3.12 a cada push/PR — nenhum teste depende de `claude`/`codex` CLI
   real (backend sempre fake ou dados seedados direto via `db.repositories.*`).
-- **CLI** (`index`, `update`, `list`, `status`, `export`, `verify`, `serve`) instalável
-  globalmente via `pipx install -e .`, autoexplicativa via `--help` (cada subcomando
-  tem um exemplo pronto), com barra de progresso no terminal (spinner, percentual,
-  status colorido por unidade) durante o `index`. `index` aceita `--repository-name`
-  para indexar vários repositórios distintos no mesmo DB, de forma cumulativa, sem
-  colisão de nomes; `serve` aceita `--backend`/`--model` (usados só por
+- **CLI** (`index`, `update`, `list`, `status`, `export`, `analyze`, `verify`,
+  `serve`) instalável globalmente via `pipx install -e .`, autoexplicativa via
+  `--help` (cada subcomando tem um exemplo pronto), com barra de progresso no
+  terminal (spinner, percentual, status colorido por unidade) durante o `index`.
+  `analyze` roda `find_change_surface` direto pela camada de domínio, sem precisar
+  de uma sessão MCP — mesma função que o servidor MCP chama, sem lógica duplicada.
+  `index` aceita `--repository-name` para indexar vários repositórios distintos no
+  mesmo DB, de forma cumulativa, sem colisão de nomes; `serve` aceita
+  `--backend`/`--model` (usados só por
   `find_change_surface`); `--version` reporta a versão instalada.
 - **Testes automatizados** (pytest, ciclo TDD, red→green→refactor): descoberta (3 das
   4 stacks), cada módulo de `db/repositories/` isoladamente, `generation/orchestrator.py`
@@ -546,9 +550,10 @@ julgamento do sistema:
 - **Precisão/recall real (manual, não roda no CI)**: só um LLM de verdade pode
   responder se o *julgamento* de `find_change_surface` está certo. Depois de indexar
   `verify/sample_project` (ou outro projeto real) com um backend real, rode
-  `find_change_surface` pra cada tarefa de `benchmark/tasks.py` e compare `primary`/
-  `secondary` contra `expected_services` à mão — o mesmo tratamento manual que o
-  e2e real de `verify/sample_project.db` já recebe. `verify_change_surface`/
+  `blastmap analyze "<tarefa>" --backend claude --db verify/sample_project.db` pra
+  cada tarefa de `benchmark/tasks.py` (sem precisar subir uma sessão MCP) e compare
+  `primary`/`secondary` contra `expected_services` à mão — o mesmo tratamento manual
+  que o e2e real de `verify/sample_project.db` já recebe. `verify_change_surface`/
   `blastmap verify` automatiza essa comparação quando já existe um commit real
   "depois" pra comparar via `git diff`.
 
@@ -560,7 +565,7 @@ exemplos ilustrativos.
 ## Referência rápida
 
 **CLI** (`blastmap <comando> --help` para exemplos): `index`, `update`, `list`,
-`status`, `export`, `verify`, `serve`, `--version`.
+`status`, `export`, `analyze`, `verify`, `serve`, `--version`.
 
 **MCP** (`blastmap serve`): `list_repositories`, `list_services`, `describe_service`,
 `list_apis`, `describe_api`, `describe_persistence`, `describe_messages`, `search`,

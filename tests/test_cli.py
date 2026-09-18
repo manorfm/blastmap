@@ -186,6 +186,57 @@ def test_version_flag_prints_the_installed_version(capsys):
     assert blastmap.__version__ in out
 
 
+def test_analyze_command_prints_change_surface_json(tmp_path: Path, capsys, monkeypatch):
+    import json
+
+    from tests.test_change_surface import FakeBackend
+
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    service_id = services_repo.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
+    services_repo.update_service_overview(conn, service_id, "Owns the checkout entry point.", "L")
+    from blastmap.db.repositories import search as search_repo
+
+    search_repo.rebuild_search_index(conn)
+
+    fake = FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    })
+    monkeypatch.setattr(cli, "resolve_backend", lambda *a, **kw: fake)
+
+    exit_code = cli.main(["analyze", "checkout task", "--db", str(db_path)])
+
+    assert exit_code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["primary"][0]["service"] == "checkout-service"
+
+
+def test_analyze_command_accepts_hint_services(tmp_path: Path, capsys, monkeypatch):
+    import json
+
+    from tests.test_change_surface import FakeBackend
+
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    services_repo.ensure_service(conn, "notification-service", "/tmp/notif", "python")
+
+    fake = FakeBackend({
+        "primary": [{"service": "notification-service", "reason": "explicitly hinted", "confidence": 0.6}],
+        "secondary": [], "no_change": [],
+    })
+    monkeypatch.setattr(cli, "resolve_backend", lambda *a, **kw: fake)
+
+    exit_code = cli.main([
+        "analyze", "xyz unrelated", "--hint-services", "notification-service", "--db", str(db_path),
+    ])
+
+    assert exit_code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["primary"][0]["service"] == "notification-service"
+    assert fake.calls == 1
+
+
 def test_main_dispatches_to_list_command(tmp_path: Path, capsys):
     db_path = tmp_path / "test.db"
     open_db(db_path)
