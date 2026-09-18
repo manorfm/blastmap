@@ -17,6 +17,7 @@ from context_insight.discovery.scan_helpers import (
     excerpt_around,
     find_matches,
     first_existing_file,
+    provider_from_match,
     resolve_local_calls,
 )
 
@@ -36,8 +37,17 @@ _OUTBOUND_RE = re.compile(r"\b(requests\.(?:get|post|put|patch|delete)|httpx\.\w
 _GRPC_STUB_RE = re.compile(r"(\w*Stub)\s*\(\s*channel\s*\)")
 _CELERY_DELAY_RE = re.compile(r"\b(\w+)\.(?:delay|apply_async)\s*\(")
 
-_QUEUE_PUBLISH_RE = re.compile(r"\b(producer\.send|channel\.basic_publish)\s*\(")
-_QUEUE_CONSUME_RE = re.compile(r"\b(consumer\.subscribe|channel\.basic_consume|@\w+\.task)\b")
+_QUEUE_PUBLISH_RE = re.compile(
+    r"\b(?:(?P<kafka>producer\.send)|(?P<rabbitmq>channel\.basic_publish)|"
+    r"(?P<sqs>\.send_message)|(?P<sns>\w*sns\w*\.publish))\s*\("
+)
+_QUEUE_CONSUME_RE = re.compile(
+    r"(?:\b(?P<kafka>consumer\.subscribe)\b|\b(?P<rabbitmq>channel\.basic_consume)\b|"
+    # no leading \b on this branch: '@' is itself a non-word char, so a boundary can
+    # never precede it — this alternative would otherwise never match (it didn't,
+    # before this fix, since the project's very first version of this pattern).
+    r"(?P<abstracted>@\w+\.task)\b|\b(?P<sqs>\.receive_message)\b)"
+)
 
 _SQLALCHEMY_MODEL_RE = re.compile(r"class\s+(\w+)\s*\([^)]*Base[^)]*\)\s*:")
 _DJANGO_MODEL_RE = re.compile(r"class\s+(\w+)\s*\(\s*models\.Model\s*\)\s*:")
@@ -104,11 +114,17 @@ class PythonDetector:
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _QUEUE_PUBLISH_RE):
             hints.messaging.append(
-                MessagingHint(direction="publishes", channel_hint="?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="publishes", channel_hint="?", excerpt=excerpt_around(path, folder, line_no),
+                    provider_hint=provider_from_match(match),
+                )
             )
         for path, line_no, match in find_matches(folder, EXTENSIONS, _QUEUE_CONSUME_RE):
             hints.messaging.append(
-                MessagingHint(direction="consumes", channel_hint="?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="consumes", channel_hint="?", excerpt=excerpt_around(path, folder, line_no),
+                    provider_hint=provider_from_match(match),
+                )
             )
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _SQLALCHEMY_MODEL_RE):

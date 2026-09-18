@@ -18,6 +18,7 @@ from context_insight.discovery.scan_helpers import (
     excerpt_around,
     find_matches,
     first_existing_file,
+    provider_from_match,
     resolve_local_calls,
 )
 
@@ -35,10 +36,14 @@ _OUTBOUND_RE = re.compile(
 )
 _GRPC_CLIENT_RE = re.compile(r"new\s+\w*(?:Client|Stub)\s*\(")
 _QUEUE_PUBLISH_RE = re.compile(
-    r"\b(producer\.send|channel\.publish|client\.emit|\.emit)\s*\(\s*['\"`]?([^'\"`,)]*)"
+    r"""\b(?:(?P<kafka>producer\.send)|(?P<rabbitmq>channel\.publish)|"""
+    r"""(?P<abstracted>client\.emit|\.emit)|(?P<sqs>\.sendMessage)|(?P<sns>\w*sns\w*\.publish))"""
+    r"""\s*\(\s*['"`]?(?P<channel>[^'"`,)]*)"""
 )
 _QUEUE_CONSUME_RE = re.compile(
-    r"\b(consumer\.subscribe|channel\.consume|@EventPattern|@MessagePattern)\s*\(\s*['\"`]?([^'\"`,)]*)"
+    r"""\b(?:(?P<kafka>consumer\.subscribe)|(?P<rabbitmq>channel\.consume)|"""
+    r"""(?P<abstracted>@EventPattern|@MessagePattern)|(?P<sqs>\.receiveMessage))"""
+    r"""\s*\(\s*['"`]?(?P<channel>[^'"`,)]*)"""
 )
 
 _ENTITY_RE = re.compile(r"@Entity\s*\(\s*['\"`]?([^'\"`)]*)['\"`]?\s*\)")
@@ -110,11 +115,17 @@ class NodeTsDetector:
             )
         for path, line_no, match in find_matches(folder, EXTENSIONS, _QUEUE_PUBLISH_RE):
             hints.messaging.append(
-                MessagingHint(direction="publishes", channel_hint=match.group(2) or "?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="publishes", channel_hint=match.group("channel") or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint=provider_from_match(match),
+                )
             )
         for path, line_no, match in find_matches(folder, EXTENSIONS, _QUEUE_CONSUME_RE):
             hints.messaging.append(
-                MessagingHint(direction="consumes", channel_hint=match.group(2) or "?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="consumes", channel_hint=match.group("channel") or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint=provider_from_match(match),
+                )
             )
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _ENTITY_RE):

@@ -40,3 +40,29 @@ def test_messages_store_evidence(tmp_path: Path):
 
     messages = messages_repo.list_messages(conn, service_id)
     assert messages[0]["evidence_json"] == '[{"file": "main.py", "start_line": 10, "end_line": 20}]'
+
+
+def test_messages_store_provider(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "orders-service", "/tmp/orders", "python")
+    messages_repo.replace_messages(
+        conn, service_id,
+        [{"direction": "publishes", "channel": "order_created", "shape_json": [], "description": "d", "provider": "kafka"}],
+        EVIDENCE,
+    )
+
+    messages = messages_repo.list_messages(conn, service_id)
+    assert messages[0]["provider"] == "kafka"
+
+
+def test_messages_provider_defaults_to_unknown_when_absent(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "orders-service", "/tmp/orders", "python")
+    messages_repo.replace_messages(
+        conn, service_id,
+        [{"direction": "publishes", "channel": "order_created", "shape_json": [], "description": "d"}],
+        EVIDENCE,
+    )
+
+    messages = messages_repo.list_messages(conn, service_id)
+    assert messages[0]["provider"] == "unknown"

@@ -74,7 +74,11 @@ def describe_service(conn: sqlite3.Connection, service: str) -> dict:
         ],
         "persists": [{"name": p["name"], "kind": p["kind"]} for p in persistence],
         "messages": [
-            {"direction": m["direction"], "channel": m["channel"], "description": m["description"]} for m in messages
+            {
+                "direction": m["direction"], "channel": m["channel"], "provider": m["provider"],
+                "description": m["description"],
+            }
+            for m in messages
         ],
         "freshness": compute_freshness(row["updated_at"], row["last_commit"], row["root_path"]),
     }
@@ -132,6 +136,7 @@ def describe_messages(conn: sqlite3.Connection, service: str) -> dict:
             {
                 "direction": m["direction"],
                 "channel": m["channel"],
+                "provider": m["provider"],
                 "shape_json": json.loads(m["shape_json"] or "[]"),
                 "description": m["description"],
             }

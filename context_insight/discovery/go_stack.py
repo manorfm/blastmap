@@ -17,6 +17,7 @@ from context_insight.discovery.scan_helpers import (
     excerpt_around,
     find_matches,
     first_existing_file,
+    provider_from_match,
     resolve_local_calls,
 )
 
@@ -31,8 +32,14 @@ _GRPC_SERVER_METHOD_RE = re.compile(r"func\s+\(\w+\s+\*?\w*Server\)\s+(\w+)\s*\(
 _OUTBOUND_HTTP_RE = re.compile(r"\bhttp\.(Get|Post|NewRequest)\s*\(")
 _GRPC_CLIENT_RE = re.compile(r"New\w*Client\s*\(\s*conn\s*\)")
 
-_QUEUE_PUBLISH_RE = re.compile(r"\b(producer\.Produce|writer\.WriteMessages|ch\.Publish)\s*\(")
-_QUEUE_CONSUME_RE = re.compile(r"\b(consumer\.Consume|reader\.ReadMessage|ch\.Consume)\s*\(")
+_QUEUE_PUBLISH_RE = re.compile(
+    r"\b(?:(?P<kafka>producer\.Produce|writer\.WriteMessages)|(?P<rabbitmq>ch\.Publish)|"
+    r"(?P<sqs>\w*[Ss]qs\w*\.SendMessage))\s*\("
+)
+_QUEUE_CONSUME_RE = re.compile(
+    r"\b(?:(?P<kafka>consumer\.Consume|reader\.ReadMessage)|(?P<rabbitmq>ch\.Consume)|"
+    r"(?P<sqs>\w*[Ss]qs\w*\.ReceiveMessage))\s*\("
+)
 
 _GORM_MODEL_RE = re.compile(r"type\s+(\w+)\s+struct\s*\{[^}]*gorm\.Model", re.DOTALL)
 _SQL_QUERY_RE = re.compile(r"\bdb\.(Query|Exec|QueryRow)\s*\(\s*\"([^\"]*)")
@@ -100,11 +107,17 @@ class GoDetector:
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _QUEUE_PUBLISH_RE):
             hints.messaging.append(
-                MessagingHint(direction="publishes", channel_hint="?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="publishes", channel_hint="?", excerpt=excerpt_around(path, folder, line_no),
+                    provider_hint=provider_from_match(match),
+                )
             )
         for path, line_no, match in find_matches(folder, EXTENSIONS, _QUEUE_CONSUME_RE):
             hints.messaging.append(
-                MessagingHint(direction="consumes", channel_hint="?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="consumes", channel_hint="?", excerpt=excerpt_around(path, folder, line_no),
+                    provider_hint=provider_from_match(match),
+                )
             )
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _GORM_MODEL_RE):

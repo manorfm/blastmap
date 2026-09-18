@@ -54,7 +54,7 @@ class FakeOrchestratorBackend:
         if kind == "persistence":
             return {"entities": [{"name": "fake_table", "kind": "sql_table", "fields": [{"field": "id", "type_desc": "string"}]}]}
         if kind == "messaging":
-            return {"messages": [{"direction": "publishes", "channel": "fake_channel", "shape": [], "description": "fake"}]}
+            return {"messages": [{"direction": "publishes", "channel": "fake_channel", "provider": "kafka", "shape": [], "description": "fake"}]}
         if kind == "component":
             return {"summary": "Fake component summary."}
         return {
@@ -83,6 +83,27 @@ class RecordingOrchestratorBackend(FakeOrchestratorBackend):
     def generate(self, prompt: str, schema: dict, cwd: Path) -> dict:
         self.prompts_by_kind.setdefault(self._kind(schema), []).append(prompt)
         return super().generate(prompt, schema, cwd)
+
+
+def test_message_provider_is_persisted_from_the_llm_result(tmp_path: Path):
+    from context_insight.db.repositories import messages as messages_repo
+
+    conn = open_db(tmp_path / "test.db")
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend())
+
+    orders = services_repo.get_service_by_name(conn, "orders-service")
+    messages = messages_repo.list_messages(conn, orders["id"])
+    assert messages[0]["provider"] == "kafka"
+
+
+def test_messaging_prompt_includes_provider_hints_and_config_evidence(tmp_path: Path):
+    backend = RecordingOrchestratorBackend()
+    conn = open_db(tmp_path / "test.db")
+    index_path(conn, SAMPLE_ROOT, backend)
+
+    messaging_prompts = backend.prompts_by_kind["messaging"]
+    assert any("Best-effort provider guesses" in p for p in messaging_prompts)
+    assert any("kafka" in p for p in messaging_prompts)
 
 
 def test_components_are_synthesized_from_endpoint_summaries_not_raw_code(tmp_path: Path):

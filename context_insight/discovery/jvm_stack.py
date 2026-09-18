@@ -45,6 +45,11 @@ _KAFKA_LISTENER_RE = re.compile(r"@KafkaListener\s*\(\s*(?:topics\s*=\s*)?['\"]?
 _KAFKA_SEND_RE = re.compile(r"\bKafkaTemplate\b.*?\.send\s*\(\s*['\"]?([^'\")]*)", re.DOTALL)
 _RABBIT_LISTENER_RE = re.compile(r"@RabbitListener\s*\(\s*(?:queues\s*=\s*)?['\"]?([^'\")]*)['\"]?")
 _RABBIT_SEND_RE = re.compile(r"\bRabbitTemplate\b.*?\.convertAndSend\s*\(\s*['\"]?([^'\")]*)", re.DOTALL)
+# JMS is a vendor-agnostic Java API (ActiveMQ, IBM MQ, Rabbit-via-JMS, ...) — the
+# concrete broker is only visible in a ConnectionFactory bean/application.properties,
+# never in the annotation/template call itself.
+_JMS_LISTENER_RE = re.compile(r"@JmsListener\s*\(\s*(?:destination\s*=\s*)?['\"]?([^'\")]*)['\"]?")
+_JMS_SEND_RE = re.compile(r"\bJmsTemplate\b.*?\.convertAndSend\s*\(\s*['\"]?([^'\")]*)", re.DOTALL)
 
 _JPA_ENTITY_RE = re.compile(r"@Entity\b.*?\bclass\s+(\w+)", re.DOTALL)
 _SPRING_DATA_REPO_RE = re.compile(r"interface\s+(\w+)\s+extends\s+\w*Repository")
@@ -123,24 +128,53 @@ class JvmSpringDetector:
             )
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _STREAM_SEND_RE):
             hints.messaging.append(
-                MessagingHint(direction="publishes", channel_hint=match.group(1) or "?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="publishes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="abstracted",
+                )
             )
 
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _KAFKA_LISTENER_RE):
             hints.messaging.append(
-                MessagingHint(direction="consumes", channel_hint=match.group(1) or "?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="consumes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="kafka",
+                )
             )
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _KAFKA_SEND_RE):
             hints.messaging.append(
-                MessagingHint(direction="publishes", channel_hint=match.group(1) or "?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="publishes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="kafka",
+                )
             )
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _RABBIT_LISTENER_RE):
             hints.messaging.append(
-                MessagingHint(direction="consumes", channel_hint=match.group(1) or "?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="consumes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="rabbitmq",
+                )
             )
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _RABBIT_SEND_RE):
             hints.messaging.append(
-                MessagingHint(direction="publishes", channel_hint=match.group(1) or "?", excerpt=excerpt_around(path, folder, line_no))
+                MessagingHint(
+                    direction="publishes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="rabbitmq",
+                )
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _JMS_LISTENER_RE):
+            hints.messaging.append(
+                MessagingHint(
+                    direction="consumes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="abstracted",
+                )
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _JMS_SEND_RE):
+            hints.messaging.append(
+                MessagingHint(
+                    direction="publishes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="abstracted",
+                )
             )
 
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _JPA_ENTITY_RE):

@@ -51,6 +51,11 @@ class MessagingHint:
     direction: str  # 'publishes' | 'consumes'
     channel_hint: str
     excerpt: CodeExcerpt
+    # Best-effort guess from which code pattern matched (e.g. 'kafka', 'rabbitmq'), or
+    # 'abstracted' when the matched pattern is a transport-agnostic API (JMS, Celery,
+    # NestJS microservices) whose concrete broker isn't visible in the code itself. Never
+    # persisted as-is — it's only a hint fed to the LLM, which makes the final call.
+    provider_hint: str | None = None
 
 
 @dataclass

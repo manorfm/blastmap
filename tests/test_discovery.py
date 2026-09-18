@@ -31,7 +31,7 @@ def test_python_detector_matches_and_finds_hints():
     outbound_kinds = {c.call_kind for c in hints.outbound_calls}
     assert "http" in outbound_kinds
 
-    assert any(m.direction == "publishes" for m in hints.messaging)  # kafka producer.send
+    assert any(m.direction == "publishes" and m.provider_hint == "kafka" for m in hints.messaging)
     assert any(p.name_hint == "Order" for p in hints.persistence)
 
 
@@ -60,6 +60,20 @@ def test_python_endpoint_resolves_a_locally_defined_helper_into_extra_excerpts()
     assert "def format_total" in endpoint.extra_excerpts[0].text
 
 
+def test_python_celery_task_is_tagged_as_an_abstracted_provider(tmp_path: Path):
+    (tmp_path / "requirements.txt").write_text("celery\n")
+    (tmp_path / "main.py").write_text("app = None\n")
+    (tmp_path / "tasks.py").write_text(
+        "from celery import Celery\n\napp = Celery()\n\n\n@app.task\ndef process_order(order_id):\n    pass\n"
+    )
+
+    hints = PythonDetector().collect_hints(tmp_path)
+
+    celery_hints = [m for m in hints.messaging if m.provider_hint == "abstracted"]
+    assert len(celery_hints) == 1
+    assert celery_hints[0].direction == "consumes"
+
+
 def test_node_ts_detector_matches_and_finds_hints():
     folder = SAMPLE_ROOT / "payments-service"
     detector = NodeTsDetector()
@@ -71,6 +85,7 @@ def test_node_ts_detector_matches_and_finds_hints():
     assert hints.endpoints[0].path == "/charge"
 
     assert any(m.channel_hint for m in hints.messaging)
+    assert any(m.provider_hint == "kafka" for m in hints.messaging)  # kafkajs producer.send
     assert any(p.name_hint == "transactions" for p in hints.persistence)
 
 

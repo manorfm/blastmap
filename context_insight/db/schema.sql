@@ -77,6 +77,11 @@ CREATE TABLE IF NOT EXISTS persistence_entities (
     UNIQUE(service_id, name)
 );
 
+-- `provider` is the concrete message broker/vendor (kafka, rabbitmq, sqs, sns,
+-- service_bus, activemq, nats), inferred by the LLM from real code the same way
+-- service_calls.target_kind is — 'unknown' means the code only showed a
+-- transport-agnostic abstraction (JMS, Celery, NestJS microservices) and no
+-- configuration evidence resolved it; never a guess.
 CREATE TABLE IF NOT EXISTS messages (
     id            INTEGER PRIMARY KEY,
     service_id    INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
@@ -84,6 +89,7 @@ CREATE TABLE IF NOT EXISTS messages (
     channel       TEXT NOT NULL,
     shape_json    TEXT,
     description   TEXT,
+    provider      TEXT NOT NULL DEFAULT 'unknown',
     evidence_json TEXT,
     updated_at    TEXT NOT NULL,
     UNIQUE(service_id, direction, channel)

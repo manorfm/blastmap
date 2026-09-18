@@ -12,8 +12,9 @@ def replace_messages(conn: sqlite3.Connection, service_id: int, messages: list[d
     conn.execute("DELETE FROM messages WHERE service_id = ?", (service_id,))
     evidence_json = json.dumps(evidence)
     conn.executemany(
-        """INSERT INTO messages (service_id, direction, channel, shape_json, description, evidence_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO messages (service_id, direction, channel, shape_json, description, provider,
+           evidence_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 service_id,
@@ -21,6 +22,7 @@ def replace_messages(conn: sqlite3.Connection, service_id: int, messages: list[d
                 m["channel"],
                 json.dumps(m.get("shape_json", {})),
                 m.get("description"),
+                m.get("provider") or "unknown",
                 evidence_json,
                 now(),
             )
@@ -32,7 +34,7 @@ def replace_messages(conn: sqlite3.Connection, service_id: int, messages: list[d
 
 def list_messages(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT direction, channel, shape_json, description, evidence_json
+        """SELECT direction, channel, shape_json, description, provider, evidence_json
            FROM messages WHERE service_id = ? ORDER BY channel""",
         (service_id,),
     ).fetchall()

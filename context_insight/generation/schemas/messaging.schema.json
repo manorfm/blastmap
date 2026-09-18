@@ -8,6 +8,11 @@
         "properties": {
           "direction": {"type": "string", "enum": ["publishes", "consumes"]},
           "channel": {"type": "string", "description": "Topic/queue/exchange name."},
+          "provider": {
+            "type": "string",
+            "enum": ["kafka", "rabbitmq", "sqs", "sns", "service_bus", "activemq", "nats", "unknown"],
+            "description": "The concrete broker/vendor, inferred from the evidence (imports, client classes, annotations). Use \"unknown\" when the code only shows a transport-agnostic abstraction (JMS, Celery, NestJS microservices) and no configuration evidence resolves it — never guess."
+          },
           "shape": {
             "type": "array",
             "items": {
@@ -22,7 +27,7 @@
           },
           "description": {"type": "string", "description": "Why/when this message is emitted or handled."}
         },
-        "required": ["direction", "channel", "shape", "description"],
+        "required": ["direction", "channel", "provider", "shape", "description"],
         "additionalProperties": false
       }
     }

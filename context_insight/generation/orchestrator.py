@@ -18,7 +18,7 @@ from context_insight.db.repositories import service_calls as service_calls_repo
 from context_insight.db.repositories import services as services_repo
 from context_insight.discovery.base import CodeExcerpt, EndpointHint, ServiceHints, StackDetector
 from context_insight.discovery.hashing import file_hash, git_head_commit
-from context_insight.discovery.scan_helpers import SKIP_DIRS
+from context_insight.discovery.scan_helpers import SKIP_DIRS, collect_config_excerpts
 from context_insight.discovery.walker import discover_services
 from context_insight.generation.backend_base import LLMBackend
 from context_insight.generation.llm_harness import generate_with_retry, load_prompt, load_schema
@@ -179,10 +179,23 @@ def _render_persistence_prompt(name: str, stack: str, hints: ServiceHints) -> st
     )
 
 
-def _render_messaging_prompt(name: str, stack: str, hints: ServiceHints) -> str:
+def _needs_config_evidence(hints: ServiceHints) -> bool:
+    """A messaging hint tagged 'abstracted' matched a transport-agnostic API (JMS,
+    Celery, NestJS microservices) whose concrete broker only lives in configuration."""
+    return any(m.provider_hint == "abstracted" for m in hints.messaging)
+
+
+def _render_messaging_prompt(name: str, stack: str, hints: ServiceHints, config_excerpts: list[CodeExcerpt]) -> str:
     excerpts = [m.excerpt for m in hints.messaging]
+    provider_hints = "\n".join(
+        f"- {m.direction} {m.channel_hint} ({m.excerpt.file_path}:{m.excerpt.start_line}): "
+        f"{m.provider_hint or 'unknown'}"
+        for m in hints.messaging
+    ) or "(none found)"
+    config_evidence = _join_excerpts(config_excerpts) if config_excerpts else "(none found)"
     return load_prompt("messaging").substitute(
-        service_name=name, stack=stack, messaging_excerpts=_join_excerpts(excerpts)
+        service_name=name, stack=stack, messaging_excerpts=_join_excerpts(excerpts),
+        provider_hints=provider_hints, config_evidence=config_evidence,
     )
 
 
@@ -344,7 +357,8 @@ def index_service(
     if hints.messaging:
         if force or is_new or (changed & messaging_files) or (removed & messaging_files):
             progress.unit_started(name, "messaging")
-            prompt = _render_messaging_prompt(name, detector.id, hints)
+            config_excerpts = collect_config_excerpts(root) if _needs_config_evidence(hints) else []
+            prompt = _render_messaging_prompt(name, detector.id, hints, config_excerpts)
             result = generate_with_retry(
                 backend, prompt, load_schema("messaging"), root, failures_root, f"{name}-messaging"
             )
@@ -355,10 +369,11 @@ def index_service(
                         "channel": m["channel"],
                         "shape_json": m["shape"],
                         "description": m["description"],
+                        "provider": m["provider"],
                     }
                     for m in result["messages"]
                 ]
-                evidence = _evidence_from_excerpts([m.excerpt for m in hints.messaging])
+                evidence = _evidence_from_excerpts([m.excerpt for m in hints.messaging] + config_excerpts)
                 messages_repo.replace_messages(conn, service_id, messages, evidence)
                 llm_calls += 1
                 progress.unit_finished(name, "messaging", "ok")

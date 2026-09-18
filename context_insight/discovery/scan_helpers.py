@@ -112,6 +112,53 @@ def component_hint_for(path: Path, line_no: int, class_pattern: re.Pattern[str] 
     return path.stem
 
 
+_CONFIG_FILE_NAMES = (
+    "application.properties", "application.yml", "application.yaml",
+    ".env", "docker-compose.yml", "docker-compose.yaml",
+)
+MAX_CONFIG_FILE_CHARS = 4_000
+
+
+def collect_config_excerpts(folder: Path) -> list[CodeExcerpt]:
+    """Whole (small, capped) content of any known config file at the service root.
+
+    Used to resolve the concrete broker/vendor behind a transport-agnostic abstraction
+    (JMS, Celery, NestJS microservices) that the application code alone never names —
+    the connection factory / broker URL lives here, not in a source file. Only the
+    service's own root is checked (not the whole tree), matching the "propositalmente
+    simples" scope every other heuristic in this module keeps.
+    """
+    excerpts: list[CodeExcerpt] = []
+    for filename in _CONFIG_FILE_NAMES:
+        path = folder / filename
+        if not path.is_file():
+            continue
+        text = read_text(path)
+        if not text:
+            continue
+        truncated = text[:MAX_CONFIG_FILE_CHARS]
+        line_count = truncated.count("\n") + 1
+        excerpts.append(CodeExcerpt(file_path=filename, start_line=1, end_line=line_count, text=truncated))
+    return excerpts
+
+
+def provider_from_match(match: re.Match[str], exclude: str = "channel") -> str | None:
+    """Which named alternative fired in a regex built from `(?P<name>...)` branches —
+    used instead of a side lookup table (matched text -> provider) so the provider tag
+    can never drift out of sync with the pattern, and so this module's own source never
+    spells out one of these patterns' matched text as a plain, unescaped string constant
+    elsewhere in the same file (which would self-match here on this module's own source
+    the next time it scans itself, the way an earlier version of this exact helper did).
+    `exclude` skips a trailing group unrelated to classification (e.g. a channel name
+    captured by the same pattern), since `Match.lastgroup` only reports the right-most
+    group, not the one that drove which alternative matched.
+    """
+    for name, value in match.groupdict().items():
+        if name != exclude and value is not None:
+            return name
+    return None
+
+
 _CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 
