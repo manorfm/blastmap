@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "One short paragraph: what this class/controller/module is responsible for."
+    }
+  },
+  "required": ["summary"],
+  "additionalProperties": false
+}

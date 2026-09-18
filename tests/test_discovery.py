@@ -35,6 +35,31 @@ def test_python_detector_matches_and_finds_hints():
     assert any(p.name_hint == "Order" for p in hints.persistence)
 
 
+def test_python_endpoint_falls_back_to_file_stem_with_no_enclosing_class():
+    folder = SAMPLE_ROOT / "orders-service"
+    hints = PythonDetector().collect_hints(folder)
+    endpoint = hints.endpoints[0]
+    assert endpoint.component_hint == "main"  # function-based routing, no class wraps it
+    assert endpoint.extra_excerpts == []  # every call in the handler is a library call
+
+
+COMPONENT_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "component_python"
+
+
+def test_python_endpoint_inside_a_class_uses_the_class_as_its_component():
+    hints = PythonDetector().collect_hints(COMPONENT_FIXTURE_ROOT)
+    endpoint = next(e for e in hints.endpoints if e.path == "/orders")
+    assert endpoint.component_hint == "OrdersController"
+
+
+def test_python_endpoint_resolves_a_locally_defined_helper_into_extra_excerpts():
+    hints = PythonDetector().collect_hints(COMPONENT_FIXTURE_ROOT)
+    endpoint = next(e for e in hints.endpoints if e.path == "/orders")
+    assert len(endpoint.extra_excerpts) == 1
+    assert endpoint.extra_excerpts[0].file_path == "routes/orders.py"
+    assert "def format_total" in endpoint.extra_excerpts[0].text
+
+
 def test_node_ts_detector_matches_and_finds_hints():
     folder = SAMPLE_ROOT / "payments-service"
     detector = NodeTsDetector()

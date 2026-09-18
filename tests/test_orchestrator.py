@@ -9,6 +9,7 @@ import pytest
 
 from context_insight.db.connection import open_db
 from context_insight.db.repositories import apis as apis_repo
+from context_insight.db.repositories import components as components_repo
 from context_insight.db.repositories import repositories as repositories_repo
 from context_insight.db.repositories import services as services_repo
 from context_insight.discovery.registry import detector_for
@@ -39,6 +40,8 @@ class FakeOrchestratorBackend:
             return "persistence"
         if "messages" in props:
             return "messaging"
+        if set(props) == {"summary"}:
+            return "component"
         return "api_detail"
 
     def generate(self, prompt: str, schema: dict, cwd: Path) -> dict:
@@ -52,6 +55,8 @@ class FakeOrchestratorBackend:
             return {"entities": [{"name": "fake_table", "kind": "sql_table", "fields": [{"field": "id", "type_desc": "string"}]}]}
         if kind == "messaging":
             return {"messages": [{"direction": "publishes", "channel": "fake_channel", "shape": [], "description": "fake"}]}
+        if kind == "component":
+            return {"summary": "Fake component summary."}
         return {
             "summary": "Fake summary.",
             "description": "Fake description.",
@@ -63,6 +68,41 @@ class FakeOrchestratorBackend:
             }],
             "validations": [{"kind": "authorization", "description": "fake auth rule"}],
         }
+
+
+class RecordingOrchestratorBackend(FakeOrchestratorBackend):
+    """Same canned responses as FakeOrchestratorBackend, but also keeps every prompt it
+    was given, keyed by unit kind — lets a test assert not just what got persisted but
+    what the LLM actually saw for a given unit (e.g. that the overview prompt really
+    includes the component summaries composed below it, not just a coincidence)."""
+
+    def __init__(self, fail_kind: str | None = None):
+        super().__init__(fail_kind=fail_kind)
+        self.prompts_by_kind: dict[str, list[str]] = {}
+
+    def generate(self, prompt: str, schema: dict, cwd: Path) -> dict:
+        self.prompts_by_kind.setdefault(self._kind(schema), []).append(prompt)
+        return super().generate(prompt, schema, cwd)
+
+
+def test_components_are_synthesized_from_endpoint_summaries_not_raw_code(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend())
+
+    orders = services_repo.get_service_by_name(conn, "orders-service")
+    components = components_repo.list_components(conn, orders["id"])
+    assert len(components) == 1
+    assert components[0]["name"] == "main"  # no class wraps the endpoint in this fixture
+    assert components[0]["summary"] == "Fake component summary."
+
+
+def test_overview_prompt_is_composed_from_the_components_summary(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    backend = RecordingOrchestratorBackend()
+    index_path(conn, SAMPLE_ROOT, backend)
+
+    overview_prompts = backend.prompts_by_kind["service_overview"]
+    assert any("Fake component summary." in p for p in overview_prompts)
 
 
 def test_index_path_indexes_all_three_sample_services(tmp_path: Path):

@@ -14,9 +14,11 @@ from context_insight.discovery.base import (
 from context_insight.discovery.scan_helpers import (
     ENDPOINT_AFTER,
     ENDPOINT_BEFORE,
+    component_hint_for,
     excerpt_around,
     find_matches,
     first_existing_file,
+    resolve_local_calls,
 )
 
 EXTENSIONS = (".js", ".ts")
@@ -44,6 +46,28 @@ _PRISMA_MODEL_RE = re.compile(r"^model\s+(\w+)\s*\{", re.MULTILINE)
 _MONGOOSE_SCHEMA_RE = re.compile(r"new\s+(?:mongoose\.)?Schema\s*\(")
 _SEQUELIZE_DEFINE_RE = re.compile(r"\.define\s*\(\s*['\"`]([^'\"`]+)['\"`]")
 
+_CLASS_RE = re.compile(r"^\s*(?:export\s+)?class\s+(\w+)")
+
+
+def _def_pattern(name: str) -> re.Pattern[str]:
+    escaped = re.escape(name)
+    return re.compile(
+        rf"^\s*(?:export\s+)?(?:async\s+)?function\s+{escaped}\s*\(|^\s*{escaped}\s*\([^)]*\)\s*\{{",
+        re.MULTILINE,
+    )
+
+
+def _endpoint_hint(method: str, path_value: str, file_path: Path, folder: Path, line_no: int) -> EndpointHint:
+    excerpt = excerpt_around(file_path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
+    component_hint = component_hint_for(file_path, line_no, _CLASS_RE)
+    extra_excerpts = resolve_local_calls(
+        file_path, folder, excerpt.text, _def_pattern, (excerpt.start_line, excerpt.end_line),
+    )
+    return EndpointHint(
+        method=method, path=path_value, component_hint=component_hint,
+        excerpt=excerpt, extra_excerpts=extra_excerpts,
+    )
+
 
 class NodeTsDetector:
     id = "node-ts"
@@ -70,13 +94,11 @@ class NodeTsDetector:
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _HTTP_METHOD_RE):
             method, route = match.group(1).upper(), match.group(2)
-            excerpt = excerpt_around(path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
-            hints.endpoints.append(EndpointHint(method=method, path=route, excerpt=excerpt))
+            hints.endpoints.append(_endpoint_hint(method, route, path, folder, line_no))
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _NEST_ROUTE_RE):
             method, route = match.group(1).upper(), match.group(2) or "/"
-            excerpt = excerpt_around(path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
-            hints.endpoints.append(EndpointHint(method=method, path=route, excerpt=excerpt))
+            hints.endpoints.append(_endpoint_hint(method, route, path, folder, line_no))
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _OUTBOUND_RE):
             hints.outbound_calls.append(

@@ -70,7 +70,7 @@ def get_api_by_key(conn: sqlite3.Connection, service_id: int, method: str, path:
 
 def list_apis(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT method, path, summary, evidence_json FROM apis WHERE service_id = ? ORDER BY path, method",
+        "SELECT method, path, summary, description, evidence_json FROM apis WHERE service_id = ? ORDER BY path, method",
         (service_id,),
     ).fetchall()
 

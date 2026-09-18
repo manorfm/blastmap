@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from context_insight.discovery.base import CodeExcerpt
 
@@ -91,3 +91,67 @@ def first_existing_file(folder: Path, names: tuple[str, ...]) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def component_hint_for(path: Path, line_no: int, class_pattern: re.Pattern[str] | None) -> str:
+    """The name an endpoint's class/controller/module layer (`components`) should be
+    grouped under: the nearest enclosing class definition above `line_no` in `path` when
+    one exists, otherwise the file's own stem — most Python/Node routing is function-based
+    with no wrapping class, so the file itself is the natural cluster in that common case.
+    """
+    if class_pattern is not None:
+        text = read_text(path)
+        if text:
+            name = None
+            for line in text.splitlines()[:line_no]:
+                match = class_pattern.match(line)
+                if match:
+                    name = match.group(1)
+            if name:
+                return name
+    return path.stem
+
+
+_CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+
+def resolve_local_calls(
+    path: Path,
+    folder: Path,
+    excerpt_text: str,
+    definition_for: Callable[[str], re.Pattern[str]],
+    exclude_line_range: tuple[int, int],
+    exclude_names: frozenset[str] = frozenset(),
+    max_hops: int = 3,
+) -> list[CodeExcerpt]:
+    """One-hop local navigation: for each name called inside `excerpt_text`, look for a
+    matching definition (built per-name by `definition_for`) in the same file, and return
+    its excerpt as extra evidence. Never crosses into another file and never chases more
+    than `max_hops` distinct names — a cheap heuristic, not a call-graph traversal (the
+    project's README lists a full AST/LSP code graph as a deliberate non-goal).
+
+    `exclude_line_range` is the endpoint's own excerpt (start_line, end_line): a name whose
+    definition falls inside it is the handler itself (its own `def`/signature line reads as
+    a "call" to `_CALL_RE`), not a real one-hop dependency, so it is skipped.
+    """
+    text = read_text(path)
+    if not text:
+        return []
+    excerpts: list[CodeExcerpt] = []
+    seen: set[str] = set(exclude_names)
+    range_start, range_end = exclude_line_range
+    for match in _CALL_RE.finditer(excerpt_text):
+        if len(excerpts) >= max_hops:
+            break
+        name = match.group(1)
+        if name in seen:
+            continue
+        seen.add(name)
+        definition_match = definition_for(name).search(text)
+        if not definition_match:
+            continue
+        line_no = text.count("\n", 0, definition_match.start()) + 1
+        if range_start <= line_no <= range_end:
+            continue
+        excerpts.append(excerpt_around(path, folder, line_no, before=1, after=30))
+    return excerpts

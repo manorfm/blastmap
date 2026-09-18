@@ -13,8 +13,9 @@ $folder_tree
 Entrypoint excerpt ($entry_file):
 $entry_excerpt
 
-Endpoints already found in this service (for context only, do not redescribe them here):
-$endpoint_paths
+Components already summarized in this service (compose your answer from these
+summaries, not by re-reading their code):
+$component_summaries
 
 Return a short, plain-language overview: what this service is for, its main
 responsibilities, and its likely role in a broader architecture, conservatively

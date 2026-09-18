@@ -13,8 +13,10 @@ from context_insight.discovery.base import (
 from context_insight.discovery.scan_helpers import (
     ENDPOINT_AFTER,
     ENDPOINT_BEFORE,
+    component_hint_for,
     excerpt_around,
     find_matches,
+    resolve_local_calls,
 )
 
 EXTENSIONS = (".java", ".kt")
@@ -46,6 +48,25 @@ _RABBIT_SEND_RE = re.compile(r"\bRabbitTemplate\b.*?\.convertAndSend\s*\(\s*['\"
 
 _JPA_ENTITY_RE = re.compile(r"@Entity\b.*?\bclass\s+(\w+)", re.DOTALL)
 _SPRING_DATA_REPO_RE = re.compile(r"interface\s+(\w+)\s+extends\s+\w*Repository")
+
+_CLASS_RE = re.compile(r"^\s*(?:public\s+|private\s+)?(?:class|interface)\s+(\w+)")
+
+
+def _def_pattern(name: str) -> re.Pattern[str]:
+    escaped = re.escape(name)
+    return re.compile(rf"^\s*fun\s+{escaped}\s*\(|^\s*[\w<>\[\],\s]+\s+{escaped}\s*\([^)]*\)\s*\{{", re.MULTILINE)
+
+
+def _endpoint_hint(method: str, path_value: str, file_path: Path, folder: Path, line_no: int) -> EndpointHint:
+    excerpt = excerpt_around(file_path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
+    component_hint = component_hint_for(file_path, line_no, _CLASS_RE)
+    extra_excerpts = resolve_local_calls(
+        file_path, folder, excerpt.text, _def_pattern, (excerpt.start_line, excerpt.end_line),
+    )
+    return EndpointHint(
+        method=method, path=path_value, component_hint=component_hint,
+        excerpt=excerpt, extra_excerpts=extra_excerpts,
+    )
 
 
 def _has_spring_boot_dependency(folder: Path) -> bool:
@@ -86,10 +107,7 @@ class JvmSpringDetector:
 
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _MAPPING_RE):
             annotation, route = match.group(1), match.group(2) or "/"
-            excerpt = excerpt_around(path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
-            hints.endpoints.append(
-                EndpointHint(method=_METHOD_BY_ANNOTATION[annotation], path=route, excerpt=excerpt)
-            )
+            hints.endpoints.append(_endpoint_hint(_METHOD_BY_ANNOTATION[annotation], route, path, folder, line_no))
 
         for path, line_no, match in find_matches(scan_root, EXTENSIONS, _OUTBOUND_RE):
             hints.outbound_calls.append(

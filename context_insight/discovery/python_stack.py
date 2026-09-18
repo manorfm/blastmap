@@ -13,9 +13,11 @@ from context_insight.discovery.base import (
 from context_insight.discovery.scan_helpers import (
     ENDPOINT_AFTER,
     ENDPOINT_BEFORE,
+    component_hint_for,
     excerpt_around,
     find_matches,
     first_existing_file,
+    resolve_local_calls,
 )
 
 EXTENSIONS = (".py",)
@@ -40,6 +42,24 @@ _QUEUE_CONSUME_RE = re.compile(r"\b(consumer\.subscribe|channel\.basic_consume|@
 _SQLALCHEMY_MODEL_RE = re.compile(r"class\s+(\w+)\s*\([^)]*Base[^)]*\)\s*:")
 _DJANGO_MODEL_RE = re.compile(r"class\s+(\w+)\s*\(\s*models\.Model\s*\)\s*:")
 
+_CLASS_RE = re.compile(r"^\s*class\s+(\w+)")
+
+
+def _def_pattern(name: str) -> re.Pattern[str]:
+    return re.compile(rf"^\s*def\s+{re.escape(name)}\s*\(", re.MULTILINE)
+
+
+def _endpoint_hint(method: str, path_value: str, file_path: Path, folder: Path, line_no: int) -> EndpointHint:
+    excerpt = excerpt_around(file_path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
+    component_hint = component_hint_for(file_path, line_no, _CLASS_RE)
+    extra_excerpts = resolve_local_calls(
+        file_path, folder, excerpt.text, _def_pattern, (excerpt.start_line, excerpt.end_line),
+    )
+    return EndpointHint(
+        method=method, path=path_value, component_hint=component_hint,
+        excerpt=excerpt, extra_excerpts=extra_excerpts,
+    )
+
 
 class PythonDetector:
     id = "python"
@@ -57,32 +77,17 @@ class PythonDetector:
             hints.entry_excerpt = excerpt_around(entry, folder, 1, context=20)
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _FASTAPI_ROUTE_RE):
-            hints.endpoints.append(
-                EndpointHint(
-                    method=match.group(1).upper(), path=match.group(2),
-                    excerpt=excerpt_around(path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER),
-                )
-            )
+            hints.endpoints.append(_endpoint_hint(match.group(1).upper(), match.group(2), path, folder, line_no))
         for path, line_no, match in find_matches(folder, EXTENSIONS, _FLASK_ROUTE_RE):
             methods = match.group(2)
             method = methods.split(",")[0].strip(" '\"").upper() if methods else "GET"
-            hints.endpoints.append(
-                EndpointHint(
-                    method=method, path=match.group(1),
-                    excerpt=excerpt_around(path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER),
-                )
-            )
+            hints.endpoints.append(_endpoint_hint(method, match.group(1), path, folder, line_no))
         urls_file = folder / "urls.py"
         if urls_file.is_file():
             for path, line_no, match in find_matches(folder, EXTENSIONS, _DJANGO_URL_RE):
                 if path.name != "urls.py":
                     continue
-                hints.endpoints.append(
-                    EndpointHint(
-                        method="GET", path=match.group(1) or "/",
-                        excerpt=excerpt_around(path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER),
-                    )
-                )
+                hints.endpoints.append(_endpoint_hint("GET", match.group(1) or "/", path, folder, line_no))
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _OUTBOUND_RE):
             hints.outbound_calls.append(

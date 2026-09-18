@@ -24,6 +24,7 @@ class CodeExcerpt:
 class EndpointHint:
     method: str  # HTTP verb, or 'RPC' / 'GRAPHQL' / 'CONSUMER'
     path: str  # route path or rpc method name
+    component_hint: str  # enclosing class name, or the file's stem when there is none
     excerpt: CodeExcerpt
     extra_excerpts: list[CodeExcerpt] = field(default_factory=list)
 

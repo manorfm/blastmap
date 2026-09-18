@@ -13,9 +13,11 @@ from context_insight.discovery.base import (
 from context_insight.discovery.scan_helpers import (
     ENDPOINT_AFTER,
     ENDPOINT_BEFORE,
+    component_hint_for,
     excerpt_around,
     find_matches,
     first_existing_file,
+    resolve_local_calls,
 )
 
 EXTENSIONS = (".go",)
@@ -34,6 +36,29 @@ _QUEUE_CONSUME_RE = re.compile(r"\b(consumer\.Consume|reader\.ReadMessage|ch\.Co
 
 _GORM_MODEL_RE = re.compile(r"type\s+(\w+)\s+struct\s*\{[^}]*gorm\.Model", re.DOTALL)
 _SQL_QUERY_RE = re.compile(r"\bdb\.(Query|Exec|QueryRow)\s*\(\s*\"([^\"]*)")
+
+# Go has no classes; the closest equivalent grouping is the receiver type of a method
+# (`func (s *Server) Handler(...)`) — the same shape _GRPC_SERVER_METHOD_RE already
+# matches on. A route registered via router.GET(...) has no enclosing receiver, so it
+# falls back to the file's stem like the other stacks' function-based routing does.
+_RECEIVER_RE = re.compile(r"^\s*func\s*\(\w+\s+\*?(\w+)\)")
+
+
+def _def_pattern(name: str) -> re.Pattern[str]:
+    escaped = re.escape(name)
+    return re.compile(rf"^\s*func\s+(?:\(\w+\s+\*?\w+\)\s+)?{escaped}\s*\(", re.MULTILINE)
+
+
+def _endpoint_hint(method: str, path_value: str, file_path: Path, folder: Path, line_no: int) -> EndpointHint:
+    excerpt = excerpt_around(file_path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
+    component_hint = component_hint_for(file_path, line_no, _RECEIVER_RE)
+    extra_excerpts = resolve_local_calls(
+        file_path, folder, excerpt.text, _def_pattern, (excerpt.start_line, excerpt.end_line),
+    )
+    return EndpointHint(
+        method=method, path=path_value, component_hint=component_hint,
+        excerpt=excerpt, extra_excerpts=extra_excerpts,
+    )
 
 
 class GoDetector:
@@ -58,14 +83,11 @@ class GoDetector:
             method = match.group(1).upper()
             if method == "HANDLE":
                 method = "GET"
-            excerpt = excerpt_around(path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
-            hints.endpoints.append(EndpointHint(method=method, path=match.group(2), excerpt=excerpt))
+            hints.endpoints.append(_endpoint_hint(method, match.group(2), path, folder, line_no))
         for path, line_no, match in find_matches(folder, EXTENSIONS, _NET_HTTP_HANDLE_RE):
-            excerpt = excerpt_around(path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
-            hints.endpoints.append(EndpointHint(method="GET", path=match.group(1), excerpt=excerpt))
+            hints.endpoints.append(_endpoint_hint("GET", match.group(1), path, folder, line_no))
         for path, line_no, match in find_matches(folder, EXTENSIONS, _GRPC_SERVER_METHOD_RE):
-            excerpt = excerpt_around(path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
-            hints.endpoints.append(EndpointHint(method="RPC", path=match.group(1), excerpt=excerpt))
+            hints.endpoints.append(_endpoint_hint("RPC", match.group(1), path, folder, line_no))
 
         for path, line_no, match in find_matches(folder, EXTENSIONS, _OUTBOUND_HTTP_RE):
             hints.outbound_calls.append(

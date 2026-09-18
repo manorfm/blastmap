@@ -89,6 +89,24 @@ CREATE TABLE IF NOT EXISTS messages (
     UNIQUE(service_id, direction, channel)
 );
 
+-- One row per class/controller/module cluster of endpoints within a service, synthesized
+-- from the already-generated `apis` summaries of the endpoints it groups (never raw code
+-- read again) — the layer between a single endpoint and the whole service. `file_path` is
+-- the file the class/module lives in; `name` falls back to the file's stem when no class
+-- wraps the endpoints (the common case for function-based routing, e.g. FastAPI/Flask).
+CREATE TABLE IF NOT EXISTS components (
+    id            INTEGER PRIMARY KEY,
+    service_id    INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    name          TEXT NOT NULL,
+    file_path     TEXT NOT NULL,
+    summary       TEXT,
+    evidence_json TEXT,
+    updated_at    TEXT NOT NULL,
+    UNIQUE(service_id, name, file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_components_service ON components(service_id);
+
 CREATE TABLE IF NOT EXISTS indexed_files (
     id              INTEGER PRIMARY KEY,
     service_id      INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

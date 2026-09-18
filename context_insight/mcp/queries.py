@@ -8,6 +8,7 @@ from collections import deque
 
 from context_insight.db.repositories import apis as apis_repo
 from context_insight.db.repositories import change_surface as change_surface_repo
+from context_insight.db.repositories import components as components_repo
 from context_insight.db.repositories import messages as messages_repo
 from context_insight.db.repositories import persistence as persistence_repo
 from context_insight.db.repositories import repositories as repositories_repo
@@ -58,6 +59,7 @@ def describe_service(conn: sqlite3.Connection, service: str) -> dict:
         return {"error": f"unknown service: {service}"}
     calls = service_calls_repo.list_calls_for_service(conn, row["id"])
     apis = apis_repo.list_apis(conn, row["id"])
+    components = components_repo.list_components(conn, row["id"])
     persistence = persistence_repo.list_persistence(conn, row["id"])
     messages = messages_repo.list_messages(conn, row["id"])
     return {
@@ -67,6 +69,9 @@ def describe_service(conn: sqlite3.Connection, service: str) -> dict:
         "stack": row["stack"],
         "calls": [_fmt_call(c) for c in calls],
         "apis": [{"method": a["method"], "path": a["path"], "summary": a["summary"]} for a in apis],
+        "components": [
+            {"name": c["name"], "file_path": c["file_path"], "summary": c["summary"]} for c in components
+        ],
         "persists": [{"name": p["name"], "kind": p["kind"]} for p in persistence],
         "messages": [
             {"direction": m["direction"], "channel": m["channel"], "description": m["description"]} for m in messages
