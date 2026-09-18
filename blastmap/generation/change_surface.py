@@ -46,6 +46,7 @@ class ChangeSurfaceBuilder:
     external_integrations: list[dict] = field(default_factory=list)
     unmapped_internal_hint: list[dict] = field(default_factory=list)
     contracts_at_risk: list[dict] = field(default_factory=list)
+    persistence_affected: list[dict] = field(default_factory=list)
     freshness: dict[str, dict] = field(default_factory=dict)
     unknowns: list[dict] = field(default_factory=list)
     recommended_next_queries: list[dict] = field(default_factory=list)
@@ -73,6 +74,10 @@ class ChangeSurfaceBuilder:
         self.contracts_at_risk = items
         return self
 
+    def with_persistence_affected(self, items: list[dict]) -> "ChangeSurfaceBuilder":
+        self.persistence_affected = items
+        return self
+
     def with_freshness(self, freshness: dict[str, dict]) -> "ChangeSurfaceBuilder":
         self.freshness = freshness
         return self
@@ -98,6 +103,7 @@ class ChangeSurfaceBuilder:
             "external_integrations": self.external_integrations,
             "unmapped_internal_hint": self.unmapped_internal_hint,
             "contracts_at_risk": self.contracts_at_risk,
+            "persistence_affected": self.persistence_affected,
             "freshness": self.freshness,
             "unknowns": self.unknowns,
             "recommended_next_queries": self.recommended_next_queries,
@@ -266,6 +272,28 @@ def _derive_contracts_at_risk(conn: sqlite3.Connection, service_names: set[str])
     return list(contracts.values())
 
 
+def _derive_persistence_for(conn: sqlite3.Connection, service_names: set[str]) -> list[dict]:
+    """What each relevant service persists — a direct read of persistence_entities,
+    no LLM cost. Tells an agent what storage a change might also need to touch
+    without a separate describe_persistence round trip for the obvious cases.
+    """
+    out: list[dict] = []
+    for name in sorted(service_names):
+        row = services_repo.get_service_by_name(conn, name)
+        if row is None:
+            continue
+        for p in persistence_repo.list_persistence(conn, row["id"]):
+            out.append(
+                {
+                    "service": name,
+                    "entity": p["name"],
+                    "kind": p["kind"],
+                    "evidence": json.loads(p["evidence_json"] or "[]"),
+                }
+            )
+    return out
+
+
 def _derive_stale_unknowns(freshness: dict[str, dict]) -> list[dict]:
     """Freshness is per-service; this is what makes it actionable at the change-
     surface level: a stale relevant service means its stored dependency reasons
@@ -313,7 +341,8 @@ def analyze_change_surface(
     candidates = retrieval.candidates(conn, task, hint_services, max_candidates)
     if not candidates:
         note = "no indexed service matched this task; pass hint_services or index more of the system"
-        unknown = {"status": "unknown", "reason": note, "suggestion": "pass hint_services or index more of the system"}
+        suggestion = "pass hint_services or index more of the system"
+        unknown = {"status": "unknown", "reason": "no indexed service matched this task", "suggestion": suggestion}
         return ChangeSurfaceBuilder().with_note(note).with_unknowns([unknown]).build()
 
     candidates_block, evidence_by_service = _build_context(conn, candidates)
@@ -344,6 +373,7 @@ def analyze_change_surface(
         .with_external_integrations(_derive_dependency_hints(conn, relevant, service_calls_repo.list_external_integration_calls))
         .with_unmapped_internal_hint(unmapped_internal_hint)
         .with_contracts_at_risk(_derive_contracts_at_risk(conn, relevant))
+        .with_persistence_affected(_derive_persistence_for(conn, relevant))
         .with_freshness(freshness)
         .with_unknowns(unknowns)
         .with_recommended_next_queries(next_queries)

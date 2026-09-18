@@ -14,6 +14,7 @@ def test_build_emits_empty_lists_by_default():
         "external_integrations": [],
         "unmapped_internal_hint": [],
         "contracts_at_risk": [],
+        "persistence_affected": [],
         "freshness": {},
         "unknowns": [],
         "recommended_next_queries": [],
@@ -49,6 +50,7 @@ def test_builder_methods_are_chainable():
         .with_flow([{"from": "a", "to": "b", "type": "HTTP"}])
         .with_external_integrations([{"service": "Stripe API"}])
         .with_unmapped_internal_hint([{"service": "fraud-service"}])
+        .with_persistence_affected([{"service": "a", "entity": "orders", "kind": "sql_table"}])
         .with_freshness({"a": {"stale": False}})
         .build()
     )
@@ -56,4 +58,5 @@ def test_builder_methods_are_chainable():
     assert result["flow"] == [{"from": "a", "to": "b", "type": "HTTP"}]
     assert result["external_integrations"] == [{"service": "Stripe API"}]
     assert result["unmapped_internal_hint"] == [{"service": "fraud-service"}]
+    assert result["persistence_affected"] == [{"service": "a", "entity": "orders", "kind": "sql_table"}]
     assert result["freshness"] == {"a": {"stale": False}}

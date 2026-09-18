@@ -9,6 +9,7 @@ from blastmap.db.connection import open_db
 from blastmap.db.repositories import apis as apis_repo
 from blastmap.db.repositories import change_surface as change_surface_repo
 from blastmap.db.repositories import messages as messages_repo
+from blastmap.db.repositories import persistence as persistence_repo
 from blastmap.db.repositories import search as search_repo
 from blastmap.db.repositories import service_calls as service_calls_repo
 from blastmap.db.repositories import services as services_repo
@@ -187,6 +188,32 @@ def test_external_and_unmapped_internal_buckets_are_populated(tmp_path: Path):
     shipping_unknown = next(u for u in result["unknowns"] if u["service"] == "shipping-service")
     assert shipping_unknown["status"] == "unknown"
     assert "suggestion" in shipping_unknown
+
+
+def test_persistence_affected_lists_entities_owned_by_relevant_services(tmp_path: Path):
+    conn = _build_pix_fixture(tmp_path / "pix7.db")
+    payments_id = services_repo.get_service_by_name(conn, "payments-service")["id"]
+    order_id = services_repo.get_service_by_name(conn, "order-service")["id"]
+    persistence_repo.replace_persistence_entities(
+        conn, payments_id, [{"name": "payment_method", "kind": "sql_table", "schema_json": []}],
+        [{"file": "payments/models.py", "start_line": 1, "end_line": 10}],
+    )
+    persistence_repo.replace_persistence_entities(
+        conn, order_id, [{"name": "orders", "kind": "sql_table", "schema_json": []}], [],
+    )
+    backend = FakeBackend({
+        "primary": [{"service": "payments-service", "reason": "owns payment method resolution", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
+
+    persisted = {p["entity"]: p for p in result["persistence_affected"]}
+    assert "payment_method" in persisted
+    assert persisted["payment_method"]["service"] == "payments-service"
+    assert persisted["payment_method"]["evidence"]
+    # order-service is neither primary nor secondary here, so its entity is out of scope.
+    assert "orders" not in persisted
 
 
 def test_contracts_at_risk_lists_consumers_of_a_relevant_service_events(tmp_path: Path):

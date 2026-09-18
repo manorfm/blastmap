@@ -135,9 +135,13 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         service lists plus a relevant call flow, each finding with a business reason,
         confidence (0-1) and evidence (file/line); also external_integrations (third-party
         vendors/SaaS reachable from the relevant services — you may need to touch that
-        integration too) and unmapped_internal_hint (dependencies that look like internal
+        integration too), unmapped_internal_hint (dependencies that look like internal
         services of this same system but haven't been indexed yet — index them for a
-        fuller picture). unknowns lists every gap in the answer explicitly (status,
+        fuller picture), contracts_at_risk (events a relevant service publishes and
+        every other indexed service that consumes them — potentially affected, never
+        declared a confirmed break) and persistence_affected (what storage each
+        relevant service owns, read straight from the index, no extra call needed for
+        the obvious cases). unknowns lists every gap in the answer explicitly (status,
         reason, suggestion) instead of silently omitting it — including a relevant
         service whose freshness came back stale, since its stored dependency reasons
         may themselves be out of date. freshness reports, per relevant service,

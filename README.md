@@ -254,6 +254,9 @@ não fato:
     {"contract": "payment_authorized", "producer": "payments-service", "consumers": ["notification-service"],
      "reason": "potentially affects its consumers; requires verification", "evidence": []}
   ],
+  "persistence_affected": [
+    {"service": "payments-service", "entity": "payment_method", "kind": "sql_table", "evidence": [...]}
+  ],
   "unknowns": [
     {"status": "unknown", "service": "shipping-service", "reason": "looks internal but has not been indexed yet",
      "suggestion": "index this repository for a fuller picture"}
@@ -277,6 +280,10 @@ não fato:
 - **`contracts_at_risk`**: eventos publicados por um serviço `primary`/`secondary` e
   quem mais consome aquele canal — sempre em linguagem de risco ("potentially
   affects", "requires verification"), nunca declarando uma quebra confirmada.
+- **`persistence_affected`**: o que cada serviço `primary`/`secondary` persiste,
+  lido direto do índice (sem custo extra de LLM) — resolve o "e os dados, o que é
+  afetado?" sem precisar de uma chamada separada a `describe_persistence` pros casos
+  óbvios.
 - **`unknowns`**: toda lacuna explícita da resposta — serviço não mapeado, a tarefa
   inteira não bateu com nada indexado, **ou um serviço relevante cujo `freshness`
   veio `stale`** (o que significa que os motivos de dependência guardados sobre ele
