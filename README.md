@@ -122,8 +122,11 @@ significa que não dá pra saber (repositório não é git, ou nunca foi indexad
 commit associado) — nunca tratado como "está tudo bem", nem como "está desatualizado".
 
 **`describe_api("orders-service", "POST", "/orders")`** — o nível mais detalhado:
-formato da resposta campo a campo, as mesmas chamadas de dependência (agora só as
-desta API) e as regras de validação/autorização:
+formato do request e da resposta campo a campo (`request_shape` inclui `required`
+por campo — o começo de Contract Intelligence estruturada, hoje só nos campos, sem
+ainda comparar entre indexações pra detectar quebra de contrato de verdade), as
+mesmas chamadas de dependência (agora só as desta API) e as regras de validação/
+autorização:
 ```json
 {
   "method": "POST",
@@ -133,6 +136,13 @@ desta API) e as regras de validação/autorização:
   "response_shape": [
     {"field": "order_id", "type_desc": "string, order id"},
     {"field": "status", "type_desc": "string, order status (e.g. \"confirmed\")"}
+  ],
+  "request_shape": [
+    {"field": "amount", "type_desc": "number, order amount", "required": true},
+    {"field": "currency", "type_desc": "string, currency code", "required": true},
+    {"field": "payment_token", "type_desc": "string, payment token", "required": true},
+    {"field": "sku", "type_desc": "string, product SKU", "required": true},
+    {"field": "qty", "type_desc": "number, quantity", "required": true}
   ],
   "calls": [
     {"to_service_name": "payments-service", "call_kind": "http", "reason": "to charge the customer's payment method for the order amount", "data_needed": ["amount", "currency", "payment_token"], "purpose_kind": "other"},
@@ -362,6 +372,10 @@ do mesmo jeito que a indexação também é feita um repositório de cada vez.
   carrega `confidence` (0-1, avaliada pelo próprio LLM) e `target_kind`
   (`internal`/`external`/`unknown` — LLM com o código real como sinal primário,
   heurística determinística de vendor/nomenclatura como fallback só para `unknown`).
+  `apis` também carrega `request_shape` estruturado (campo, tipo, `required`),
+  espelhando o `response_shape` que já existia — a base de dados pra Contract
+  Intelligence mais profunda (comparar contratos entre indexações pra achar quebra de
+  verdade ainda não está implementado, ver "Limitações conhecidas").
 - **Provenance e freshness explícitos**: `provenance` (`llm` vs. `deterministic`)
   formaliza a distinção fato/interpretação onde ela já era implícita; `freshness`
   (`generation/freshness.py`) compara o commit indexado com o commit atual do
@@ -425,8 +439,14 @@ do mesmo jeito que a indexação também é feita um repositório de cada vez.
   colunas — o schema em `db/schema.sql` é a única forma esperada para tabelas já
   existentes (SQLite não altera uma tabela via `CREATE TABLE IF NOT EXISTS`; tabelas
   novas, como `change_surface_verifications`, são adicionadas automaticamente, colunas
-  novas em tabelas existentes não). Se uma mudança de schema afetar uma tabela já
-  existente, apague `~/.blastmap/blastmap.db` e rode `blastmap index` de novo.
+  novas em tabelas existentes não — `apis.request_shape` é um exemplo real: um banco
+  indexado antes dessa coluna existir não a ganha sozinho). Se uma mudança de schema
+  afetar uma tabela já existente, apague `~/.blastmap/blastmap.db` (ou o `--db` que
+  você estiver usando) e rode `blastmap index` de novo.
+- `request_shape` só captura o formato do campo; ainda não compara contratos entre
+  indexações pra detectar automaticamente que um campo obrigatório sumiu (isso
+  exigiria guardar histórico de schema por API, não implementado). `contracts_at_risk`
+  continua sinalizando risco por consumidor de evento, não por diff de campo.
 - Heurísticas de descoberta são propositalmente simples (regex): apontam o LLM para o
   trecho certo, mas podem perder padrões incomuns (ex.: cliente HTTP instanciado numa
   variável com nome não convencional), e são desenhadas para o formato de um

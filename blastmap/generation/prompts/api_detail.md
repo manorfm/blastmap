@@ -19,6 +19,9 @@ Return:
 - summary: one line describing what this endpoint does
 - description: what it does and what it returns, in business terms
 - response_shape: fields of the response payload, if visible in the evidence
+- request_shape: fields of the request payload this endpoint accepts, if visible in
+  the evidence, each with whether the handler treats it as required (e.g. accessed
+  directly without a default/None check) or optional
 - calls: any other service, queue or topic this endpoint calls or publishes to while
   handling a request, WHY it does so (business reason, e.g. "to charge the customer's
   card" or "to check current stock before confirming the order"), exactly what

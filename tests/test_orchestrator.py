@@ -56,6 +56,7 @@ class FakeOrchestratorBackend:
             "summary": "Fake summary.",
             "description": "Fake description.",
             "response_shape": [{"field": "id", "type_desc": "string"}],
+            "request_shape": [{"field": "amount", "type_desc": "number", "required": True}],
             "calls": [{
                 "to_service_name": "payments-service", "call_kind": "http", "reason": "fake reason",
                 "data_needed": ["amount"], "purpose_kind": "data_fetch", "confidence": 0.8, "target_kind": "internal",

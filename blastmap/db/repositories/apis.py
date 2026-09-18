@@ -17,15 +17,19 @@ def upsert_api(
     description: str,
     response_shape: dict,
     evidence: list[dict],
+    request_shape: list[dict] | None = None,
 ) -> int:
     row = conn.execute(
         "SELECT id FROM apis WHERE service_id = ? AND method = ? AND path = ?",
         (service_id, method, path),
     ).fetchone()
-    payload = (summary, description, json.dumps(response_shape), json.dumps(evidence), now())
+    payload = (
+        summary, description, json.dumps(response_shape), json.dumps(request_shape or []),
+        json.dumps(evidence), now(),
+    )
     if row is not None:
         conn.execute(
-            """UPDATE apis SET summary = ?, description = ?, response_shape = ?,
+            """UPDATE apis SET summary = ?, description = ?, response_shape = ?, request_shape = ?,
                evidence_json = ?, updated_at = ? WHERE id = ?""",
             (*payload, row["id"]),
         )
@@ -33,7 +37,7 @@ def upsert_api(
     else:
         cur = conn.execute(
             """INSERT INTO apis (service_id, method, path, summary, description, response_shape,
-               evidence_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               request_shape, evidence_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (service_id, method, path, *payload),
         )
         api_id = cur.lastrowid

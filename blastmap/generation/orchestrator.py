@@ -250,6 +250,7 @@ def index_service(
         api_id = apis_repo.upsert_api(
             conn, service_id, endpoint.method, endpoint.path,
             result["summary"], result["description"], result["response_shape"], evidence,
+            request_shape=result["request_shape"],
         )
         apis_repo.replace_api_validations(conn, api_id, result["validations"])
         service_calls_repo.replace_calls_for_api(conn, service_id, api_id, result["calls"], evidence)

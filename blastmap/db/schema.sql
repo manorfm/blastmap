@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS apis (
     summary        TEXT,
     description    TEXT,
     response_shape TEXT,
+    request_shape  TEXT,
     evidence_json  TEXT,
     updated_at     TEXT NOT NULL,
     UNIQUE(service_id, method, path)

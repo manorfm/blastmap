@@ -98,6 +98,7 @@ def describe_api(conn: sqlite3.Connection, service: str, method: str, path: str)
         "summary": api["summary"],
         "description": api["description"],
         "response_shape": json.loads(api["response_shape"] or "[]"),
+        "request_shape": json.loads(api["request_shape"] or "[]"),
         "calls": [_fmt_call(c) for c in calls],
         "validations": [{"kind": v["kind"], "description": v["description"]} for v in validations],
     }

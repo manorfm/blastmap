@@ -22,6 +22,20 @@
         "additionalProperties": false
       }
     },
+    "request_shape": {
+      "type": "array",
+      "description": "Fields of the request payload this endpoint accepts, if visible in the evidence.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {"type": "string"},
+          "type_desc": {"type": "string", "description": "e.g. 'string, order id' or 'number, total in cents'"},
+          "required": {"type": "boolean", "description": "Whether the handler treats this field as required (e.g. accessed directly without a default/None check) vs. optional."}
+        },
+        "required": ["field", "type_desc", "required"],
+        "additionalProperties": false
+      }
+    },
     "calls": {
       "type": "array",
       "description": "Other services, queues or topics this API calls or publishes to while handling a request.",
@@ -70,6 +84,6 @@
       }
     }
   },
-  "required": ["summary", "description", "response_shape", "calls", "validations"],
+  "required": ["summary", "description", "response_shape", "request_shape", "calls", "validations"],
   "additionalProperties": false
 }
