@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS service_calls (
     updated_at      TEXT NOT NULL
 );
 
--- `engine` is the concrete database (postgres, mysql, mongodb, dynamodb, redis,
--- elasticsearch, sqlite), inferred by the LLM the same way messages.provider is —
+-- `engine` is the concrete database (postgres, mysql, mongodb, cassandra, dynamodb,
+-- redis, elasticsearch, sqlite), inferred by the LLM the same way messages.provider is —
 -- an ORM model/entity definition (SQLAlchemy, JPA, GORM) rarely names its own engine,
 -- so this leans on the service's dependency manifest and config files as evidence.
 -- 'unknown' means neither resolved it; never a guess.

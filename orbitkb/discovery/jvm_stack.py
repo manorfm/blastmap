@@ -28,6 +28,9 @@ _ENGINE_DRIVER_KEYWORDS = {
     "spring-boot-starter-data-mongodb": "mongodb",
     "lettuce": "redis",
     "jedis": "redis",
+    "spring-boot-starter-data-cassandra": "cassandra",
+    "cassandra-driver": "cassandra",
+    "datastax": "cassandra",
 }
 
 EXTENSIONS = (".java", ".kt")

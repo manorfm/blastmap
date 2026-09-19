@@ -10,7 +10,7 @@
           "kind": {"type": "string", "enum": ["sql_table", "document", "cache", "other"]},
           "engine": {
             "type": "string",
-            "enum": ["postgres", "mysql", "mongodb", "dynamodb", "redis", "elasticsearch", "sqlite", "unknown"],
+            "enum": ["postgres", "mysql", "mongodb", "cassandra", "dynamodb", "redis", "elasticsearch", "sqlite", "unknown"],
             "description": "The concrete database engine, inferred from the evidence (dependency manifest, config files, driver imports). Use \"unknown\" when the model/entity definition alone doesn't name one and no manifest/config evidence resolves it — never guess."
           },
           "fields": {

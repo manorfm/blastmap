@@ -15,6 +15,10 @@ def test_discover_services_finds_all_three():
 
 
 def test_python_detector_matches_and_finds_hints():
+    """orders-service is a hexagonal (ports & adapters) FastAPI service: three
+    endpoints (create/get/cancel an order) live on a single OrdersController
+    class in adapters/http/orders_controller.py, plus a plain function-based
+    /health check in main.py (see the next test)."""
     folder = SAMPLE_ROOT / "orders-service"
     detector = PythonDetector()
     assert detector.matches(folder)
@@ -23,22 +27,28 @@ def test_python_detector_matches_and_finds_hints():
     assert hints.entry_excerpt is not None
     assert hints.entry_excerpt.file_path == "main.py"
 
-    assert len(hints.endpoints) == 1
-    endpoint = hints.endpoints[0]
-    assert endpoint.method == "POST"
-    assert endpoint.path == "/orders"
+    assert len(hints.endpoints) == 4
+    create_order = next(e for e in hints.endpoints if e.path == "/orders")
+    assert create_order.method == "POST"
+    assert create_order.component_hint == "OrdersController"
+    assert any(e.path == "/orders/{order_id}" and e.method == "GET" for e in hints.endpoints)
+    assert any(e.path == "/orders/{order_id}/cancel" and e.method == "POST" for e in hints.endpoints)
 
     outbound_kinds = {c.call_kind for c in hints.outbound_calls}
     assert "http" in outbound_kinds
 
     assert any(m.direction == "publishes" and m.provider_hint == "kafka" for m in hints.messaging)
-    assert any(p.name_hint == "Order" for p in hints.persistence)
+    assert any(m.direction == "consumes" and m.provider_hint == "kafka" for m in hints.messaging)
+    assert any(p.name_hint == "Order" and p.engine_hint == "postgres" for p in hints.persistence)
 
 
 def test_python_endpoint_falls_back_to_file_stem_with_no_enclosing_class():
+    """main.py's own /health check is the one endpoint in orders-service with no
+    enclosing class (it's a bare `@app.get` in the composition root) — a natural
+    case of the function-based-routing fallback, distinct from OrdersController."""
     folder = SAMPLE_ROOT / "orders-service"
     hints = PythonDetector().collect_hints(folder)
-    endpoint = hints.endpoints[0]
+    endpoint = next(e for e in hints.endpoints if e.path == "/health")
     assert endpoint.component_hint == "main"  # function-based routing, no class wraps it
     assert endpoint.extra_excerpts == []  # every call in the handler is a library call
 
@@ -87,21 +97,35 @@ def test_python_persistence_engine_hint_comes_from_the_manifest_driver(tmp_path:
 
 
 def test_node_ts_detector_matches_and_finds_hints():
+    """payments-service is deliberately class-free at the routing layer (plain
+    Express handlers in routes/payments.routes.js, delegating to the fat
+    PaymentService) — component_hint falls back to the file stem."""
     folder = SAMPLE_ROOT / "payments-service"
     detector = NodeTsDetector()
     assert detector.matches(folder)
 
     hints = detector.collect_hints(folder)
-    assert len(hints.endpoints) == 1
-    assert hints.endpoints[0].method == "POST"
-    assert hints.endpoints[0].path == "/charge"
+    assert len(hints.endpoints) == 3
+    charge = next(e for e in hints.endpoints if e.path == "/charge")
+    assert charge.method == "POST"
+    assert charge.component_hint == "payments.routes"  # no enclosing class, file-stem fallback
+    assert any(e.path == "/payments/:id" and e.method == "GET" for e in hints.endpoints)
+    assert any(e.path == "/payments/:id/refund" and e.method == "POST" for e in hints.endpoints)
 
     assert any(m.channel_hint for m in hints.messaging)
     assert any(m.provider_hint == "kafka" for m in hints.messaging)  # kafkajs producer.send
-    assert any(p.name_hint == "transactions" for p in hints.persistence)
+    # Mongoose's `new Schema(...)` constructor never names its own model (that
+    # happens in a separate `mongoose.model(name, schema)` call this heuristic
+    # doesn't chase) — engine/kind is still unambiguous, name_hint stays "?".
+    assert any(p.kind == "document" and p.engine_hint == "mongodb" for p in hints.persistence)
 
 
 def test_jvm_spring_detector_matches_and_finds_hints():
+    """inventory-service is Clean Architecture over Cassandra: StockController
+    (conforming) exposes two endpoints; legacy.QuickStockPatchController is a
+    deliberate architecture-smell endpoint that bypasses every layer — see its
+    own component below. The service makes zero outbound calls (a pure leaf in
+    the synchronous graph), only reacting to/publishing Kafka events."""
     folder = SAMPLE_ROOT / "inventory-service"
     detector = JvmSpringDetector()
     assert detector.matches(folder)
@@ -109,9 +133,18 @@ def test_jvm_spring_detector_matches_and_finds_hints():
     hints = detector.collect_hints(folder)
     assert hints.entry_excerpt is not None
 
-    assert len(hints.endpoints) == 1
-    assert hints.endpoints[0].method == "GET"
-    assert hints.endpoints[0].path == "/stock/{sku}"
+    assert len(hints.endpoints) == 3
+    stock_check = next(e for e in hints.endpoints if e.path == "/stock/{sku}")
+    assert stock_check.method == "GET"
+    assert stock_check.component_hint == "StockController"
+    assert any(e.path == "/stock/{sku}/reserve" and e.method == "POST" for e in hints.endpoints)
+    smell_endpoint = next(e for e in hints.endpoints if e.path == "/internal/stock/{sku}/adjust")
+    assert smell_endpoint.component_hint == "QuickStockPatchController"  # its own, separate component
 
     assert not hints.outbound_calls  # leaf service, no outbound calls
-    assert any(p.name_hint == "Stock" for p in hints.persistence)
+
+    assert any(m.direction == "consumes" and m.channel_hint == "order.created" for m in hints.messaging)
+    assert any(m.direction == "consumes" and m.channel_hint == "order.cancelled" for m in hints.messaging)
+    assert any(m.direction == "publishes" and m.provider_hint == "kafka" for m in hints.messaging)
+
+    assert any(p.name_hint == "SpringDataStockRepository" and p.engine_hint == "cassandra" for p in hints.persistence)

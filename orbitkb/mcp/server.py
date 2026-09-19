@@ -87,7 +87,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
     def describe_persistence(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
         """Full field-level schema of everything one microservice persists (tables/
         documents/caches), including the concrete engine (postgres/mysql/mongodb/
-        dynamodb/redis/elasticsearch/sqlite/unknown) — describe_service only names
+        cassandra/dynamodb/redis/elasticsearch/sqlite/unknown) — describe_service only names
         these, this returns the actual fields. Capped at `limit` entities (default 50)
         starting at `offset`; `total`/`truncated` tell you whether to page further.
         Call this before changing anything that reads or writes this service's

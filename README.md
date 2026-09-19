@@ -199,8 +199,8 @@ for the description tools; the "checkout/payments/Pix" test fixture for
 ```json
 {
   "services": [
-    {"name": "orders-service", "short_desc": "A FastAPI service that handles order creation by charging a customer's payment and reserving product stock.", "stack": "python", "api_count": 1},
-    {"name": "payments-service", "short_desc": "A Node.js/TypeScript backend service that processes payment charges and publishes payment-related events to Kafka.", "stack": "node-ts", "api_count": 1}
+    {"name": "orders-service", "short_desc": "A hexagonal FastAPI service that orchestrates checkout: charges a customer's payment, reserves product stock, and manages the order lifecycle via Postgres.", "stack": "python", "api_count": 4},
+    {"name": "payments-service", "short_desc": "A Node.js/Express service that charges and refunds customers via an external card gateway, persists transactions in MongoDB, and publishes payment-related events to Kafka.", "stack": "node-ts", "api_count": 3}
   ]
 }
 ```
@@ -212,27 +212,35 @@ no field-level detail) + `freshness`:
 ```json
 {
   "name": "orders-service",
-  "short_desc": "A FastAPI service that handles order creation by charging a customer's payment and reserving product stock.",
-  "long_desc": "orders-service is a Python microservice built on FastAPI, exposing a single POST /orders endpoint that creates new orders. Requests must carry a Bearer token in the Authorization header (...) it publishes events to a Kafka topic for downstream consumers, giving it a role as both an orchestrator of a synchronous checkout flow and a producer in an event-driven architecture.",
+  "short_desc": "A hexagonal FastAPI service that orchestrates checkout: charges a customer's payment, reserves product stock, and manages the order lifecycle via Postgres.",
+  "long_desc": "orders-service is a Python microservice built on FastAPI using a hexagonal (ports & adapters) architecture, exposing endpoints to create, fetch, and cancel orders. Creating an order synchronously checks stock and charges the customer, then persists the order to Postgres and publishes an order.created event for downstream consumers; a background consumer reacts to payment.failed and stock.reservation_failed events by cancelling the order, giving it a role as both an orchestrator of a synchronous checkout flow and a participant in an asynchronous, choreographed saga.",
   "stack": "python",
   "calls": [
     {"to_service_name": "payments-service", "call_kind": "http", "reason": "to charge the customer's payment method for the order amount", "data_needed": ["amount", "currency", "payment_token"], "purpose_kind": "other", "target_kind": "internal", "resource_type": "not_applicable"},
     {"to_service_name": "inventory-service", "call_kind": "http", "reason": "to check current stock for the requested SKU before confirming the order", "data_needed": ["sku", "qty"], "purpose_kind": "validation", "target_kind": "internal", "resource_type": "not_applicable"},
-    {"to_service_name": "order_created", "call_kind": "queue_publish", "reason": "to notify downstream consumers that a new order was created", "data_needed": ["order_id", "sku", "qty"], "purpose_kind": "notification", "target_kind": "unknown", "resource_type": "not_applicable"}
+    {"to_service_name": "notify-hub.vendor.io", "call_kind": "http", "reason": "to send the customer an order-confirmation notification", "data_needed": ["order_id", "recipient"], "purpose_kind": "notification", "target_kind": "external", "resource_type": "saas"},
+    {"to_service_name": "order.created", "call_kind": "queue_publish", "reason": "to notify downstream consumers that a new order was created", "data_needed": ["order_id", "sku", "qty"], "purpose_kind": "notification", "target_kind": "unknown", "resource_type": "not_applicable"}
   ],
   "apis": [
-    {"method": "POST", "path": "/orders", "summary": "Creates a new order by charging the customer's payment method and checking stock availability, then publishes an order-created event."}
+    {"method": "POST", "path": "/orders", "summary": "Creates a new order by charging the customer's payment method and checking stock availability, then publishes an order-created event."},
+    {"method": "GET", "path": "/orders/{order_id}", "summary": "Fetches an order by id."},
+    {"method": "POST", "path": "/orders/{order_id}/cancel", "summary": "Cancels an order and publishes an order-cancelled event."},
+    {"method": "GET", "path": "/health", "summary": "Liveness check."}
   ],
   "components": [
-    {"name": "main", "file_path": "main.py", "summary": "Function-based FastAPI routing with a single order-creation endpoint; no class wraps it."}
+    {"name": "OrdersController", "file_path": "adapters/http/orders_controller.py", "summary": "The inbound HTTP adapter: create/get/cancel-order endpoints, delegating to the application use cases."},
+    {"name": "main", "file_path": "main.py", "summary": "Composition root; also exposes a bare /health check with no enclosing class."}
   ],
   "persists": [{"name": "orders", "kind": "sql_table", "engine": "postgres"}],
-  "messages": [{"direction": "publishes", "channel": "order_created", "provider": "kafka", "description": "Published after a payment charge succeeds and inventory stock is confirmed; signals that a new order has been created."}],
+  "messages": [
+    {"direction": "publishes", "channel": "order.created", "provider": "kafka", "description": "Published after a payment charge succeeds and inventory stock is confirmed; signals that a new order has been created."},
+    {"direction": "consumes", "channel": "payment.failed", "provider": "kafka", "description": "Triggers order cancellation when payments-service declines or fraud-blocks a charge."}
+  ],
   "freshness": {"indexed_at": "2026-03-01T12:00:00+00:00", "source_commit": "a1b2c3d", "current_commit": "a1b2c3d", "stale": false},
   "pagination": {"limit": 50, "offset": 0,
-    "calls": {"total": 3, "truncated": false}, "apis": {"total": 1, "truncated": false},
-    "components": {"total": 1, "truncated": false}, "persists": {"total": 1, "truncated": false},
-    "messages": {"total": 1, "truncated": false}}
+    "calls": {"total": 4, "truncated": false}, "apis": {"total": 4, "truncated": false},
+    "components": {"total": 2, "truncated": false}, "persists": {"total": 1, "truncated": false},
+    "messages": {"total": 3, "truncated": false}}
 }
 ```
 `stale: true` means the repository has had new commits since indexing — the
@@ -271,7 +279,7 @@ and validation/authorization rules:
   "method": "POST",
   "path": "/orders",
   "summary": "Creates a new order by charging the customer's payment method and checking stock availability, then publishes an order-created event.",
-  "description": "Accepts an order request (amount, currency, payment token, SKU, quantity), charges the customer via the payments service, checks stock availability via the inventory service, then publishes an order_created event to Kafka. Returns the newly created order's ID and confirmation status.",
+  "description": "Accepts an order request (amount, currency, payment token, SKU, quantity), charges the customer via the payments service, checks stock availability via the inventory service, then publishes an order.created event to Kafka and notifies the customer via an external vendor. Returns the newly created order's ID and confirmation status.",
   "response_shape": [
     {"field": "order_id", "type_desc": "string, order id"},
     {"field": "status", "type_desc": "string, order status (e.g. \"confirmed\")"}
@@ -285,7 +293,8 @@ and validation/authorization rules:
   ],
   "calls": [
     {"to_service_name": "payments-service", "call_kind": "http", "reason": "to charge the customer's payment method for the order amount", "data_needed": ["amount", "currency", "payment_token"], "purpose_kind": "other", "target_kind": "internal", "resource_type": "not_applicable"},
-    {"to_service_name": "inventory-service", "call_kind": "http", "reason": "to check current stock for the requested SKU before confirming the order", "data_needed": ["sku", "qty"], "purpose_kind": "validation", "target_kind": "internal", "resource_type": "not_applicable"}
+    {"to_service_name": "inventory-service", "call_kind": "http", "reason": "to check current stock for the requested SKU before confirming the order", "data_needed": ["sku", "qty"], "purpose_kind": "validation", "target_kind": "internal", "resource_type": "not_applicable"},
+    {"to_service_name": "notify-hub.vendor.io", "call_kind": "http", "reason": "to send the customer an order-confirmation notification", "data_needed": ["order_id", "recipient"], "purpose_kind": "notification", "target_kind": "external", "resource_type": "saas"}
   ],
   "validations": [
     {"kind": "authorization", "description": "Requires an Authorization header starting with \"Bearer \"; otherwise returns 401 with detail \"missing bearer token\"."},
@@ -427,7 +436,7 @@ This distinction feeds two buckets in `find_change_surface`:
 An ORM model/entity (SQLAlchemy, JPA, GORM) rarely reveals on its own which
 database is behind it — that usually only exists in a connection string or the
 dependency manifest. `persistence_entities.engine`
-(`postgres`/`mysql`/`mongodb`/`dynamodb`/`redis`/`elasticsearch`/`sqlite`/`unknown`)
+(`postgres`/`mysql`/`mongodb`/`cassandra`/`dynamodb`/`redis`/`elasticsearch`/`sqlite`/`unknown`)
 and `messages.provider`
 (`kafka`/`rabbitmq`/`sqs`/`sns`/`service_bus`/`activemq`/`nats`/`unknown`) follow
 the same precedence as `target_kind`: the LLM decides from real evidence, with

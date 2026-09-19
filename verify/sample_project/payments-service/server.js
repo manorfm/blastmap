@@ -1,30 +1,26 @@
 const express = require('express');
-const { Kafka } = require('kafkajs');
+const mongoose = require('mongoose');
+const paymentsRoutes = require('./routes/payments.routes');
+const paymentService = require('./services/payment.service');
+const { startProducer, startOrderCancelledConsumer } = require('./events/kafka');
 
 const app = express();
 app.use(express.json());
+app.use('/', paymentsRoutes);
 
-const kafka = new Kafka({ clientId: 'payments-service', brokers: ['localhost:9092'] });
-const producer = kafka.producer();
+const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/payments';
 
-app.post('/charge', (req, res) => {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'missing bearer token' });
-  }
+async function start() {
+  await mongoose.connect(MONGO_URL);
+  await startProducer();
+  await startOrderCancelledConsumer(paymentService);
 
-  const { amount, currency, payment_token } = req.body;
-  if (!amount || amount <= 0) {
-    return res.status(400).json({ error: 'amount must be positive' });
-  }
-
-  const transactionId = 'txn_456';
-  producer.send({
-    topic: 'payment_completed',
-    messages: [{ value: JSON.stringify({ transactionId, amount, currency }) }],
+  app.listen(3000, () => {
+    console.log('payments-service listening on port 3000');
   });
+}
 
-  res.json({ transactionId, status: 'charged' });
+start().catch((err) => {
+  console.error('failed to start payments-service', err);
+  process.exit(1);
 });
-
-app.listen(3000);

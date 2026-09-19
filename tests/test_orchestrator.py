@@ -120,9 +120,11 @@ def test_components_are_synthesized_from_endpoint_summaries_not_raw_code(tmp_pat
 
     orders = services_repo.get_service_by_name(conn, "orders-service")
     components = components_repo.list_components(conn, orders["id"])
-    assert len(components) == 1
-    assert components[0]["name"] == "main"  # no class wraps the endpoint in this fixture
-    assert components[0]["summary"] == "Fake component summary."
+    # Two components: OrdersController (the three /orders endpoints) and main
+    # (the bare /health check, no class wraps it).
+    names = {c["name"] for c in components}
+    assert names == {"OrdersController", "main"}
+    assert all(c["summary"] == "Fake component summary." for c in components)
 
 
 def test_overview_prompt_is_composed_from_the_components_summary(tmp_path: Path):
@@ -210,7 +212,7 @@ def test_generation_failure_is_isolated_per_unit(tmp_path: Path):
     orders_row = services_repo.get_service_by_name(conn2, "orders-service")
     assert orders_row["short_desc"] is None  # overview failed, never written
     apis = apis_repo.list_apis(conn2, orders_row["id"])
-    assert len(apis) == 1  # api_detail unit succeeded independently
+    assert len(apis) == 4  # api_detail units succeeded independently (4 endpoints)
     assert failures_root.exists()
     assert list(failures_root.glob("*.txt"))
 
