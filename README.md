@@ -9,9 +9,12 @@ code — with evidence, confidence and freshness made explicit, instead of impli
 - **Not a generic code graph** via AST/LSP — that already exists (Serena,
   Codebase-Memory MCP and similar tools), and it isn't the missing layer.
 - **Not generic RAG** over the repository, nor "code memory".
-- **Not vector-DB semantic search** — `search`/`find_change_surface` use SQLite
-  FTS5 (bm25); embeddings would only come in once a benchmark shows FTS5 isn't
-  enough, which hasn't happened yet (see "Known limitations").
+- **Not a vector database** — `search`/`find_change_surface` use SQLite FTS5
+  (bm25) as the primary, free retrieval path. An optional local (no paid API),
+  CPU-only semantic fallback exists (see "Semantic retrieval fallback" below) for
+  when a task's vocabulary doesn't keyword-match anything indexed, but it's an
+  opt-in extra, never the default path, and every vector lives in SQLite
+  (`vector_json` columns) — no separate vector-DB service.
 - **Doesn't try to rewrite code or act on its own** — it's a knowledge layer
   queried via MCP; the agent is the one who decides and edits.
 
@@ -103,6 +106,14 @@ with your normal subscription session — see `--backend` in "Basic usage" below
 Commands that only read the already-indexed SQLite database (`list`, `status`,
 `export`, and every MCP tool except `find_change_surface`) don't need either
 CLI at all.
+
+Optional: `pip install orbitkb[semantic]` (or `pip install -e ".[dev,semantic]"`
+from source) adds a local, CPU-only semantic-retrieval fallback for
+`find_change_surface` — see "Semantic retrieval fallback" below. It's never
+required; without it, retrieval stays exactly keyword-only (FTS5), same as
+before. The first embed call after installing it downloads a small model file
+from Hugging Face once and caches it locally; every call after that is fully
+offline.
 
 ## Configuration
 
@@ -209,7 +220,11 @@ no field-level detail) + `freshness`:
   ],
   "persists": [{"name": "orders", "kind": "sql_table", "engine": "postgres"}],
   "messages": [{"direction": "publishes", "channel": "order_created", "provider": "kafka", "description": "Published after a payment charge succeeds and inventory stock is confirmed; signals that a new order has been created."}],
-  "freshness": {"indexed_at": "2026-03-01T12:00:00+00:00", "source_commit": "a1b2c3d", "current_commit": "a1b2c3d", "stale": false}
+  "freshness": {"indexed_at": "2026-03-01T12:00:00+00:00", "source_commit": "a1b2c3d", "current_commit": "a1b2c3d", "stale": false},
+  "pagination": {"limit": 50, "offset": 0,
+    "calls": {"total": 3, "truncated": false}, "apis": {"total": 1, "truncated": false},
+    "components": {"total": 1, "truncated": false}, "persists": {"total": 1, "truncated": false},
+    "messages": {"total": 1, "truncated": false}}
 }
 ```
 `stale: true` means the repository has had new commits since indexing — the
@@ -222,6 +237,20 @@ as "it's stale".
 is done via loose functions (no class), the component is the file itself
 (`"name": "main"`); when there's a class/controller, the component takes its
 name.
+
+### Pagination (`describe_service`, `list_apis`, `describe_persistence`, `describe_messages`)
+
+A benchmark fixture has one or two endpoints; a real service can have dozens.
+These four tools accept optional `limit` (default 50, capped at 500) and
+`offset` (default 0) parameters and cap every list they return accordingly —
+`describe_service` applies them independently to each of its five lists
+(`calls`/`apis`/`components`/`persists`/`messages`), reported per-list under
+`pagination`; `list_apis`/`describe_persistence`/`describe_messages` report a
+single top-level `total`/`truncated` next to their one list. `truncated: true`
+means call again with `offset` advanced by `limit` to see the rest — the
+response never silently drops items without saying so. A negative or zero
+`limit`/`offset` is rejected with `{"error": "..."}`; an oversized `limit` is
+silently capped at 500, never an error.
 
 **`describe_api("orders-service", "POST", "/orders")`** — the most detailed
 level: request and response shape field by field (`request_shape` includes
@@ -332,7 +361,12 @@ a verdict:
     {"kind": "duplicate_external_integration", "severity": "info", "services": ["checkout-service", "refunds-service"],
      "reason": "checkout-service, refunds-service each integrate with 'Stripe API' independently — worth checking whether that's intentional or should be consolidated behind one service.",
      "detail": {"vendor": "Stripe API"}}
-  ]
+  ],
+  "trend": {
+    "new_findings": [{"kind": "fan_in", "services": ["payments-service"], "detail": {"count": 5}}],
+    "resolved_findings": [{"kind": "cycle", "services": ["checkout-service", "refunds-service"], "detail": {}}],
+    "count_deltas": [{"kind": "fan_out", "services": ["checkout-service"], "previous_count": 4, "current_count": 6}]
+  }
 }
 ```
 4 detectors today: `cycle` (circular dependency among internal services),
@@ -341,9 +375,15 @@ dependents/dependencies — a starting threshold of 4, not a trained value),
 `shared_database` (same-named entity, same engine, different services) and
 `duplicate_external_integration` (two or more services independently integrating
 with the same vendor). Deliberately out of scope still: legacy/strangler-fig
-tagging, directional cycle severity (a cycle involving a legacy service is more
-serious than one between two peers) and trend across successive runs — see
-"Known limitations".
+tagging and directional cycle severity (a cycle involving a legacy service is
+more serious than one between two peers) — see "Known limitations".
+
+`trend` compares the latest run against the one immediately before it —
+`new_findings`/`resolved_findings` by `(kind, services)` identity, and
+`count_deltas` for a `fan_in`/`fan_out` finding that persisted across both runs
+but whose count changed — computed for free from already-stored runs, no
+re-detection. It's omitted entirely (not an empty object) on the very first
+architecture run ever, since there's nothing yet to compare against.
 
 ### Internal vs. external (`target_kind`, `resource_type`)
 
@@ -445,7 +485,13 @@ inference**, not a fact:
     {"tool": "index", "arguments": {"service": "shipping-service"},
      "reason": "shipping-service looks internal but not indexed yet — index it for a fuller picture."}
   ],
-  "run_id": 1
+  "similar_past_tasks": [
+    {"run_id": 4, "task": "Add support for boleto in checkout", "similarity": 0.87,
+     "primary_services": ["checkout-service", "payments-service"],
+     "outcome": "verified precision=1.0 recall=1.0"}
+  ],
+  "run_id": 1,
+  "run_cost_usd": 0.0123
 }
 ```
 - **`contracts_at_risk`**: events published by a `primary`/`secondary` service
@@ -469,11 +515,40 @@ inference**, not a fact:
   from what's already been read — **zero extra LLM cost**. It's the
   highest-return-per-token piece of the whole change surface: instead of just
   handing over context, it says **where to look next**.
+- **`similar_past_tasks`**: up to 3 earlier `find_change_surface` runs whose task
+  text was semantically closest to this one (local embeddings — see "Semantic
+  retrieval fallback" below), each restated with its `primary_services` and an
+  honest `outcome`: a real git-verified `"verified precision=... recall=..."`
+  (from `verify_change_surface`) when one exists, a self-reported
+  `"feedback: N confirmed, M rejected"` when only that exists, or
+  `"no feedback yet"` — never fabricated. Only populated when the optional
+  `semantic` extra is installed; an empty list otherwise, never an error.
+  Historical precedent: has a similarly-worded task actually panned out before?
+- **`run_cost_usd`**: this call's own LLM cost, when the backend's CLI exposed
+  it — `null` (never fabricated as `0`) when it didn't.
 
 Accepts an optional `hint_services` to anchor the search when the agent already
 suspects specific services. If the task doesn't match anything indexed, it
 returns empty lists with a `note` (for humans) and an `unknowns` (structured, for
 the agent) explaining why — without calling the LLM.
+
+### Semantic retrieval fallback
+
+`find_change_surface`/`search`'s primary retrieval is always FTS5 keyword
+matching — free, no model, same as before. When the optional `semantic` extra
+is installed (`pip install orbitkb[semantic]`, see "Installation"), a second
+strategy is layered on top as a **fallback only**: if keyword retrieval finds
+zero candidates, a local, CPU-only embedding model
+(`generation/embeddings.FastEmbedBackend`, via the `fastembed` package — no
+paid API, no network call after the first use) embeds the task and cosine-ranks
+it against every indexed service's own embedding (computed once, whenever a
+service's overview is generated, stored in `service_embeddings`). Candidates
+below a similarity floor (a starting constant, not a trained value — same
+honesty as `find_architecture_smells`'s `FAN_THRESHOLD`) are dropped. The
+common path — keyword retrieval finds something — pays zero extra cost or
+latency: the embedding model is never even loaded unless the fallback actually
+runs. The same embedding infrastructure also backs `similar_past_tasks` above
+(one vector per `change_surface_runs` row, in `change_surface_run_embeddings`).
 
 ### Audit and feedback
 
@@ -521,6 +596,34 @@ comparing several unrelated git histories under a single `--since` wouldn't make
 sense; in a cumulative multi-repository setup, you run one `verify` per
 repository, the same way indexing is also done one repository at a time.
 
+## Token/cost accounting
+
+Every `index_runs` row (one per `orbitkb index`/`update` invocation) and every
+`change_surface_runs` row (one per `find_change_surface`/`analyze` call) carries
+best-effort `input_tokens`, `output_tokens` and `cost_usd`, read from whatever
+the `claude`/`codex` CLI's own JSON output reports for that call
+(`generation/backend_base.LLMUsage`). "Best-effort" is deliberate here: no key
+beyond `structured_output`/`is_error`/`result` was ever verified against a real
+`claude -p --output-format json` payload in this codebase before this was
+added, so extraction is defensive (`payload.get(...)`) and every field stays
+honestly `None` instead of raising or guessing when the CLI doesn't carry it —
+same posture as `persistence_entities.engine = "unknown"`.
+
+`orbitkb index`/`update` print each service's `cost_usd` on completion;
+`orbitkb status` prints tokens/cost per recent run plus a cumulative total
+(service-scoped with `orbitkb status <service>`, whole-DB otherwise):
+```
+$ orbitkb status orders-service
+service: orders-service (python) — /path/to/orders-service
+last_commit: a1b2c3d
+indexed files: 4
+  run#12 2026-03-01T12:00:00+00:00 status=ok backend=claude files_changed=2 llm_calls=3 tokens=(in=4200,out=650) cost_usd=0.0187 notes=None
+cumulative usage: input_tokens=18400 output_tokens=2950 cost_usd=0.0821
+```
+`find_change_surface` surfaces its own call's cost directly in the response as
+`run_cost_usd` (see above) — no separate `status` round trip needed just to see
+what one call cost.
+
 ## Diagrams (Mermaid)
 
 `orbitkb export mermaid --out docs/` generates:
@@ -556,7 +659,8 @@ generated 100% from SQLite, with no LLM cost.
   using the user's subscription (not a paid API) by default. The returned JSON is
   validated against a schema, with 1 retry and per-unit failure isolation (one
   failure never aborts the whole run). Invocation harness (prompt/schema loading
-  + retry) shared between indexing and `find_change_surface`
+  + retry + best-effort token/cost usage summed across retries)
+  shared between indexing and `find_change_surface`
   (`generation/llm_harness.py`).
 - **SQLite as the source of truth** — a single System Knowledge Model, with
   `repositories` (explicit, cumulative multi-repository) and
@@ -570,8 +674,44 @@ generated 100% from SQLite, with no LLM cost.
 - **Repository layer split by aggregate** (`db/repositories/`: `services`,
   `apis`, `components`, `service_calls`, `persistence`, `messages`,
   `architecture`, `indexed_files`, `change_surface`, `verification`,
-  `index_runs`, `search`, `repositories`) — each module only knows its own
-  tables; no other module runs SQL directly.
+  `index_runs`, `search`, `repositories`, `embeddings`) — each module only
+  knows its own tables; no other module runs SQL directly. `embeddings` is one
+  module for two tables (`service_embeddings`, `change_surface_run_embeddings`)
+  since both are the same "vector storage for X" concern for two different
+  aggregates.
+- **Hierarchical generation as one Strategy/Template Method per unit**
+  (`generation/orchestrator.py`: `EndpointGenerator`, `ComponentGenerator`,
+  `PersistenceGenerator`, `MessagingGenerator`, `OverviewGenerator`, all
+  implementing `UnitGenerator`) — `index_service` is a thin coordinator that
+  runs them in the order the hierarchy above requires, instead of one long
+  function inlining all five.
+- **Token/cost accounting** (`generation/backend_base.LLMUsage`,
+  best-effort, honestly `None` when unavailable — see "Token/cost accounting"
+  above): summed per `index`/`update` run and per `find_change_surface`/`analyze`
+  call, surfaced via `orbitkb status` and `run_cost_usd`.
+- **Bounded, paginated MCP list responses** (`describe_service`, `list_apis`,
+  `describe_persistence`, `describe_messages` — see "Pagination" above): a real
+  service's endpoint/entity/message count no longer determines the response
+  size by default.
+- **Local semantic retrieval fallback** (`generation/embeddings.py`,
+  `generation/retrieval.SemanticRetrieval`/`FallbackRetrieval` — see "Semantic
+  retrieval fallback" above), and **`similar_past_tasks` historical
+  precedent** in `find_change_surface`, reusing the same embedding
+  infrastructure — both opt-in via `pip install orbitkb[semantic]`, both
+  degrade to today's exact behavior (empty/absent, never an error) when not
+  installed.
+- **Architecture-smells trend** (`generation/architecture.diff_architecture_runs`,
+  `find_architecture_smells`'s `trend` field — see above): new/resolved
+  findings and fan-in/fan-out count deltas between the two most recent runs,
+  pure SQL/in-memory diff, no LLM, no re-detection.
+- **Explicit self-indexing via `--stack`** (`orbitkb index . --service <name>
+  --stack <node-ts|python|jvm-spring|go>`, `discovery/registry.detector_by_id`):
+  bypasses `discover_services()`/`matches()` entirely for a folder shape no
+  heuristic recognizes (a library/CLI package, exactly `orbitkb`'s own shape),
+  without weakening detection precision for the default heuristic path. This
+  is what `tests/test_self_index_e2e.py` now drives through the real CLI, and
+  what also proves cumulative multi-repository indexing end to end in the same
+  test.
 - **Persisted evidence**: `apis`, `components`, `service_calls`,
   `persistence_entities` and `messages` carry `evidence_json` (file + line) — the
   exact excerpt the LLM saw when it generated that piece of information, never a
@@ -622,10 +762,11 @@ generated 100% from SQLite, with no LLM cost.
   natural next tool is — the progressive-disclosure narrative lives in the MCP
   schema, not just in this README. Registrable with any MCP client (Claude Code,
   Codex, etc.).
-- **Full-text search (SQLite FTS5)**, not a vector DB: `search` and
-  `find_change_surface`'s candidate retrieval use an FTS5 index (prefix match +
-  `bm25` ranking) rebuilt per service on every indexing run
-  (`db.repositories.search`).
+- **Full-text search (SQLite FTS5)** as the primary, always-free retrieval
+  path: `search` and `find_change_surface`'s candidate retrieval use an FTS5
+  index (prefix match + `bm25` ranking) rebuilt per service on every indexing
+  run (`db.repositories.search`). The optional semantic fallback (see above)
+  only ever runs as a `FallbackRetrieval` secondary when this finds nothing.
 - **CI** (GitHub Actions, `.github/workflows/ci.yml`): runs the whole suite on
   Python 3.11 and 3.12 on every push/PR — no test depends on a real
   `claude`/`codex` CLI (the backend is always fake, or data is seeded directly
@@ -710,31 +851,29 @@ that is not listed above."), but this has never been adversarially tested.
   of a web microservice (HTTP endpoint, queue, ORM) — a Python package that's a
   library/CLI rather than a web service (like `orbitkb` itself) doesn't match
   any of these patterns, and so only generates the overview unit, with no
-  endpoints/persistence/messaging detected. This also means **`orbitkb` can't
-  self-index via the CLI's `index` command** (which requires `matches()` to
-  pass, and the dependency manifest lives at the repo root while the code lives
-  in a subdirectory — neither alone satisfies `PythonDetector.matches()`); real
-  self-indexing only works by calling
-  `generation.orchestrator.index_service()` directly with an explicit detector
-  (exactly what `tests/test_self_index_e2e.py` does, and what was used to
-  validate the pipeline with a real backend during development — see
-  "Development"). Broadening `matches()` to accept this case would reduce
-  detection precision for real targets (any Python package would start
-  "looking like" a service), so this gap is deliberate, not a trivial pending
-  task. No automated test specifically for the Go/JVM stacks in
-  `cli.py`/`orchestrator.py` (covered via Python/Node in the suite) — only
-  `discovery/go_stack.py` in isolation.
-- `find_change_surface`/`search` tokenize the query and use FTS5 with prefix
-  match — good for finding things by keyword, but still not semantic search: a
+  endpoints/persistence/messaging detected. `orbitkb index --service <name>
+  --stack <stack>` (`discovery/registry.detector_by_id`) is the explicit escape
+  hatch for exactly this case — see "What's already implemented"; broadening
+  `matches()` itself to accept this shape automatically would reduce detection
+  precision for real targets (any Python package would start "looking like" a
+  service), so that stays a deliberate non-goal. No automated test specifically
+  for the Go/JVM stacks in `cli.py`/`orchestrator.py` (covered via Python/Node
+  in the suite) — only `discovery/go_stack.py` in isolation.
+- `find_change_surface`/`search`'s primary retrieval is FTS5 keyword matching: a
   task whose vocabulary doesn't appear in any indexed description/reason, and
-  without `hint_services`, finds no candidates (returns empty lists with a
-  `note`/`unknowns`, without calling the LLM).
-- Confidence recalibration (`record_change_surface_feedback`) is by exact
-  service name, without generalizing across similar tasks or across services —
-  each one accumulates its own history, from scratch. `verify_change_surface`
-  helps populate that history automatically from git, but still doesn't
-  correlate similar tasks with each other (architectural historical precedent is
-  a future evolution, not implemented).
+  without `hint_services`, finds no candidates via that path alone. The optional
+  semantic fallback (`pip install orbitkb[semantic]`, see "Semantic retrieval
+  fallback") closes most of this gap, but its similarity floor
+  (`SemanticRetrieval.SIMILARITY_FLOOR`) is a starting constant, not a trained
+  value, and it's still opt-in — without the extra installed, behavior is
+  exactly as before.
+- Confidence recalibration (`record_change_surface_feedback`) is still by exact
+  service name only, without generalizing across similar tasks or across
+  services — each one accumulates its own history, from scratch.
+  `similar_past_tasks` (see above, needs the optional `semantic` extra) now
+  surfaces historical precedent for a similarly-worded task as informational
+  context, but it's read-only — it doesn't itself feed back into confidence
+  recalibration, which remains exact-service-name-only.
 - `verify_change_surface`/`orbitkb verify` are scoped to one repository at a
   time — there's no notion of a "cumulative diff" across several unrelated
   repositories under a single reference commit.
@@ -744,13 +883,13 @@ that is not listed above."), but this has never been adversarially tested.
   into `external`; the list was built to avoid false positives, not false
   negatives). It only kicks in when the LLM (which already saw the real code)
   couldn't classify — in practice it covers the minority of cases.
-- `find_architecture_smells` doesn't yet model three things that were discussed
+- `find_architecture_smells` doesn't yet model two things that were discussed
   but not implemented: legacy/strangler-fig tagging (`role: legacy` on a
-  service, to tell a monolith mid-migration apart from a brand-new service),
+  service, to tell a monolith mid-migration apart from a brand-new service) and
   directional cycle severity (a cycle involving a legacy service is more serious
-  than one between two peers — the extraction leaked a dependency back), and
-  trend across successive runs (`architecture_runs` is already versioned, but
-  nothing yet compares fan-in/fan-out from one run to the next). A modular
+  than one between two peers — the extraction leaked a dependency back). Trend
+  across successive runs is now implemented (see `trend` above), but it only
+  ever compares the two most recent runs, not a longer history. A modular
   monolith (several domain boundaries inside a single deploy) also isn't
   detected as such — it becomes one flattened `services` row; the component
   layer is the necessary foundation for a future clustering step, but that
@@ -798,10 +937,13 @@ python -m coverage combine && python -m coverage report -m
 
 The automated suite never calls a real LLM (fake/deterministic backends, DBs
 seeded directly via `db.repositories.*`) — including the self-indexing suite
-(`tests/test_self_index_e2e.py`), which runs real discovery against `orbitkb`'s
-own source code with a fake backend. To validate the real pipeline end to end —
-discovery → real LLM generation → SQLite → MCP —, use the project's own fixture
-as a manual e2e test:
+(`tests/test_self_index_e2e.py`), which drives real discovery against
+`orbitkb`'s own source code through the real CLI path (`cli._cmd_index`, with
+`--stack python` — see "What's already implemented") with a fake backend, and
+also indexes `verify/sample_project` into the same database to prove
+cumulative multi-repository indexing concretely. To validate the real pipeline
+end to end — discovery → real LLM generation → SQLite → MCP —, use the
+project's own fixture as a manual e2e test:
 ```bash
 orbitkb index verify/sample_project --backend claude --db verify/sample_project.db
 pytest tests/test_mcp_tools.py   # skipped before this; runs for real against that DB
@@ -809,27 +951,20 @@ pytest tests/test_mcp_tools.py   # skipped before this; runs for real against th
 This is also what populates `verify/sample_project.db` (gitignored, not
 versioned — each dev/CI generates its own).
 
-Self-indexing `orbitkb` itself with a real backend **doesn't work via the CLI**
-(see "Known limitations" — `PythonDetector.matches()` doesn't match either the
-repo root or the package alone); use the Python API directly, the same way
-`tests/test_self_index_e2e.py` does, just swapping the fake backend for a real
-one:
-```python
-from pathlib import Path
-from orbitkb.db.connection import open_db
-from orbitkb.discovery.python_stack import PythonDetector
-from orbitkb.generation.claude_backend import ClaudeBackend
-from orbitkb.generation.orchestrator import index_service
-
-conn = open_db(Path("verify/self_index.db"))
-index_service(conn, "orbitkb-core", Path("orbitkb"), PythonDetector(), ClaudeBackend(), force=True)
+Self-indexing `orbitkb` itself with a **real** backend now works via the CLI
+directly, using the same `--stack` escape hatch the automated suite exercises
+with a fake one:
+```bash
+orbitkb index orbitkb --service orbitkb-core --stack python --backend claude --db verify/self_index.db
 ```
-This is exactly the real validation done during development: the generated
-overview correctly described the project's own architecture (CLI/MCP, the 4
-discovery stacks, the generation pipeline, the exports), and
-`find_change_surface("Add NATS support to Go-stack discovery")` pointed at
-`orbitkb-core` as `primary` with 0.9 confidence and the right reason — the
-scanner itself is what would need to change.
+This is exactly the real validation done during development (back when this
+required calling `generation.orchestrator.index_service()` directly with an
+explicit detector, before `--stack` existed): the generated overview correctly
+described the project's own architecture (CLI/MCP, the 4 discovery stacks, the
+generation pipeline, the exports), and `find_change_surface("Add NATS support
+to Go-stack discovery")` pointed at `orbitkb-core` as `primary` with 0.9
+confidence and the right reason — the scanner itself is what would need to
+change.
 
 ### Benchmark: retrieval recall (CI) vs. real precision/recall (manual)
 
@@ -860,7 +995,12 @@ it proves nothing about the system's judgment:
   it's the fixture's real size. The "catalog" fixture (two disconnected
   components) shows a real reduction. Read the number as "how much this specific
   scenario reduced", not as a ceiling on what the system can achieve in
-  production.
+  production. A separate, narrower test in the same file
+  (`test_semantic_fallback_recalls_a_task_that_defeats_keyword_matching`) proves
+  the optional semantic fallback (see "Semantic retrieval fallback") actually
+  recalls a task purpose-built to defeat keyword matching, using a fake
+  embedding backend — kept out of the main 8-task set above since that one is
+  deliberately keyword-only/zero-cost by design.
 - **Real precision/recall (manual, doesn't run in CI)**: only a real LLM can
   answer whether `find_change_surface`'s *judgment* is actually right. After
   indexing `verify/sample_project` (or another real project) with a real
