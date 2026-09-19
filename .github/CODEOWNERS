@@ -1,0 +1,4 @@
+# CI/CD and repo-security config requires the owner's review on every PR,
+# even once other collaborators have write access — see the branch
+# protection rule on main ("Require review from Code Owners").
+/.github/ @manorfm
