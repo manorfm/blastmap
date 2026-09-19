@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -213,8 +213,261 @@ def _render_messaging_prompt(name: str, stack: str, hints: ServiceHints, config_
 
 
 # ---------------------------------------------------------------------------
-# per-service indexing
+# per-service indexing: one UnitGenerator per generation-unit kind (Strategy),
+# coordinated in a fixed order by index_service (Template Method) — see the
+# "Hierarchical generation" note on _render_service_overview_prompt for why
+# that order (endpoints -> components -> persistence/messaging -> overview)
+# is load-bearing, not incidental.
 # ---------------------------------------------------------------------------
+
+@dataclass
+class UnitOutcome:
+    """What one UnitGenerator.run() call did: how many LLM calls it spent, whether
+    any of its sub-units failed, and which files those failures touched (so their
+    hash is deliberately NOT persisted afterward — see index_service's final loop —
+    and the unit is retried next run instead of being silently skipped forever)."""
+
+    llm_calls: int = 0
+    had_failure: bool = False
+    failed_files: set[str] = field(default_factory=set)
+
+
+@dataclass
+class IndexContext:
+    """Shared state one index_service call passes through every UnitGenerator.
+    any_endpoint_regenerated/any_component_regenerated are written by the endpoint/
+    component generators and read by OverviewGenerator (composed last, see above)."""
+
+    conn: sqlite3.Connection
+    name: str
+    root: Path
+    detector: StackDetector
+    backend: LLMBackend
+    hints: ServiceHints
+    component_groups: dict[str, list[EndpointHint]]
+    service_id: int
+    is_new: bool
+    existing: sqlite3.Row | None
+    changed: set[str]
+    removed: set[str]
+    force: bool
+    failures_root: Path
+    progress: ProgressReporter
+    any_endpoint_regenerated: bool = False
+    any_component_regenerated: bool = False
+
+
+class UnitGenerator(Protocol):
+    def run(self, ctx: IndexContext) -> UnitOutcome: ...
+
+
+class EndpointGenerator:
+    """Finest-grained unit, generated first so components/overview can compose from
+    its summaries (see the module-level docstring above)."""
+
+    def run(self, ctx: IndexContext) -> UnitOutcome:
+        outcome = UnitOutcome()
+        keep_api_keys: set[tuple[str, str]] = set()
+        for endpoint in ctx.hints.endpoints:
+            key = (endpoint.method, endpoint.path)
+            keep_api_keys.add(key)
+            existing_api = apis_repo.get_api_by_key(ctx.conn, ctx.service_id, *key)
+            dep_files = endpoint.dependency_files()
+            needs_regen = ctx.force or existing_api is None or bool(dep_files & ctx.changed)
+            label = f"{endpoint.method} {endpoint.path}"
+            if not needs_regen:
+                ctx.progress.unit_finished(ctx.name, label, "skipped")
+                continue
+            ctx.progress.unit_started(ctx.name, label)
+            prompt = _render_api_detail_prompt(ctx.name, ctx.detector.id, endpoint, ctx.hints)
+            result = generate_with_retry(
+                ctx.backend, prompt, load_schema("api_detail"), ctx.root, ctx.failures_root,
+                f"{ctx.name}-{endpoint.method}-{endpoint.path}",
+            )
+            if not result:
+                outcome.had_failure = True
+                outcome.failed_files |= dep_files
+                ctx.progress.unit_finished(ctx.name, label, "failed")
+                continue
+            evidence = _evidence_from_excerpts([endpoint.excerpt, *endpoint.extra_excerpts])
+            api_id = apis_repo.upsert_api(
+                ctx.conn, ctx.service_id, endpoint.method, endpoint.path,
+                result["summary"], result["description"], result["response_shape"], evidence,
+                request_shape=result["request_shape"],
+            )
+            apis_repo.replace_api_validations(ctx.conn, api_id, result["validations"])
+            service_calls_repo.replace_calls_for_api(ctx.conn, ctx.service_id, api_id, result["calls"], evidence)
+            outcome.llm_calls += 1
+            ctx.any_endpoint_regenerated = True
+            ctx.progress.unit_finished(ctx.name, label, "ok")
+
+        apis_repo.prune_apis_not_in(ctx.conn, ctx.service_id, keep_api_keys)
+        return outcome
+
+
+class ComponentGenerator:
+    """One class/controller/module per group of endpoints, composed from the endpoint
+    summaries EndpointGenerator just wrote — never a fresh read of the group's raw code."""
+
+    def run(self, ctx: IndexContext) -> UnitOutcome:
+        outcome = UnitOutcome()
+        current_apis_by_key = {
+            (row["method"], row["path"]): row for row in apis_repo.list_apis(ctx.conn, ctx.service_id)
+        }
+        keep_component_keys: set[tuple[str, str]] = set()
+        for component_name, group in ctx.component_groups.items():
+            component_file = group[0].excerpt.file_path
+            keep_component_keys.add((component_name, component_file))
+            group_dep_files: set[str] = set()
+            for endpoint in group:
+                group_dep_files |= endpoint.dependency_files()
+            needs_regen = ctx.force or ctx.is_new or bool(group_dep_files & ctx.changed)
+            label = f"component {component_name}"
+            if not needs_regen:
+                ctx.progress.unit_finished(ctx.name, label, "skipped")
+                continue
+            ctx.progress.unit_started(ctx.name, label)
+            summary_lines = []
+            for endpoint in group:
+                api_row = current_apis_by_key.get((endpoint.method, endpoint.path))
+                if api_row is not None:
+                    summary_lines.append(f"- {endpoint.method} {endpoint.path}: {api_row['summary']}")
+            endpoint_summaries = "\n".join(summary_lines) or "(no endpoint summaries available yet)"
+            prompt = _render_component_prompt(ctx.name, component_name, component_file, endpoint_summaries)
+            result = generate_with_retry(
+                ctx.backend, prompt, load_schema("component"), ctx.root, ctx.failures_root,
+                f"{ctx.name}-component-{component_name}",
+            )
+            if not result:
+                outcome.had_failure = True
+                outcome.failed_files |= group_dep_files
+                ctx.progress.unit_finished(ctx.name, label, "failed")
+                continue
+            evidence = _evidence_from_excerpts([endpoint.excerpt for endpoint in group])
+            components_repo.upsert_component(
+                ctx.conn, ctx.service_id, component_name, component_file, result["summary"], evidence
+            )
+            outcome.llm_calls += 1
+            ctx.any_component_regenerated = True
+            ctx.progress.unit_finished(ctx.name, label, "ok")
+
+        components_repo.prune_components_not_in(ctx.conn, ctx.service_id, keep_component_keys)
+        return outcome
+
+
+class PersistenceGenerator:
+    def run(self, ctx: IndexContext) -> UnitOutcome:
+        outcome = UnitOutcome()
+        persistence_files = {p.excerpt.file_path for p in ctx.hints.persistence}
+        if not ctx.hints.persistence:
+            persistence_repo.replace_persistence_entities(ctx.conn, ctx.service_id, [], [])
+            return outcome
+
+        if not (ctx.force or ctx.is_new or (ctx.changed & persistence_files) or (ctx.removed & persistence_files)):
+            ctx.progress.unit_finished(ctx.name, "persistence", "skipped")
+            return outcome
+
+        ctx.progress.unit_started(ctx.name, "persistence")
+        persistence_config_excerpts = (
+            collect_config_excerpts(ctx.root) if _persistence_needs_config_evidence(ctx.hints) else []
+        )
+        prompt = _render_persistence_prompt(ctx.name, ctx.detector.id, ctx.hints, persistence_config_excerpts)
+        result = generate_with_retry(
+            ctx.backend, prompt, load_schema("persistence"), ctx.root, ctx.failures_root, f"{ctx.name}-persistence"
+        )
+        if result:
+            entities = [
+                {"name": e["name"], "kind": e["kind"], "engine": e["engine"], "schema_json": e["fields"]}
+                for e in result["entities"]
+            ]
+            evidence = _evidence_from_excerpts([p.excerpt for p in ctx.hints.persistence] + persistence_config_excerpts)
+            persistence_repo.replace_persistence_entities(ctx.conn, ctx.service_id, entities, evidence)
+            outcome.llm_calls += 1
+            ctx.progress.unit_finished(ctx.name, "persistence", "ok")
+        else:
+            outcome.had_failure = True
+            outcome.failed_files |= persistence_files
+            ctx.progress.unit_finished(ctx.name, "persistence", "failed")
+        return outcome
+
+
+class MessagingGenerator:
+    def run(self, ctx: IndexContext) -> UnitOutcome:
+        outcome = UnitOutcome()
+        messaging_files = {m.excerpt.file_path for m in ctx.hints.messaging}
+        if not ctx.hints.messaging:
+            messages_repo.replace_messages(ctx.conn, ctx.service_id, [], [])
+            return outcome
+
+        if not (ctx.force or ctx.is_new or (ctx.changed & messaging_files) or (ctx.removed & messaging_files)):
+            ctx.progress.unit_finished(ctx.name, "messaging", "skipped")
+            return outcome
+
+        ctx.progress.unit_started(ctx.name, "messaging")
+        config_excerpts = collect_config_excerpts(ctx.root) if _needs_config_evidence(ctx.hints) else []
+        prompt = _render_messaging_prompt(ctx.name, ctx.detector.id, ctx.hints, config_excerpts)
+        result = generate_with_retry(
+            ctx.backend, prompt, load_schema("messaging"), ctx.root, ctx.failures_root, f"{ctx.name}-messaging"
+        )
+        if result:
+            messages = [
+                {
+                    "direction": m["direction"],
+                    "channel": m["channel"],
+                    "shape_json": m["shape"],
+                    "description": m["description"],
+                    "provider": m["provider"],
+                }
+                for m in result["messages"]
+            ]
+            evidence = _evidence_from_excerpts([m.excerpt for m in ctx.hints.messaging] + config_excerpts)
+            messages_repo.replace_messages(ctx.conn, ctx.service_id, messages, evidence)
+            outcome.llm_calls += 1
+            ctx.progress.unit_finished(ctx.name, "messaging", "ok")
+        else:
+            outcome.had_failure = True
+            outcome.failed_files |= messaging_files
+            ctx.progress.unit_finished(ctx.name, "messaging", "failed")
+        return outcome
+
+
+class OverviewGenerator:
+    """Composed LAST, from the components' own summaries above (see the docstring on
+    _render_service_overview_prompt) — never a fresh read of the entrypoint alone."""
+
+    def run(self, ctx: IndexContext) -> UnitOutcome:
+        outcome = UnitOutcome()
+        entry_files = {ctx.hints.entry_excerpt.file_path} if ctx.hints.entry_excerpt else set()
+        needs_overview = (
+            ctx.force or ctx.is_new or bool(ctx.changed & entry_files)
+            or not (ctx.existing and ctx.existing["short_desc"])
+            or ctx.any_endpoint_regenerated or ctx.any_component_regenerated
+        )
+        if not needs_overview:
+            ctx.progress.unit_finished(ctx.name, "overview", "skipped")
+            return outcome
+
+        ctx.progress.unit_started(ctx.name, "overview")
+        components = components_repo.list_components(ctx.conn, ctx.service_id)
+        prompt = _render_service_overview_prompt(ctx.name, ctx.detector.id, ctx.root, ctx.hints, components)
+        result = generate_with_retry(
+            ctx.backend, prompt, load_schema("service_overview"), ctx.root, ctx.failures_root, f"{ctx.name}-overview"
+        )
+        if result:
+            services_repo.update_service_overview(ctx.conn, ctx.service_id, result["short_desc"], result["long_desc"])
+            outcome.llm_calls += 1
+            ctx.progress.unit_finished(ctx.name, "overview", "ok")
+        else:
+            outcome.had_failure = True
+            outcome.failed_files |= entry_files
+            ctx.progress.unit_finished(ctx.name, "overview", "failed")
+        return outcome
+
+
+UNIT_GENERATORS: tuple[UnitGenerator, ...] = (
+    EndpointGenerator(), ComponentGenerator(), PersistenceGenerator(), MessagingGenerator(), OverviewGenerator(),
+)
+
 
 def index_service(
     conn: sqlite3.Connection,
@@ -256,179 +509,28 @@ def index_service(
     removed = set(old_hashes) - set(new_hashes)
 
     run_id = index_runs_repo.start_index_run(conn, service_id, backend.name)
+
+    ctx = IndexContext(
+        conn=conn, name=name, root=root, detector=detector, backend=backend, hints=hints,
+        component_groups=component_groups, service_id=service_id, is_new=is_new, existing=existing,
+        changed=changed, removed=removed, force=force, failures_root=failures_root, progress=progress,
+    )
+
     llm_calls = 0
     had_failure = False
     # Files whose derived unit failed to generate this run. Their hash is deliberately
     # NOT persisted to indexed_files below, so next run sees them as "changed" again
     # and retries instead of silently skipping a permanently-broken unit forever.
     failed_files: set[str] = set()
-
-    # --- endpoints: the finest-grained unit, generated first so everything above it
-    # (components, then the overview) can compose from their summaries -----------------
-    keep_api_keys: set[tuple[str, str]] = set()
-    any_endpoint_regenerated = False
-    for endpoint in hints.endpoints:
-        key = (endpoint.method, endpoint.path)
-        keep_api_keys.add(key)
-        existing_api = apis_repo.get_api_by_key(conn, service_id, *key)
-        dep_files = endpoint.dependency_files()
-        needs_regen = force or existing_api is None or bool(dep_files & changed)
-        label = f"{endpoint.method} {endpoint.path}"
-        if not needs_regen:
-            progress.unit_finished(name, label, "skipped")
-            continue
-        progress.unit_started(name, label)
-        prompt = _render_api_detail_prompt(name, detector.id, endpoint, hints)
-        result = generate_with_retry(
-            backend, prompt, load_schema("api_detail"), root, failures_root, f"{name}-{endpoint.method}-{endpoint.path}"
-        )
-        if not result:
-            had_failure = True
-            failed_files |= dep_files
-            progress.unit_finished(name, label, "failed")
-            continue
-        evidence = _evidence_from_excerpts([endpoint.excerpt, *endpoint.extra_excerpts])
-        api_id = apis_repo.upsert_api(
-            conn, service_id, endpoint.method, endpoint.path,
-            result["summary"], result["description"], result["response_shape"], evidence,
-            request_shape=result["request_shape"],
-        )
-        apis_repo.replace_api_validations(conn, api_id, result["validations"])
-        service_calls_repo.replace_calls_for_api(conn, service_id, api_id, result["calls"], evidence)
-        llm_calls += 1
-        any_endpoint_regenerated = True
-        progress.unit_finished(name, label, "ok")
-
-    apis_repo.prune_apis_not_in(conn, service_id, keep_api_keys)
-
-    # --- components: one class/controller/module per group of endpoints, composed from
-    # the summaries just written above — never a fresh read of the group's raw code -----
-    current_apis_by_key = {(row["method"], row["path"]): row for row in apis_repo.list_apis(conn, service_id)}
-    keep_component_keys: set[tuple[str, str]] = set()
-    any_component_regenerated = False
-    for component_name, group in component_groups.items():
-        component_file = group[0].excerpt.file_path
-        keep_component_keys.add((component_name, component_file))
-        group_dep_files: set[str] = set()
-        for endpoint in group:
-            group_dep_files |= endpoint.dependency_files()
-        needs_regen = force or is_new or bool(group_dep_files & changed)
-        label = f"component {component_name}"
-        if not needs_regen:
-            progress.unit_finished(name, label, "skipped")
-            continue
-        progress.unit_started(name, label)
-        summary_lines = []
-        for endpoint in group:
-            api_row = current_apis_by_key.get((endpoint.method, endpoint.path))
-            if api_row is not None:
-                summary_lines.append(f"- {endpoint.method} {endpoint.path}: {api_row['summary']}")
-        endpoint_summaries = "\n".join(summary_lines) or "(no endpoint summaries available yet)"
-        prompt = _render_component_prompt(name, component_name, component_file, endpoint_summaries)
-        result = generate_with_retry(
-            backend, prompt, load_schema("component"), root, failures_root, f"{name}-component-{component_name}"
-        )
-        if not result:
-            had_failure = True
-            failed_files |= group_dep_files
-            progress.unit_finished(name, label, "failed")
-            continue
-        evidence = _evidence_from_excerpts([endpoint.excerpt for endpoint in group])
-        components_repo.upsert_component(conn, service_id, component_name, component_file, result["summary"], evidence)
-        llm_calls += 1
-        any_component_regenerated = True
-        progress.unit_finished(name, label, "ok")
-
-    components_repo.prune_components_not_in(conn, service_id, keep_component_keys)
-
-    persistence_files = {p.excerpt.file_path for p in hints.persistence}
-    if hints.persistence:
-        if force or is_new or (changed & persistence_files) or (removed & persistence_files):
-            progress.unit_started(name, "persistence")
-            persistence_config_excerpts = (
-                collect_config_excerpts(root) if _persistence_needs_config_evidence(hints) else []
-            )
-            prompt = _render_persistence_prompt(name, detector.id, hints, persistence_config_excerpts)
-            result = generate_with_retry(
-                backend, prompt, load_schema("persistence"), root, failures_root, f"{name}-persistence"
-            )
-            if result:
-                entities = [
-                    {"name": e["name"], "kind": e["kind"], "engine": e["engine"], "schema_json": e["fields"]}
-                    for e in result["entities"]
-                ]
-                evidence = _evidence_from_excerpts([p.excerpt for p in hints.persistence] + persistence_config_excerpts)
-                persistence_repo.replace_persistence_entities(conn, service_id, entities, evidence)
-                llm_calls += 1
-                progress.unit_finished(name, "persistence", "ok")
-            else:
-                had_failure = True
-                failed_files |= persistence_files
-                progress.unit_finished(name, "persistence", "failed")
-        else:
-            progress.unit_finished(name, "persistence", "skipped")
-    else:
-        persistence_repo.replace_persistence_entities(conn, service_id, [], [])
-
-    messaging_files = {m.excerpt.file_path for m in hints.messaging}
-    if hints.messaging:
-        if force or is_new or (changed & messaging_files) or (removed & messaging_files):
-            progress.unit_started(name, "messaging")
-            config_excerpts = collect_config_excerpts(root) if _needs_config_evidence(hints) else []
-            prompt = _render_messaging_prompt(name, detector.id, hints, config_excerpts)
-            result = generate_with_retry(
-                backend, prompt, load_schema("messaging"), root, failures_root, f"{name}-messaging"
-            )
-            if result:
-                messages = [
-                    {
-                        "direction": m["direction"],
-                        "channel": m["channel"],
-                        "shape_json": m["shape"],
-                        "description": m["description"],
-                        "provider": m["provider"],
-                    }
-                    for m in result["messages"]
-                ]
-                evidence = _evidence_from_excerpts([m.excerpt for m in hints.messaging] + config_excerpts)
-                messages_repo.replace_messages(conn, service_id, messages, evidence)
-                llm_calls += 1
-                progress.unit_finished(name, "messaging", "ok")
-            else:
-                had_failure = True
-                failed_files |= messaging_files
-                progress.unit_finished(name, "messaging", "failed")
-        else:
-            progress.unit_finished(name, "messaging", "skipped")
-    else:
-        messages_repo.replace_messages(conn, service_id, [], [])
-
-    # --- overview: composed LAST, from the components' own summaries above (see the
-    # docstring on _render_service_overview_prompt) -------------------------------------
-    entry_files = {hints.entry_excerpt.file_path} if hints.entry_excerpt else set()
-    needs_overview = (
-        force or is_new or bool(changed & entry_files) or not (existing and existing["short_desc"])
-        or any_endpoint_regenerated or any_component_regenerated
-    )
-    if needs_overview:
-        progress.unit_started(name, "overview")
-        components = components_repo.list_components(conn, service_id)
-        prompt = _render_service_overview_prompt(name, detector.id, root, hints, components)
-        result = generate_with_retry(
-            backend, prompt, load_schema("service_overview"), root, failures_root, f"{name}-overview"
-        )
-        if result:
-            services_repo.update_service_overview(conn, service_id, result["short_desc"], result["long_desc"])
-            llm_calls += 1
-            progress.unit_finished(name, "overview", "ok")
-        else:
-            had_failure = True
-            failed_files |= entry_files
-            progress.unit_finished(name, "overview", "failed")
-    else:
-        progress.unit_finished(name, "overview", "skipped")
+    for generator in UNIT_GENERATORS:
+        outcome = generator.run(ctx)
+        llm_calls += outcome.llm_calls
+        had_failure = had_failure or outcome.had_failure
+        failed_files |= outcome.failed_files
 
     route_files = {e.excerpt.file_path for e in hints.endpoints}
+    persistence_files = {p.excerpt.file_path for p in hints.persistence}
+    messaging_files = {m.excerpt.file_path for m in hints.messaging}
     for rel, h in new_hashes.items():
         if rel in failed_files:
             continue  # retry these next run instead of locking in a broken generation forever
