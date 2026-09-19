@@ -3,11 +3,11 @@
 import subprocess
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import search as search_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.generation import change_surface
-from blastmap.mcp import queries
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import search as search_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation import change_surface
+from orbitkb.mcp import queries
 
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
 

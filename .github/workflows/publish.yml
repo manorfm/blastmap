@@ -45,7 +45,7 @@ jobs:
     # environment name (pypi) — see README's "Release process" section.
     environment:
       name: pypi
-      url: https://pypi.org/project/blastmap/
+      url: https://pypi.org/project/orbitkb/
     permissions:
       id-token: write
     steps:

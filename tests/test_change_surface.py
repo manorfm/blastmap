@@ -5,15 +5,15 @@ deterministically without a real subprocess call — matching the harness's own
 """
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import apis as apis_repo
-from blastmap.db.repositories import change_surface as change_surface_repo
-from blastmap.db.repositories import messages as messages_repo
-from blastmap.db.repositories import persistence as persistence_repo
-from blastmap.db.repositories import search as search_repo
-from blastmap.db.repositories import service_calls as service_calls_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.generation import change_surface
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import change_surface as change_surface_repo
+from orbitkb.db.repositories import messages as messages_repo
+from orbitkb.db.repositories import persistence as persistence_repo
+from orbitkb.db.repositories import search as search_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation import change_surface
 
 
 class FakeBackend:

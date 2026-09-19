@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import repositories as repositories_repo
-from blastmap.db.repositories import services as services_repo
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import repositories as repositories_repo
+from orbitkb.db.repositories import services as services_repo
 
 
 def test_ensure_service_and_overview(tmp_path: Path):

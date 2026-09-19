@@ -2,10 +2,10 @@
 response_shape treatment (see db/repositories/apis.py upsert_api)."""
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import apis as apis_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.mcp import queries
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.mcp import queries
 
 
 def test_describe_api_includes_request_shape(tmp_path: Path):

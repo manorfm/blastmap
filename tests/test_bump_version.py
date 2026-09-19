@@ -40,7 +40,7 @@ def test_next_version_rejects_unknown_kind():
 
 def _write_project_files(tmp_path: Path, version: str) -> tuple[Path, Path]:
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(f'[project]\nname = "blastmap"\nversion = "{version}"\n', encoding="utf-8")
+    pyproject.write_text(f'[project]\nname = "orbitkb"\nversion = "{version}"\n', encoding="utf-8")
     init_file = tmp_path / "__init__.py"
     init_file.write_text(f'__version__ = "{version}"\n', encoding="utf-8")
     return pyproject, init_file

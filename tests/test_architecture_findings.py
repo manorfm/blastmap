@@ -2,13 +2,13 @@
 findings computed purely from already-seeded db.repositories.* facts, no LLM."""
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import apis as apis_repo
-from blastmap.db.repositories import architecture as architecture_repo
-from blastmap.db.repositories import persistence as persistence_repo
-from blastmap.db.repositories import service_calls as service_calls_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.generation.architecture import (
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import architecture as architecture_repo
+from orbitkb.db.repositories import persistence as persistence_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation.architecture import (
     find_cycles,
     find_duplicate_external_integrations,
     find_fan_imbalance,

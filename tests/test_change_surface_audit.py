@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import change_surface as repository
-from blastmap.mcp import queries
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import change_surface as repository
+from orbitkb.mcp import queries
 
 SAMPLE_RESULT = {
     "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9, "evidence": []}],

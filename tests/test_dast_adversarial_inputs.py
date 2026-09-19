@@ -17,11 +17,11 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import apis as apis_repo
-from blastmap.db.repositories import service_calls as service_calls_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.generation.architecture import recompute_architecture_view
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation.architecture import recompute_architecture_view
 
 from tests.mcp_test_helpers import content_json, server_params
 

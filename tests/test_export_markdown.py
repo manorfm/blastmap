@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import apis as apis_repo
-from blastmap.db.repositories import messages as messages_repo
-from blastmap.db.repositories import persistence as persistence_repo
-from blastmap.db.repositories import service_calls as service_calls_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.export.markdown import export_markdown
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import messages as messages_repo
+from orbitkb.db.repositories import persistence as persistence_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.export.markdown import export_markdown
 
 
 def _seed(conn):

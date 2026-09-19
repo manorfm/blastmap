@@ -2,7 +2,7 @@
 information is a deterministically extracted fact or an LLM-synthesized
 interpretation — formalizing a distinction the schema already carries implicitly
 via confidence being null or not."""
-from blastmap.generation.provenance import infer_provenance
+from orbitkb.generation.provenance import infer_provenance
 
 
 def test_a_confidence_value_means_llm_sourced():

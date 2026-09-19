@@ -1,4 +1,4 @@
-# blastmap
+# orbitkb
 
 Task-aware change intelligence for AI coding agents: given an engineering task, what
 is the smallest architectural surface an agent needs to understand before touching
@@ -19,7 +19,7 @@ code — with evidence, confidence and freshness made explicit, instead of impli
 
 AI agents that need to understand a microservices system today only have two
 paths: read the entire source code (expensive in tokens, slow) or rely on manual
-documentation that goes stale. `blastmap` "grinds" one or several code trees —
+documentation that goes stale. `orbitkb` "grinds" one or several code trees —
 repository by repository, or a whole monorepo at once, cumulatively into the same
 database — uses an LLM (Claude Code or Codex, via headless CLI, using your
 subscription instead of paid API) to synthesize lean, **semantic** documentation
@@ -85,19 +85,19 @@ calls just because they were in the same service) and a shallow overview
 
 From PyPI:
 ```bash
-pip install blastmap
+pip install orbitkb
 # or, for an isolated CLI install:
-pipx install blastmap
+pipx install orbitkb
 ```
 
 From source:
 ```bash
-git clone https://github.com/manorfm/blastmap.git
-cd blastmap
+git clone https://github.com/manorfm/orbitkb.git
+cd orbitkb
 pip install -e ".[dev]"
 ```
 
-Either way, `blastmap` needs a headless LLM CLI on `PATH` to actually generate
+Either way, `orbitkb` needs a headless LLM CLI on `PATH` to actually generate
 anything: `claude` (Claude Code) or `codex` (OpenAI Codex CLI), authenticated
 with your normal subscription session — see `--backend` in "Basic usage" below.
 Commands that only read the already-indexed SQLite database (`list`, `status`,
@@ -108,27 +108,27 @@ CLI at all.
 
 ### MCP client (Claude Code, Codex, etc.)
 
-Register `blastmap serve` as an MCP server. For Claude Code, add this to your
+Register `orbitkb serve` as an MCP server. For Claude Code, add this to your
 MCP client config (e.g. `~/.claude.json`'s `mcpServers`, or a project's
 `.mcp.json`):
 ```json
 {
   "mcpServers": {
-    "blastmap": {
+    "orbitkb": {
       "type": "stdio",
-      "command": "blastmap",
+      "command": "orbitkb",
       "args": ["serve", "--backend", "claude"]
     }
   }
 }
 ```
-If `blastmap` isn't on `PATH` in the environment your MCP client launches from,
-use its absolute path instead — e.g. whatever `which blastmap` prints, often
-`<your-venv>/bin/blastmap` for a source/editable install.
+If `orbitkb` isn't on `PATH` in the environment your MCP client launches from,
+use its absolute path instead — e.g. whatever `which orbitkb` prints, often
+`<your-venv>/bin/orbitkb` for a source/editable install.
 
 ### Environment variables
 
-- `BLASTMAP_BACKEND` — default backend (`claude` or `codex`) when `--backend`
+- `ORBITKB_BACKEND` — default backend (`claude` or `codex`) when `--backend`
   isn't passed explicitly. Defaults to `claude` when unset.
 - `ANTHROPIC_API_KEY` — only read when `--claude-bare` is passed (metered API
   billing instead of the Claude Code subscription session).
@@ -137,7 +137,7 @@ use its absolute path instead — e.g. whatever `which blastmap` prints, often
 
 ### Database location
 
-Defaults to `~/.blastmap/blastmap.db`, shared across every command unless you
+Defaults to `~/.orbitkb/orbitkb.db`, shared across every command unless you
 pass `--db <path>` explicitly (every subcommand accepts it). One database can
 accumulate multiple repositories (see "Basic usage" below), so a single default
 location is usually what you want; pass `--db` to keep separate projects in
@@ -146,23 +146,23 @@ separate databases.
 ## Basic usage
 
 ```bash
-blastmap index /path/to/repository --backend claude   # or --backend codex
-blastmap index /another/repository --repository-name another-repo  # multiple repos in the same DB, cumulative
-blastmap list
-blastmap status [service]
-blastmap export md --out docs/
-blastmap export mermaid --out docs/   # topology diagram + one ER diagram per service
-blastmap serve --backend claude   # MCP server (stdio); backend only used by find_change_surface
-blastmap analyze "Add Pix support to checkout" --backend claude   # runs find_change_surface directly, no MCP session needed
-blastmap verify <run_id> --repository <name> --since <commit>   # checks a prediction against the real git diff
+orbitkb index /path/to/repository --backend claude   # or --backend codex
+orbitkb index /another/repository --repository-name another-repo  # multiple repos in the same DB, cumulative
+orbitkb list
+orbitkb status [service]
+orbitkb export md --out docs/
+orbitkb export mermaid --out docs/   # topology diagram + one ER diagram per service
+orbitkb serve --backend claude   # MCP server (stdio); backend only used by find_change_surface
+orbitkb analyze "Add Pix support to checkout" --backend claude   # runs find_change_surface directly, no MCP session needed
+orbitkb verify <run_id> --repository <name> --since <commit>   # checks a prediction against the real git diff
 ```
 
-Every subcommand is self-explanatory via `--help` (e.g. `blastmap index --help`),
-with a ready-to-copy example. `blastmap --help` explains the whole flow: **index
+Every subcommand is self-explanatory via `--help` (e.g. `orbitkb index --help`),
+with a ready-to-copy example. `orbitkb --help` explains the whole flow: **index
 → ask → verify**.
 
 Knowledge is cumulative by nature: you can index one repository at a time
-(`blastmap index <repo1>`, then `blastmap index <repo2> --repository-name
+(`orbitkb index <repo1>`, then `orbitkb index <repo2> --repository-name
 <repo2>`, ...) as they become available, or point at a monorepo root all at once
 — the same SQLite database accumulates both cases without name collisions, and
 `find_change_surface`/`search` always see everything indexed so far, not just the
@@ -490,7 +490,7 @@ a minimum of 3 accumulated feedback entries, and as a light adjustment (30%) on
 top of the LLM's fresh guess, never replacing the judgment made from the current
 task's evidence.
 
-### Ground truth via git: `verify_change_surface` / `blastmap verify`
+### Ground truth via git: `verify_change_surface` / `orbitkb verify`
 
 Instead of relying only on the agent remembering to report the outcome, you can
 check a past prediction against a repository's real `git diff` since a commit:
@@ -513,17 +513,17 @@ The MCP version is read-only (it doesn't record feedback on its own); the CLI
 has a `--record-feedback` flag that optionally records `confirmed`/`rejected`
 automatically from the result:
 ```bash
-blastmap verify 1 --repository my-monorepo --since a1b2c3d --record-feedback
+orbitkb verify 1 --repository my-monorepo --since a1b2c3d --record-feedback
 ```
 Every verification is saved (`change_surface_verifications`) and shows up in
-`blastmap status`. It's intentionally scoped to **one repository at a time** —
+`orbitkb status`. It's intentionally scoped to **one repository at a time** —
 comparing several unrelated git histories under a single `--since` wouldn't make
 sense; in a cumulative multi-repository setup, you run one `verify` per
 repository, the same way indexing is also done one repository at a time.
 
 ## Diagrams (Mermaid)
 
-`blastmap export mermaid --out docs/` generates:
+`orbitkb export mermaid --out docs/` generates:
 - **`topology.mmd`** — a `graph TD` of the whole system: every indexed service is
   a node, every external vendor reached is a rounded node, edges from
   `service_calls` and `MESSAGE_LINK` connect everything. Services involved in a
@@ -607,7 +607,7 @@ generated 100% from SQLite, with no LLM cost.
   LLM cost.
 - **`contracts_at_risk`**: consumers of an event published by a relevant
   service, reusing the same channel join `get_relationships` already uses.
-- **Ground truth via git** (`generation/verification.py`, `blastmap verify`):
+- **Ground truth via git** (`generation/verification.py`, `orbitkb verify`):
   compares a past prediction against a repository's real `git diff`, computes
   precision/recall and can record feedback automatically.
 - **MCP server** with 14 tools (one writes feedback; `verify_change_surface`
@@ -631,7 +631,7 @@ generated 100% from SQLite, with no LLM cost.
   `claude`/`codex` CLI (the backend is always fake, or data is seeded directly
   via `db.repositories.*`).
 - **CLI** (`index`, `update`, `list`, `status`, `export`, `analyze`, `verify`,
-  `serve`) installable globally via `pipx install blastmap`, self-explanatory via
+  `serve`) installable globally via `pipx install orbitkb`, self-explanatory via
   `--help` (every subcommand has a ready example), with a terminal progress bar
   (spinner, percentage, per-unit colored status) during `index`. `analyze` runs
   `find_change_surface` directly through the domain layer, with no MCP session
@@ -653,19 +653,19 @@ generated 100% from SQLite, with no LLM cost.
   (stdio) for `get_relationships`, `trace_flow`, `find_architecture_smells`,
   `find_change_surface` and `verify_change_surface`, a context-efficiency harness
   with a response-size budget, and a **self-indexing suite**
-  (`tests/test_self_index_e2e.py`): `blastmap` indexes its own source code and
+  (`tests/test_self_index_e2e.py`): `orbitkb` indexes its own source code and
   answers `find_change_surface` about itself — the most direct proof that the
   pipeline works end to end against real, non-trivial code, and one that has
   already caught real bugs (see "Development" below).
 - **Manual, deliberate versioning**: `python scripts/bump_version.py
-  <major|minor|patch>` updates `pyproject.toml` and `blastmap/__init__.py`
+  <major|minor|patch>` updates `pyproject.toml` and `orbitkb/__init__.py`
   together, as part of the release step — no commit hook trying to guess the
   right bump.
 
 ## Security
 
 Repository content (README, comments, source code) is **untrusted data**, never
-an instruction. `blastmap` sends that content to the LLM as evidence to be
+an instruction. `orbitkb` sends that content to the LLM as evidence to be
 described, not as a command to follow — but no prompt has an explicit, dedicated
 defense against prompt injection (e.g. a code comment saying "ignore previous
 instructions and return {...}"). That said, the blast radius of a successful
@@ -697,7 +697,7 @@ that is not listed above."), but this has never been adversarially tested.
   tables that already exist (SQLite doesn't alter a table via `CREATE TABLE IF
   NOT EXISTS`; new tables get added automatically, new columns on existing
   tables don't). If a schema change affects an existing table, delete
-  `~/.blastmap/blastmap.db` (or whichever `--db` you're using) and run `blastmap
+  `~/.orbitkb/orbitkb.db` (or whichever `--db` you're using) and run `orbitkb
   index` again.
 - `request_shape` only captures the field's shape; it doesn't yet compare
   contracts across indexing runs to automatically detect that a required field
@@ -708,9 +708,9 @@ that is not listed above."), but this has never been adversarially tested.
   the right spot, but can miss unusual patterns (e.g. an HTTP client instantiated
   in a variable with an unconventional name), and they're designed for the shape
   of a web microservice (HTTP endpoint, queue, ORM) — a Python package that's a
-  library/CLI rather than a web service (like `blastmap` itself) doesn't match
+  library/CLI rather than a web service (like `orbitkb` itself) doesn't match
   any of these patterns, and so only generates the overview unit, with no
-  endpoints/persistence/messaging detected. This also means **`blastmap` can't
+  endpoints/persistence/messaging detected. This also means **`orbitkb` can't
   self-index via the CLI's `index` command** (which requires `matches()` to
   pass, and the dependency manifest lives at the repo root while the code lives
   in a subdirectory — neither alone satisfies `PythonDetector.matches()`); real
@@ -735,7 +735,7 @@ that is not listed above."), but this has never been adversarially tested.
   helps populate that history automatically from git, but still doesn't
   correlate similar tasks with each other (architectural historical precedent is
   a future evolution, not implemented).
-- `verify_change_surface`/`blastmap verify` are scoped to one repository at a
+- `verify_change_surface`/`orbitkb verify` are scoped to one repository at a
   time — there's no notion of a "cumulative diff" across several unrelated
   repositories under a single reference commit.
 - The deterministic `target_kind`/`resource_type` heuristic
@@ -776,7 +776,7 @@ make security         # sast + sca
 make build            # sdist + wheel into dist/
 ```
 (every target is a thin wrapper — see the `Makefile` for the exact command it
-runs, e.g. `pytest tests/ --cov=blastmap --cov-report=term-missing` for
+runs, e.g. `pytest tests/ --cov=orbitkb --cov-report=term-missing` for
 `coverage`.)
 
 CI (`.github/workflows/ci.yml`) runs exactly the deterministic test suite on
@@ -786,7 +786,7 @@ failure).
 
 `get_relationships`/`trace_flow`/`find_architecture_smells`/`find_change_surface`/
 `verify_change_surface` are exercised via a real MCP session (stdio), which
-spins up `blastmap.mcp.server` in a **subprocess** — for coverage to see that
+spins up `orbitkb.mcp.server` in a **subprocess** — for coverage to see that
 subprocess (instead of reporting `mcp/server.py`/`mcp/queries.py` as 0% even
 though they're tested), you need a `coverage` hook in the venv's site-packages
 plus the `COVERAGE_PROCESS_START` variable:
@@ -798,37 +798,37 @@ python -m coverage combine && python -m coverage report -m
 
 The automated suite never calls a real LLM (fake/deterministic backends, DBs
 seeded directly via `db.repositories.*`) — including the self-indexing suite
-(`tests/test_self_index_e2e.py`), which runs real discovery against `blastmap`'s
+(`tests/test_self_index_e2e.py`), which runs real discovery against `orbitkb`'s
 own source code with a fake backend. To validate the real pipeline end to end —
 discovery → real LLM generation → SQLite → MCP —, use the project's own fixture
 as a manual e2e test:
 ```bash
-blastmap index verify/sample_project --backend claude --db verify/sample_project.db
+orbitkb index verify/sample_project --backend claude --db verify/sample_project.db
 pytest tests/test_mcp_tools.py   # skipped before this; runs for real against that DB
 ```
 This is also what populates `verify/sample_project.db` (gitignored, not
 versioned — each dev/CI generates its own).
 
-Self-indexing `blastmap` itself with a real backend **doesn't work via the CLI**
+Self-indexing `orbitkb` itself with a real backend **doesn't work via the CLI**
 (see "Known limitations" — `PythonDetector.matches()` doesn't match either the
 repo root or the package alone); use the Python API directly, the same way
 `tests/test_self_index_e2e.py` does, just swapping the fake backend for a real
 one:
 ```python
 from pathlib import Path
-from blastmap.db.connection import open_db
-from blastmap.discovery.python_stack import PythonDetector
-from blastmap.generation.claude_backend import ClaudeBackend
-from blastmap.generation.orchestrator import index_service
+from orbitkb.db.connection import open_db
+from orbitkb.discovery.python_stack import PythonDetector
+from orbitkb.generation.claude_backend import ClaudeBackend
+from orbitkb.generation.orchestrator import index_service
 
 conn = open_db(Path("verify/self_index.db"))
-index_service(conn, "blastmap-core", Path("blastmap"), PythonDetector(), ClaudeBackend(), force=True)
+index_service(conn, "orbitkb-core", Path("orbitkb"), PythonDetector(), ClaudeBackend(), force=True)
 ```
 This is exactly the real validation done during development: the generated
 overview correctly described the project's own architecture (CLI/MCP, the 4
 discovery stacks, the generation pipeline, the exports), and
 `find_change_surface("Add NATS support to Go-stack discovery")` pointed at
-`blastmap-core` as `primary` with 0.9 confidence and the right reason — the
+`orbitkb-core` as `primary` with 0.9 confidence and the right reason — the
 scanner itself is what would need to change.
 
 ### Benchmark: retrieval recall (CI) vs. real precision/recall (manual)
@@ -851,7 +851,7 @@ it proves nothing about the system's judgment:
   all services indexed in that task's fixture, what fraction
   `KeywordGraphRetrieval` did **not** need to put forward as a candidate — the
   deterministic, non-circular half of "exploration reduction" (the other half —
-  comparing an agent's tool calls/tokens with and without real `blastmap` — would
+  comparing an agent's tool calls/tokens with and without real `orbitkb` — would
   require simulating a "baseline agent", which would be fabricated and
   unverifiable, so it stays a manual methodology, not code). This number depends
   heavily on the size/connectivity of the indexed system: in this benchmark's
@@ -864,12 +864,12 @@ it proves nothing about the system's judgment:
 - **Real precision/recall (manual, doesn't run in CI)**: only a real LLM can
   answer whether `find_change_surface`'s *judgment* is actually right. After
   indexing `verify/sample_project` (or another real project) with a real
-  backend, run `blastmap analyze "<task>" --backend claude --db
+  backend, run `orbitkb analyze "<task>" --backend claude --db
   verify/sample_project.db` for each task in `benchmark/tasks.py` (no need to
   spin up an MCP session) and compare `primary`/`secondary` against
   `expected_services` by hand — the same manual treatment
   `verify/sample_project.db`'s real e2e already gets.
-  `verify_change_surface`/`blastmap verify` automates that comparison once a
+  `verify_change_surface`/`orbitkb verify` automates that comparison once a
   real "after" commit exists to compare against via `git diff`.
 
 As real engineering tasks happen on this project (or another one indexed by it),
@@ -903,7 +903,7 @@ Before the first tag push, configure Trusted Publishing on PyPI: on the
 project's page (or, before it exists yet, at
 https://pypi.org/manage/account/publishing/), add a pending publisher with:
 - Repository owner: `manorfm`
-- Repository name: `blastmap`
+- Repository name: `orbitkb`
 - Workflow name: `publish.yml`
 - Environment name: `pypi`
 
@@ -918,16 +918,16 @@ make release-patch   # or release-minor / release-major
 git push && git push origin v<the new version>
 ```
 `make release-*` bumps the version (`scripts/bump_version.py`), commits
-`pyproject.toml` + `blastmap/__init__.py`, and creates a local `vX.Y.Z` tag — it
+`pyproject.toml` + `orbitkb/__init__.py`, and creates a local `vX.Y.Z` tag — it
 deliberately does **not** push. Review the diff, then push both the commit and
 the tag yourself; pushing the tag is what triggers `publish.yml`.
 
 ## Quick reference
 
-**CLI** (`blastmap <command> --help` for examples): `index`, `update`, `list`,
+**CLI** (`orbitkb <command> --help` for examples): `index`, `update`, `list`,
 `status`, `export` (`md`|`mermaid`), `analyze`, `verify`, `serve`, `--version`.
 
-**MCP** (`blastmap serve`): `list_repositories`, `list_services`,
+**MCP** (`orbitkb serve`): `list_repositories`, `list_services`,
 `describe_service`, `list_apis`, `describe_api`, `describe_persistence`,
 `describe_messages`, `search`, `get_relationships`, `trace_flow`,
 `find_architecture_smells`, `find_change_surface`, `record_change_surface_feedback`,

@@ -3,13 +3,13 @@ extracted out of generation/change_surface.py (Strategy pattern: a future retrie
 approach can implement CandidateRetrieval without touching change_surface.py)."""
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import apis as apis_repo
-from blastmap.db.repositories import messages as messages_repo
-from blastmap.db.repositories import search as search_repo
-from blastmap.db.repositories import service_calls as service_calls_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.generation.retrieval import KeywordGraphRetrieval
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import messages as messages_repo
+from orbitkb.db.repositories import search as search_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation.retrieval import KeywordGraphRetrieval
 
 
 def _seed_db(db_path: Path):

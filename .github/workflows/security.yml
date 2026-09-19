@@ -19,11 +19,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install blastmap with dev dependencies
+      - name: Install orbitkb with dev dependencies
         run: pip install -e ".[dev]"
 
       - name: Static analysis (bandit)
-        run: bandit -c pyproject.toml -r blastmap
+        run: bandit -c pyproject.toml -r orbitkb
 
       - name: Dependency vulnerability scan (pip-audit)
         run: pip-audit
@@ -38,10 +38,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install blastmap with dev dependencies
+      - name: Install orbitkb with dev dependencies
         run: pip install -e ".[dev]"
 
-      # tests/test_dast_adversarial_inputs.py spins up the real blastmap MCP
+      # tests/test_dast_adversarial_inputs.py spins up the real orbitkb MCP
       # server as a subprocess (stdio) and drives it with SQL-injection,
       # prompt-injection, FTS5-syntax and oversized/malformed payloads over a
       # real client session — a dynamic test of the running process, not a

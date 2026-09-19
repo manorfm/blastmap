@@ -2,10 +2,10 @@
         release-patch release-minor release-major _release
 
 PYTHON ?= python3
-DB_DEFAULT := $(HOME)/.blastmap/blastmap.db
+DB_DEFAULT := $(HOME)/.orbitkb/orbitkb.db
 
 help:
-	@echo "blastmap — available targets:"
+	@echo "orbitkb — available targets:"
 	@echo "  install         Install the package (runtime only)"
 	@echo "  dev             Install the package with dev/test/security tooling"
 	@echo "  test            Run the deterministic test suite"
@@ -34,11 +34,11 @@ coverage:
 	$(PYTHON) -m coverage report -m
 
 lint:
-	ruff check --select F401,F841 blastmap tests scripts
-	vulture blastmap --min-confidence 80
+	ruff check --select F401,F841 orbitkb tests scripts
+	vulture orbitkb --min-confidence 80
 
 sast:
-	bandit -c pyproject.toml -r blastmap
+	bandit -c pyproject.toml -r orbitkb
 
 sca:
 	pip-audit
@@ -49,9 +49,9 @@ build: clean
 	$(PYTHON) -m build
 
 clean:
-	rm -rf build dist *.egg-info blastmap.egg-info
+	rm -rf build dist *.egg-info orbitkb.egg-info
 
-# Bumps the version, commits pyproject.toml + blastmap/__init__.py, and tags the
+# Bumps the version, commits pyproject.toml + orbitkb/__init__.py, and tags the
 # commit as vX.Y.Z — deliberately does NOT push. Review the diff and push
 # yourself (`git push && git push --tags`), which is also what triggers
 # .github/workflows/publish.yml to build and publish to PyPI.
@@ -66,8 +66,8 @@ release-major:
 
 _release:
 	$(PYTHON) scripts/bump_version.py $(KIND)
-	$(eval NEW_VERSION := $(shell $(PYTHON) -c "import blastmap; print(blastmap.__version__)"))
-	git add pyproject.toml blastmap/__init__.py
+	$(eval NEW_VERSION := $(shell $(PYTHON) -c "import orbitkb; print(orbitkb.__version__)"))
+	git add pyproject.toml orbitkb/__init__.py
 	git commit -m "chore: released v$(NEW_VERSION)"
 	git tag "v$(NEW_VERSION)"
 	@echo ""

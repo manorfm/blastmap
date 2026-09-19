@@ -7,10 +7,10 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import repositories as repositories_repo
-from blastmap.db.repositories import services as services_repo
-from blastmap.mcp import queries
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import repositories as repositories_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.mcp import queries
 
 from tests.mcp_test_helpers import content_json, server_params
 

@@ -3,14 +3,14 @@ __pycache__/
 .venv/
 *.egg-info/
 .pytest_cache/
-blastmap.egg-info/
+orbitkb.egg-info/
 .DS_Store
 
 # generated artifacts, not source
 *.db
 /docs/
 verify/sample_project.db
-.blastmap/
+.orbitkb/
 .coverage
 .coverage.*
 

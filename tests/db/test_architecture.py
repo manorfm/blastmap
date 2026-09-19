@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from blastmap.db.connection import open_db
-from blastmap.db.repositories import architecture as architecture_repo
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import architecture as architecture_repo
 
 
 def test_start_run_and_record_finding(tmp_path: Path):
