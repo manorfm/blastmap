@@ -137,6 +137,31 @@ async def test_adversarial_search_queries_never_crash_the_fts5_index(tmp_path: P
                 assert "results" in body, f"search({payload!r}) broke: {body}"
 
 
+PAGINATION_PAYLOADS = [-1, 0, -999999, 999999999]
+
+
+@pytest.mark.anyio
+async def test_adversarial_pagination_params_never_crash(tmp_path: Path):
+    db_path = tmp_path / "fixture.db"
+    _build_fixture_db(db_path)
+
+    params = server_params(db_path)
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            for tool in ("describe_service", "list_apis", "describe_persistence", "describe_messages"):
+                for value in PAGINATION_PAYLOADS:
+                    for arg_name in ("limit", "offset"):
+                        result = await session.call_tool(tool, {"service": "orders-service", arg_name: value})
+                        body = content_json(result)
+                        # A negative/zero value is a validation error; an oversized one
+                        # is silently clamped (never a crash, never unbounded output).
+                        assert "error" in body or "pagination" in body or "total" in body, (
+                            f"{tool}({arg_name}={value!r}) misbehaved: {body}"
+                        )
+
+
 @pytest.mark.anyio
 async def test_find_architecture_smells_is_unaffected_by_prior_adversarial_calls(tmp_path: Path):
     """Runs last against a fixture that already has a real edge, confirming the

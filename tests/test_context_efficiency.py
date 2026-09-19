@@ -8,13 +8,21 @@ from pathlib import Path
 
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
 
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation import change_surface
+from orbitkb.mcp import queries
 
 # Budget: find_change_surface's whole point is a small, progressive-disclosure
 # response an agent can act on without pulling in a service's full documentation —
 # this number is the harness's concrete stand-in for that claim.
 MAX_RESPONSE_BYTES = 3000
+
+# Same idea for describe_service's default (unpaginated-request) page: a real service
+# can have far more endpoints than any fixture here, so the default page must stay
+# bounded no matter how large the underlying service is.
+MAX_DESCRIBE_SERVICE_DEFAULT_BYTES = 8000
 
 
 def _context_efficiency(result: dict, total_services: int) -> dict:
@@ -83,3 +91,19 @@ def test_no_match_short_circuit_is_tiny_and_free(tmp_path: Path):
 
     assert backend.calls == 0  # no LLM cost paid for a query that matches nothing
     assert len(json.dumps(result)) < 500
+
+
+def test_describe_service_default_page_stays_bounded_for_a_huge_real_service(tmp_path: Path):
+    conn = open_db(tmp_path / "huge.db")
+    service_id = services_repo.ensure_service(conn, "huge-service", "/tmp/huge", "python")
+    for i in range(200):
+        apis_repo.upsert_api(conn, service_id, "GET", f"/resource/{i}", f"summary {i}" * 5, "d" * 20, [], [])
+
+    result = queries.describe_service(conn, "huge-service")
+
+    # The default page, not the full 200 endpoints, is what an agent actually pays
+    # tokens for — pagination (see mcp/queries.py) is what keeps this bounded.
+    assert len(result["apis"]) == queries.DEFAULT_LIST_LIMIT
+    assert result["pagination"]["apis"]["total"] == 200
+    assert result["pagination"]["apis"]["truncated"] is True
+    assert len(json.dumps(result)) < MAX_DESCRIBE_SERVICE_DEFAULT_BYTES

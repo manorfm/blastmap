@@ -46,7 +46,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.list_services(conn)
 
     @mcp.tool()
-    def describe_service(service: str) -> dict:
+    def describe_service(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
         """Full picture of one microservice: description, why it calls other services/queues
         (with the business reason, data needed, and target_kind/resource_type when the
         target is external), its components (classes/controllers/modules, each with a
@@ -54,19 +54,25 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         (use describe_persistence/describe_messages for the full field-level schema,
         including engine/provider). Includes freshness (indexed commit vs. the
         repository's current commit, and whether that means this knowledge may be
-        stale). Call this once you know which service is relevant. Next: describe_api
-        for a specific endpoint's contract, or get_relationships to see who else
-        depends on it."""
+        stale). Every list (calls/apis/components/persists/messages) is capped at
+        `limit` items (default 50) starting at `offset`, so a service with dozens of
+        endpoints can't blow your context budget by default — the `pagination` field
+        reports each list's real total and whether it was truncated; raise `offset` by
+        `limit` to fetch the next page of whichever list you need more of. Call this
+        once you know which service is relevant. Next: describe_api for a specific
+        endpoint's contract, or get_relationships to see who else depends on it."""
         with closing(_conn()) as conn:
-            return queries.describe_service(conn, service)
+            return queries.describe_service(conn, service, limit, offset)
 
     @mcp.tool()
-    def list_apis(service: str) -> dict:
+    def list_apis(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
         """One-line summary of every API on one microservice — a thinner view than
         describe_service's own apis list, useful once you already know the service
-        and just need the endpoint list. Next: describe_api for a specific one."""
+        and just need the endpoint list. Capped at `limit` items (default 50) starting
+        at `offset`; `total`/`truncated` in the response tell you whether to page
+        further. Next: describe_api for a specific one."""
         with closing(_conn()) as conn:
-            return queries.list_apis(conn, service)
+            return queries.list_apis(conn, service, limit, offset)
 
     @mcp.tool()
     def describe_api(service: str, method: str, path: str) -> dict:
@@ -78,25 +84,29 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.describe_api(conn, service, method, path)
 
     @mcp.tool()
-    def describe_persistence(service: str) -> dict:
+    def describe_persistence(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
         """Full field-level schema of everything one microservice persists (tables/
         documents/caches), including the concrete engine (postgres/mysql/mongodb/
         dynamodb/redis/elasticsearch/sqlite/unknown) — describe_service only names
-        these, this returns the actual fields. Call this before changing anything
-        that reads or writes this service's storage."""
+        these, this returns the actual fields. Capped at `limit` entities (default 50)
+        starting at `offset`; `total`/`truncated` tell you whether to page further.
+        Call this before changing anything that reads or writes this service's
+        storage."""
         with closing(_conn()) as conn:
-            return queries.describe_persistence(conn, service)
+            return queries.describe_persistence(conn, service, limit, offset)
 
     @mcp.tool()
-    def describe_messages(service: str) -> dict:
+    def describe_messages(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
         """Full field-level shape of async messages one microservice publishes/
         consumes, including the concrete broker (kafka/rabbitmq/sqs/sns/service_bus/
         activemq/nats/unknown) — describe_service only names the channels, this
-        returns the actual payload shape. Call this before changing an event's
-        contract; then check get_relationships/find_change_surface's
-        contracts_at_risk for who else consumes it."""
+        returns the actual payload shape. Capped at `limit` messages (default 50)
+        starting at `offset`; `total`/`truncated` tell you whether to page further.
+        Call this before changing an event's contract; then check
+        get_relationships/find_change_surface's contracts_at_risk for who else
+        consumes it."""
         with closing(_conn()) as conn:
-            return queries.describe_messages(conn, service)
+            return queries.describe_messages(conn, service, limit, offset)
 
     @mcp.tool()
     def search(query: str) -> dict:

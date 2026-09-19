@@ -22,6 +22,28 @@ from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.provenance import infer_provenance
 from orbitkb.generation.verification import verify_change_surface as _verify_change_surface
 
+# Progressive-disclosure budget for list-shaped MCP responses (describe_service's own
+# lists, list_apis, describe_persistence, describe_messages): a real service can have
+# far more endpoints/entities/messages than a benchmark fixture, so every such list is
+# capped by default instead of returned whole — see README's context-efficiency notes.
+DEFAULT_LIST_LIMIT = 50
+MAX_LIST_LIMIT = 500
+
+
+def _validate_pagination(limit: int, offset: int) -> str | None:
+    if limit < 1:
+        return f"limit must be >= 1 (got {limit})"
+    if offset < 0:
+        return f"offset must be >= 0 (got {offset})"
+    return None
+
+
+def _paginate(items: list, limit: int, offset: int) -> tuple[list, dict]:
+    limit = min(limit, MAX_LIST_LIMIT)
+    total = len(items)
+    page = items[offset : offset + limit]
+    return page, {"total": total, "truncated": offset + len(page) < total}
+
 
 def _fmt_call(c: sqlite3.Row) -> dict:
     return {
@@ -55,15 +77,18 @@ def list_services(conn: sqlite3.Connection) -> dict:
     }
 
 
-def describe_service(conn: sqlite3.Connection, service: str) -> dict:
+def describe_service(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    error = _validate_pagination(limit, offset)
+    if error:
+        return {"error": error}
     row = services_repo.get_service_by_name(conn, service)
     if row is None:
         return {"error": f"unknown service: {service}"}
-    calls = service_calls_repo.list_calls_for_service(conn, row["id"])
-    apis = apis_repo.list_apis(conn, row["id"])
-    components = components_repo.list_components(conn, row["id"])
-    persistence = persistence_repo.list_persistence(conn, row["id"])
-    messages = messages_repo.list_messages(conn, row["id"])
+    calls, calls_page = _paginate(service_calls_repo.list_calls_for_service(conn, row["id"]), limit, offset)
+    apis, apis_page = _paginate(apis_repo.list_apis(conn, row["id"]), limit, offset)
+    components, components_page = _paginate(components_repo.list_components(conn, row["id"]), limit, offset)
+    persistence, persists_page = _paginate(persistence_repo.list_persistence(conn, row["id"]), limit, offset)
+    messages, messages_page = _paginate(messages_repo.list_messages(conn, row["id"]), limit, offset)
     return {
         "name": row["name"],
         "short_desc": row["short_desc"],
@@ -83,15 +108,26 @@ def describe_service(conn: sqlite3.Connection, service: str) -> dict:
             for m in messages
         ],
         "freshness": compute_freshness(row["updated_at"], row["last_commit"], row["root_path"]),
+        "pagination": {
+            "limit": limit, "offset": offset,
+            "calls": calls_page, "apis": apis_page, "components": components_page,
+            "persists": persists_page, "messages": messages_page,
+        },
     }
 
 
-def list_apis(conn: sqlite3.Connection, service: str) -> dict:
+def list_apis(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    error = _validate_pagination(limit, offset)
+    if error:
+        return {"error": error}
     row = services_repo.get_service_by_name(conn, service)
     if row is None:
         return {"error": f"unknown service: {service}"}
-    apis = apis_repo.list_apis(conn, row["id"])
-    return {"apis": [{"method": a["method"], "path": a["path"], "summary": a["summary"]} for a in apis]}
+    apis, page = _paginate(apis_repo.list_apis(conn, row["id"]), limit, offset)
+    return {
+        "apis": [{"method": a["method"], "path": a["path"], "summary": a["summary"]} for a in apis],
+        **page,
+    }
 
 
 def describe_api(conn: sqlite3.Connection, service: str, method: str, path: str) -> dict:
@@ -115,11 +151,14 @@ def describe_api(conn: sqlite3.Connection, service: str, method: str, path: str)
     }
 
 
-def describe_persistence(conn: sqlite3.Connection, service: str) -> dict:
+def describe_persistence(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    error = _validate_pagination(limit, offset)
+    if error:
+        return {"error": error}
     row = services_repo.get_service_by_name(conn, service)
     if row is None:
         return {"error": f"unknown service: {service}"}
-    entities = persistence_repo.list_persistence(conn, row["id"])
+    entities, page = _paginate(persistence_repo.list_persistence(conn, row["id"]), limit, offset)
     return {
         "entities": [
             {
@@ -127,15 +166,19 @@ def describe_persistence(conn: sqlite3.Connection, service: str) -> dict:
                 "schema_json": json.loads(e["schema_json"] or "[]"),
             }
             for e in entities
-        ]
+        ],
+        **page,
     }
 
 
-def describe_messages(conn: sqlite3.Connection, service: str) -> dict:
+def describe_messages(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    error = _validate_pagination(limit, offset)
+    if error:
+        return {"error": error}
     row = services_repo.get_service_by_name(conn, service)
     if row is None:
         return {"error": f"unknown service: {service}"}
-    messages = messages_repo.list_messages(conn, row["id"])
+    messages, page = _paginate(messages_repo.list_messages(conn, row["id"]), limit, offset)
     return {
         "messages": [
             {
@@ -146,7 +189,8 @@ def describe_messages(conn: sqlite3.Connection, service: str) -> dict:
                 "description": m["description"],
             }
             for m in messages
-        ]
+        ],
+        **page,
     }
 
 
