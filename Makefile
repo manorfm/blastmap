@@ -1,7 +1,22 @@
 .PHONY: help install dev hooks test coverage lint sast sca security dast verify \
         build clean release release-patch release-minor release-major _release
 
-PYTHON ?= python3
+# Defaults to the project's own .venv when one exists, so `make verify`/
+# `make release` use the interpreter `make dev` installed into -- not
+# whatever `python3`/`ruff`/`bandit`/etc. happen to be first on PATH (which,
+# unactivated, can silently be an unrelated interpreter with none of this
+# project's dev dependencies installed). Override with `make PYTHON=...`.
+ifeq ($(origin PYTHON),undefined)
+PYTHON := $(shell test -x .venv/bin/python3 && echo .venv/bin/python3 || echo python3)
+endif
+
+# Also put .venv/bin first on PATH for every recipe, so things spawned as a
+# bare command (the `orbitkb` console script itself, in tests/test_rename_smoke.py)
+# resolve to the venv's copy too, without requiring `source .venv/bin/activate`.
+ifneq ($(wildcard .venv/bin),)
+export PATH := $(abspath .venv/bin):$(PATH)
+endif
+
 DB_DEFAULT := $(HOME)/.orbitkb/orbitkb.db
 
 help:
@@ -43,14 +58,14 @@ coverage:
 	$(PYTHON) -m coverage report -m
 
 lint:
-	ruff check --select F401,F841 orbitkb tests scripts
-	vulture orbitkb --min-confidence 80
+	$(PYTHON) -m ruff check --select F401,F841 orbitkb tests scripts
+	$(PYTHON) -m vulture orbitkb --min-confidence 80
 
 sast:
-	bandit -c pyproject.toml -r orbitkb
+	$(PYTHON) -m bandit -c pyproject.toml -r orbitkb
 
 sca:
-	pip-audit
+	$(PYTHON) -m pip_audit
 
 security: sast sca
 
