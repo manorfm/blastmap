@@ -10,6 +10,7 @@ from impactmesh.db.repositories import apis as apis_repo
 from impactmesh.db.repositories import architecture as architecture_repo
 from impactmesh.db.repositories import change_surface as change_surface_repo
 from impactmesh.db.repositories import components as components_repo
+from impactmesh.db.repositories import flows as flows_repo
 from impactmesh.db.repositories import messages as messages_repo
 from impactmesh.db.repositories import persistence as persistence_repo
 from impactmesh.db.repositories import repositories as repositories_repo
@@ -149,6 +150,56 @@ def describe_api(conn: sqlite3.Connection, service: str, method: str, path: str)
         "request_shape": json.loads(api["request_shape"] or "[]"),
         "calls": [_fmt_call(c) for c in calls],
         "validations": [{"kind": v["kind"], "description": v["description"]} for v in validations],
+    }
+
+
+def list_entrypoints(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    """List every transport entry into a service without loading its flow bodies."""
+    error = _validate_pagination(limit, offset)
+    if error:
+        return {"error": error}
+    row = services_repo.get_service_by_name(conn, service)
+    if row is None:
+        return {"error": f"unknown service: {service}"}
+    entrypoints, page = _paginate(flows_repo.list_entrypoints(conn, row["id"]), limit, offset)
+    return {
+        "entrypoints": [
+            {
+                "kind": entry["kind"], "method": entry["method"], "name": entry["name"],
+                "symbol": entry["symbol"], "evidence": {
+                    "file": entry["file_path"], "start_line": entry["start_line"], "end_line": entry["end_line"],
+                },
+            }
+            for entry in entrypoints
+        ],
+        **page,
+    }
+
+
+def describe_entrypoint(conn: sqlite3.Connection, service: str, kind: str, method: str, name: str) -> dict:
+    """Return a compact deterministic flow for one HTTP, GraphQL, message or CLI entrypoint."""
+    row = services_repo.get_service_by_name(conn, service)
+    if row is None:
+        return {"error": f"unknown service: {service}"}
+    entrypoint = flows_repo.get_entrypoint(conn, row["id"], kind, method, name)
+    if entrypoint is None:
+        return {"error": f"unknown entrypoint: {kind} {method} {name} on {service}"}
+    return {
+        "entrypoint": {
+            "kind": entrypoint["kind"], "method": entrypoint["method"], "name": entrypoint["name"],
+            "symbol": entrypoint["symbol"], "evidence": {
+                "file": entrypoint["file_path"], "start_line": entrypoint["start_line"], "end_line": entrypoint["end_line"],
+            },
+        },
+        "flow": [
+            {
+                "from": edge["from_symbol"], "to": edge["to_symbol"], "kind": edge["kind"],
+                "confidence": edge["confidence"], "origin": edge["origin"], "evidence": {
+                    "file": edge["file_path"], "start_line": edge["start_line"], "end_line": edge["end_line"],
+                },
+            }
+            for edge in flows_repo.list_entrypoint_edges(conn, entrypoint["id"])
+        ],
     }
 
 

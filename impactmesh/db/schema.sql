@@ -124,6 +124,42 @@ CREATE TABLE IF NOT EXISTS components (
 
 CREATE INDEX IF NOT EXISTS idx_components_service ON components(service_id);
 
+-- Deterministic execution context. These tables intentionally store a bounded
+-- entrypoint-to-boundary flow, not an all-purpose code graph. They are populated
+-- by local AST analyzers and optionally enriched by a depth provider.
+CREATE TABLE IF NOT EXISTS entrypoints (
+    id          INTEGER PRIMARY KEY,
+    service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('http', 'graphql', 'message', 'cli', 'job', 'rpc')),
+    method      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    file_path   TEXT NOT NULL,
+    start_line  INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    updated_at  TEXT NOT NULL,
+    UNIQUE(service_id, kind, method, name, symbol)
+);
+
+CREATE TABLE IF NOT EXISTS flow_edges (
+    id            INTEGER PRIMARY KEY,
+    service_id    INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    entrypoint_id INTEGER REFERENCES entrypoints(id) ON DELETE CASCADE,
+    from_symbol   TEXT NOT NULL,
+    to_symbol     TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('invokes', 'injects', 'validates', 'reads', 'writes', 'publishes', 'consumes')),
+    confidence    TEXT NOT NULL CHECK (confidence IN ('high', 'medium', 'low')),
+    origin        TEXT NOT NULL CHECK (origin IN ('static', 'codegraph', 'runtime')),
+    file_path     TEXT NOT NULL,
+    start_line    INTEGER NOT NULL,
+    end_line      INTEGER NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_entrypoints_service ON entrypoints(service_id);
+CREATE INDEX IF NOT EXISTS idx_flow_edges_service ON flow_edges(service_id);
+CREATE INDEX IF NOT EXISTS idx_flow_edges_entrypoint ON flow_edges(entrypoint_id);
+
 CREATE TABLE IF NOT EXISTS indexed_files (
     id              INTEGER PRIMARY KEY,
     service_id      INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

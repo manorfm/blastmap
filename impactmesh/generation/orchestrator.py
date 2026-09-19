@@ -6,9 +6,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
+from impactmesh.analysis.engine import StaticAnalysisEngine
 from impactmesh.db.repositories import apis as apis_repo
 from impactmesh.db.repositories import components as components_repo
 from impactmesh.db.repositories import embeddings as embeddings_repo
+from impactmesh.db.repositories import flows as flows_repo
 from impactmesh.db.repositories import index_runs as index_runs_repo
 from impactmesh.db.repositories import indexed_files as indexed_files_repo
 from impactmesh.db.repositories import messages as messages_repo
@@ -525,6 +527,7 @@ def index_service(
     existing = services_repo.get_service_by_name(conn, name)
     is_new = existing is None
     service_id = services_repo.ensure_service(conn, name, str(root), detector.id, repository_id=repository_id)
+    flows_repo.replace_analysis(conn, service_id, StaticAnalysisEngine().analyze(root, detector.id))
 
     old_hashes = indexed_files_repo.get_indexed_file_hashes(conn, service_id)
     relevant = hints.relevant_files()

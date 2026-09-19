@@ -84,6 +84,22 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.describe_api(conn, service, method, path)
 
     @mcp.tool()
+    def list_entrypoints(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+        """List HTTP, GraphQL, message, CLI and job entrypoints for one service.
+        Call this after describe_service when an agent needs to select one narrow flow.
+        Next: describe_entrypoint on the relevant item; responses are paginated."""
+        with closing(_conn()) as conn:
+            return queries.list_entrypoints(conn, service, limit, offset)
+
+    @mcp.tool()
+    def describe_entrypoint(service: str, kind: str, method: str, name: str) -> dict:
+        """Return one entrypoint plus its deterministic local flow: invocations,
+        validation, reads/writes and messages, each with evidence and provenance.
+        This is the preferred narrow context primitive before reading source files."""
+        with closing(_conn()) as conn:
+            return queries.describe_entrypoint(conn, service, kind, method, name)
+
+    @mcp.tool()
     def describe_persistence(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
         """Full field-level schema of everything one microservice persists (tables/
         documents/caches), including the concrete engine (postgres/mysql/mongodb/
