@@ -36,6 +36,13 @@ dev = [
     "pip-audit>=2.7.0",
     "build>=1.2.0",
 ]
+# Local, CPU-only semantic retrieval fallback for find_change_surface (see
+# generation/embeddings.py) — never required by the default install; a task whose
+# vocabulary doesn't keyword-match anything indexed just returns fewer candidates
+# without this extra, rather than erroring.
+semantic = [
+    "fastembed>=0.4",
+]
 
 [project.urls]
 Homepage = "https://github.com/manorfm/orbitkb"

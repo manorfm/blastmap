@@ -21,11 +21,12 @@ from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation import embeddings
 from orbitkb.generation.backend_base import LLMBackend
 from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 from orbitkb.generation.next_queries import NextQueryRecommender
-from orbitkb.generation.retrieval import CandidateRetrieval, KeywordGraphRetrieval
+from orbitkb.generation.retrieval import CandidateRetrieval, FallbackRetrieval, KeywordGraphRetrieval, SemanticRetrieval
 
 MAX_CANDIDATES = 10
 MAX_LISTED_PER_SERVICE = 8
@@ -329,6 +330,18 @@ def _derive_unknowns_from_unmapped(unmapped_internal_hint: list[dict]) -> list[d
     ]
 
 
+def _default_retrieval() -> CandidateRetrieval:
+    """Keyword retrieval is always free and stays the primary strategy; semantic
+    retrieval (local embeddings, see generation/embeddings.py) is only added as a
+    FallbackRetrieval secondary when the optional `semantic` extra is installed —
+    a query whose vocabulary already matches something indexed never pays the extra
+    encode cost."""
+    semantic_backend = embeddings.try_create_default_backend()
+    if semantic_backend is None:
+        return KeywordGraphRetrieval()
+    return FallbackRetrieval(KeywordGraphRetrieval(), SemanticRetrieval(semantic_backend))
+
+
 def analyze_change_surface(
     conn: sqlite3.Connection,
     task: str,
@@ -337,7 +350,7 @@ def analyze_change_surface(
     max_candidates: int = MAX_CANDIDATES,
     retrieval: CandidateRetrieval | None = None,
 ) -> dict:
-    retrieval = retrieval or KeywordGraphRetrieval()
+    retrieval = retrieval or _default_retrieval()
     candidates = retrieval.candidates(conn, task, hint_services, max_candidates)
     if not candidates:
         note = "no indexed service matched this task; pass hint_services or index more of the system"

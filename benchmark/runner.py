@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from orbitkb.db.repositories import services as services_repo
-from orbitkb.generation.retrieval import KeywordGraphRetrieval
+from orbitkb.generation.retrieval import CandidateRetrieval, KeywordGraphRetrieval
 
 from benchmark.tasks import BenchmarkTask
 
@@ -61,9 +61,12 @@ class BenchmarkReport:
 
 
 def run_retrieval_recall(
-    tasks: list[BenchmarkTask], tmp_dir: Path, max_candidates: int = DEFAULT_MAX_CANDIDATES
+    tasks: list[BenchmarkTask],
+    tmp_dir: Path,
+    max_candidates: int = DEFAULT_MAX_CANDIDATES,
+    retrieval: CandidateRetrieval | None = None,
 ) -> BenchmarkReport:
-    retrieval = KeywordGraphRetrieval()
+    retrieval = retrieval or KeywordGraphRetrieval()
     results = []
     for task in tasks:
         conn = task.build_fixture(tmp_dir / f"{task.id}.db")

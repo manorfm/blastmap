@@ -8,6 +8,7 @@ from typing import Protocol
 
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import components as components_repo
+from orbitkb.db.repositories import embeddings as embeddings_repo
 from orbitkb.db.repositories import index_runs as index_runs_repo
 from orbitkb.db.repositories import indexed_files as indexed_files_repo
 from orbitkb.db.repositories import messages as messages_repo
@@ -22,6 +23,7 @@ from orbitkb.discovery.scan_helpers import SKIP_DIRS, collect_config_excerpts
 from orbitkb.discovery.walker import discover_services
 from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.backend_base import LLMBackend, LLMUsage
+from orbitkb.generation.embeddings import EmbeddingBackend
 from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 
 MAX_EXCERPT_CHARS = 20_000
@@ -257,6 +259,7 @@ class IndexContext:
     force: bool
     failures_root: Path
     progress: ProgressReporter
+    embedding_backend: EmbeddingBackend | None = None
     any_endpoint_regenerated: bool = False
     any_component_regenerated: bool = False
 
@@ -470,12 +473,25 @@ class OverviewGenerator:
             services_repo.update_service_overview(ctx.conn, ctx.service_id, result["short_desc"], result["long_desc"])
             outcome.llm_calls += 1
             outcome.usage = outcome.usage + generation.usage
+            self._update_embedding(ctx, result["short_desc"], result["long_desc"])
             ctx.progress.unit_finished(ctx.name, "overview", "ok")
         else:
             outcome.had_failure = True
             outcome.failed_files |= entry_files
             ctx.progress.unit_finished(ctx.name, "overview", "failed")
         return outcome
+
+    @staticmethod
+    def _update_embedding(ctx: IndexContext, short_desc: str, long_desc: str) -> None:
+        """Zero-LLM-cost: only runs when an embedding_backend was actually injected
+        (i.e. the `semantic` extra is installed — see
+        generation.embeddings.try_create_default_backend, wired in by the CLI), and
+        only on the same trigger as the overview regen itself, never as a separate
+        indexing pass."""
+        if ctx.embedding_backend is None:
+            return
+        vector = ctx.embedding_backend.embed([f"{short_desc} {long_desc}"])[0]
+        embeddings_repo.upsert_service_embedding(ctx.conn, ctx.service_id, ctx.embedding_backend.model_name, vector)
 
 
 UNIT_GENERATORS: tuple[UnitGenerator, ...] = (
@@ -493,6 +509,7 @@ def index_service(
     failures_root: Path | None = None,
     progress: ProgressReporter | None = None,
     repository_id: int | None = None,
+    embedding_backend: EmbeddingBackend | None = None,
 ) -> IndexResult:
     failures_root = failures_root or (Path.home() / ".orbitkb" / "failures")
     progress = progress or NullProgressReporter()
@@ -528,6 +545,7 @@ def index_service(
         conn=conn, name=name, root=root, detector=detector, backend=backend, hints=hints,
         component_groups=component_groups, service_id=service_id, is_new=is_new, existing=existing,
         changed=changed, removed=removed, force=force, failures_root=failures_root, progress=progress,
+        embedding_backend=embedding_backend,
     )
 
     llm_calls = 0
@@ -590,6 +608,7 @@ def index_path(
     force: bool = False,
     progress: ProgressReporter | None = None,
     repository_name: str | None = None,
+    embedding_backend: EmbeddingBackend | None = None,
 ) -> list[IndexResult]:
     candidates = discover_services(path)
     if not candidates:
@@ -606,6 +625,9 @@ def index_path(
     repository_id = repositories_repo.ensure_repository(conn, repository_name or resolved_path.name, str(resolved_path))
 
     return [
-        index_service(conn, c.name, c.path, c.detector, backend, force=force, progress=progress, repository_id=repository_id)
+        index_service(
+            conn, c.name, c.path, c.detector, backend, force=force, progress=progress,
+            repository_id=repository_id, embedding_backend=embedding_backend,
+        )
         for c in candidates
     ]

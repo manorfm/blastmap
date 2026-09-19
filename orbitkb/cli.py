@@ -17,6 +17,7 @@ from orbitkb.export.markdown import export_markdown
 from orbitkb.export.mermaid import export_mermaid
 from orbitkb.generation import change_surface
 from orbitkb.generation.backend_base import GenerationError
+from orbitkb.generation.embeddings import try_create_default_backend
 from orbitkb.generation.orchestrator import DiscoveryError, index_path, index_service
 from orbitkb.generation.verification import verify_change_surface
 
@@ -24,11 +25,12 @@ from orbitkb.generation.verification import verify_change_surface
 def _cmd_index(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    embedding_backend = try_create_default_backend()
     try:
         with RichProgressReporter() as progress:
             results = index_path(
                 conn, Path(args.path), backend, service_override=args.service, force=args.force,
-                progress=progress, repository_name=args.repository_name,
+                progress=progress, repository_name=args.repository_name, embedding_backend=embedding_backend,
             )
     except (DiscoveryError, GenerationError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -62,8 +64,12 @@ def _cmd_update(args: argparse.Namespace) -> int:
         print(f"error: {root} no longer matches any known stack", file=sys.stderr)
         return 1
     backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    embedding_backend = try_create_default_backend()
     with RichProgressReporter() as progress:
-        result = index_service(conn, args.service, root, detector, backend, force=args.force, progress=progress)
+        result = index_service(
+            conn, args.service, root, detector, backend, force=args.force, progress=progress,
+            embedding_backend=embedding_backend,
+        )
     print(
         f"{result.service_name}: status={result.status} files_changed={result.files_changed} "
         f"llm_calls={result.llm_calls} cost_usd={result.cost_usd}"

@@ -8,6 +8,7 @@ from pathlib import Path
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
+from orbitkb.db.repositories import embeddings as embeddings_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import search as search_repo
@@ -117,6 +118,47 @@ def test_no_matching_service_short_circuits_without_calling_backend(tmp_path: Pa
     assert len(result["unknowns"]) == 1
     assert result["unknowns"][0]["status"] == "unknown"
     assert "suggestion" in result["unknowns"][0]
+
+
+class FakeEmbeddingBackend:
+    model_name = "fake-embedding-model"
+
+    def __init__(self, vectors_by_text: dict[str, list[float]]):
+        self._vectors_by_text = vectors_by_text
+        self.calls = 0
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        return [self._vectors_by_text[t] for t in texts]
+
+
+def test_default_retrieval_stays_keyword_only_when_semantic_extra_unavailable(tmp_path: Path, monkeypatch):
+    conn = _build_pix_fixture(tmp_path / "default1.db")
+    monkeypatch.setattr(change_surface.embeddings, "try_create_default_backend", lambda: None)
+    backend = FakeBackend({"primary": [], "secondary": [], "no_change": []})
+
+    result = change_surface.analyze_change_surface(conn, "completely unrelated xyz task", backend)
+
+    assert result["primary"] == []
+    assert backend.calls == 0  # no semantic backend available, so no fallback candidate either
+
+
+def test_default_retrieval_uses_semantic_fallback_when_available(tmp_path: Path, monkeypatch):
+    conn = _build_pix_fixture(tmp_path / "default2.db")
+    row = services_repo.get_service_by_name(conn, "notification-service")
+    embeddings_repo.upsert_service_embedding(conn, row["id"], "fake-embedding-model", [1.0, 0.0])
+    embedding_backend = FakeEmbeddingBackend({"xyz totally unrelated": [1.0, 0.0]})
+    monkeypatch.setattr(change_surface.embeddings, "try_create_default_backend", lambda: embedding_backend)
+    backend = FakeBackend({
+        "primary": [{"service": "notification-service", "reason": "matched semantically", "confidence": 0.5}],
+        "secondary": [], "no_change": [],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "xyz totally unrelated", backend)
+
+    assert embedding_backend.calls == 1
+    assert backend.calls == 1  # keyword retrieval found nothing, semantic fallback did, so the LLM ran
+    assert result["primary"][0]["service"] == "notification-service"
 
 
 def test_hallucinated_service_is_filtered_and_evidence_confidence_attached(tmp_path: Path):

@@ -10,6 +10,7 @@ import pytest
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import components as components_repo
+from orbitkb.db.repositories import embeddings as embeddings_repo
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.discovery.registry import detector_for
@@ -231,6 +232,49 @@ def test_index_path_service_override_requires_single_candidate(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     with pytest.raises(DiscoveryError):
         index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend(), service_override="custom-name")
+
+
+class FakeEmbeddingBackend:
+    model_name = "fake-embedding-model"
+
+    def __init__(self):
+        self.calls = 0
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        return [[float(len(t))] for t in texts]
+
+
+def test_indexing_with_an_embedding_backend_stores_a_vector_for_each_service(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    embedding_backend = FakeEmbeddingBackend()
+
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend(), embedding_backend=embedding_backend)
+
+    orders = services_repo.get_service_by_name(conn, "orders-service")
+    rows = embeddings_repo.get_all_service_embeddings(conn)
+    assert {r["service_name"] for r in rows} == {"orders-service", "payments-service", "inventory-service"}
+    assert embedding_backend.calls > 0
+    assert orders["id"] in {r["service_id"] for r in rows}
+
+
+def test_indexing_without_an_embedding_backend_stores_no_vectors(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend())
+
+    assert embeddings_repo.get_all_service_embeddings(conn) == []
+
+
+def test_reindexing_unchanged_files_does_not_recompute_the_embedding(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    embedding_backend = FakeEmbeddingBackend()
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend(), embedding_backend=embedding_backend)
+    calls_after_first_run = embedding_backend.calls
+
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend(), embedding_backend=embedding_backend)
+
+    assert embedding_backend.calls == calls_after_first_run  # overview was skipped, so was the embedding
 
 
 def test_index_service_directly_with_service_override_style_path(tmp_path: Path):

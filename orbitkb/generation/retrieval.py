@@ -5,14 +5,17 @@ synthesis/filtering logic (Strategy pattern) so a different retrieval approach �
 e.g. a future semantic one — can be swapped in without touching it."""
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from typing import Protocol
 
+from orbitkb.db.repositories import embeddings as embeddings_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation.embeddings import EmbeddingBackend, cosine_similarity
 
 _STOPWORDS = {
     "the", "a", "an", "to", "for", "in", "on", "of", "and", "or", "with", "add", "support",
@@ -102,3 +105,63 @@ class KeywordGraphRetrieval:
         # to_service_name with no matching row can't be given any context afterward.
         known = [name for name in visited if services_repo.get_service_by_name(conn, name) is not None]
         return sorted(known)[:max_candidates]
+
+
+class SemanticRetrieval:
+    """Cosine-ranks the task against every indexed service's local embedding (see
+    generation/embeddings.py, db/repositories/embeddings.py). Meant to be used only
+    as FallbackRetrieval's secondary strategy, since — unlike KeywordGraphRetrieval —
+    it costs a local encode instead of being free SQL.
+
+    SIMILARITY_FLOOR is a starting constant, not a trained value — same honesty as
+    generation.architecture.FAN_THRESHOLD.
+    """
+
+    SIMILARITY_FLOOR = 0.35
+
+    def __init__(self, embedding_backend: EmbeddingBackend) -> None:
+        self._embedding_backend = embedding_backend
+
+    def candidates(
+        self,
+        conn: sqlite3.Connection,
+        task: str,
+        hint_services: list[str] | None,
+        max_candidates: int,
+    ) -> list[str]:
+        hints = list(hint_services or [])
+        rows = embeddings_repo.get_all_service_embeddings(conn)
+        if not rows:
+            return hints[:max_candidates]
+
+        task_vector = self._embedding_backend.embed([task])[0]
+        scored = [
+            (cosine_similarity(task_vector, json.loads(row["vector_json"])), row["service_name"])
+            for row in rows
+        ]
+        ranked = [name for score, name in sorted(scored, key=lambda item: item[0], reverse=True) if score >= self.SIMILARITY_FLOOR]
+
+        combined = hints + [name for name in ranked if name not in hints]
+        return combined[:max_candidates]
+
+
+class FallbackRetrieval:
+    """Decorator (GoF): tries `primary` first, only calls `secondary` when it
+    returns no candidates at all — the default (keyword-only) path pays zero extra
+    cost or latency."""
+
+    def __init__(self, primary: CandidateRetrieval, secondary: CandidateRetrieval) -> None:
+        self._primary = primary
+        self._secondary = secondary
+
+    def candidates(
+        self,
+        conn: sqlite3.Connection,
+        task: str,
+        hint_services: list[str] | None,
+        max_candidates: int,
+    ) -> list[str]:
+        found = self._primary.candidates(conn, task, hint_services, max_candidates)
+        if found:
+            return found
+        return self._secondary.candidates(conn, task, hint_services, max_candidates)

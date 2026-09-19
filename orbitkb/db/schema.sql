@@ -243,6 +243,27 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
     service_id UNINDEXED
 );
 
+-- Local, zero-marginal-cost semantic vectors (see generation/embeddings.py) used as
+-- a fallback when FTS5 keyword retrieval (search_fts) finds nothing for a task's
+-- vocabulary, and to rank similar past find_change_surface tasks. vector_json is a
+-- JSON array of floats — brute-force cosine similarity in Python is plenty fast at
+-- this project's catalog scale, so no vector-DB dependency or BLOB packing is
+-- introduced for it. Both tables are the same "vector storage for X" concern for two
+-- different aggregates, read/written by the single db/repositories/embeddings.py.
+CREATE TABLE IF NOT EXISTS service_embeddings (
+    service_id  INTEGER PRIMARY KEY REFERENCES services(id) ON DELETE CASCADE,
+    model_name  TEXT NOT NULL,
+    vector_json TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS change_surface_run_embeddings (
+    run_id      INTEGER PRIMARY KEY REFERENCES change_surface_runs(id) ON DELETE CASCADE,
+    model_name  TEXT NOT NULL,
+    vector_json TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_apis_service ON apis(service_id);
 CREATE INDEX IF NOT EXISTS idx_service_calls_from ON service_calls(from_service_id);
 CREATE INDEX IF NOT EXISTS idx_service_calls_to_name ON service_calls(to_service_name);

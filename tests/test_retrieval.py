@@ -9,7 +9,8 @@ from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
-from orbitkb.generation.retrieval import KeywordGraphRetrieval
+from orbitkb.db.repositories import embeddings as embeddings_repo
+from orbitkb.generation.retrieval import FallbackRetrieval, KeywordGraphRetrieval, SemanticRetrieval
 
 
 def _seed_db(db_path: Path):
@@ -99,3 +100,78 @@ def test_candidates_are_capped_at_max_candidates(tmp_path: Path):
     )
 
     assert len(candidates) <= 2
+
+
+class FakeEmbeddingBackend:
+    """Deterministic stand-in for FastEmbedBackend: a text's 'vector' is a
+    hand-picked 2D point, so cosine similarity between fixture texts is
+    predictable without downloading or running a real model."""
+
+    model_name = "fake-embedding-model"
+
+    def __init__(self, vectors_by_text: dict[str, list[float]]):
+        self._vectors_by_text = vectors_by_text
+        self.calls = 0
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        return [self._vectors_by_text[t] for t in texts]
+
+
+def _seed_embeddings(conn, vectors_by_service: dict[str, list[float]]) -> None:
+    for name, vector in vectors_by_service.items():
+        row = services_repo.get_service_by_name(conn, name)
+        embeddings_repo.upsert_service_embedding(conn, row["id"], "fake-embedding-model", vector)
+
+
+def test_semantic_retrieval_ranks_services_by_cosine_similarity_to_the_task(tmp_path: Path):
+    conn = _seed_db(tmp_path / "semantic1.db")
+    _seed_embeddings(conn, {
+        "checkout-service": [1.0, 0.0],
+        "payments-service": [0.9, 0.1],
+        "order-service": [0.0, 1.0],
+        "notification-service": [-1.0, 0.0],
+    })
+    backend = FakeEmbeddingBackend({"a task about checkout and payments": [1.0, 0.0]})
+    retrieval = SemanticRetrieval(backend)
+
+    candidates = retrieval.candidates(conn, "a task about checkout and payments", hint_services=None, max_candidates=10)
+
+    assert candidates[0] == "checkout-service"
+    assert "payments-service" in candidates
+    assert "notification-service" not in candidates  # below the similarity floor
+
+
+def test_semantic_retrieval_returns_hint_services_even_with_no_embeddings_indexed(tmp_path: Path):
+    conn = _seed_db(tmp_path / "semantic2.db")
+    backend = FakeEmbeddingBackend({"xyz": [0.0, 0.0]})
+    retrieval = SemanticRetrieval(backend)
+
+    candidates = retrieval.candidates(conn, "xyz", hint_services=["notification-service"], max_candidates=10)
+
+    assert candidates == ["notification-service"]
+
+
+def test_fallback_retrieval_only_calls_secondary_when_primary_finds_nothing(tmp_path: Path):
+    conn = _seed_db(tmp_path / "fallback1.db")
+    _seed_embeddings(conn, {"notification-service": [1.0, 0.0]})
+    backend = FakeEmbeddingBackend({"xyz totally unrelated": [1.0, 0.0]})
+    fallback = FallbackRetrieval(KeywordGraphRetrieval(), SemanticRetrieval(backend))
+
+    # A keyword match exists ("checkout"), so the semantic backend must never be called.
+    candidates = fallback.candidates(conn, "checkout payment flow", hint_services=None, max_candidates=10)
+
+    assert backend.calls == 0
+    assert "checkout-service" in candidates
+
+
+def test_fallback_retrieval_uses_semantic_when_keyword_retrieval_finds_nothing(tmp_path: Path):
+    conn = _seed_db(tmp_path / "fallback2.db")
+    _seed_embeddings(conn, {"notification-service": [1.0, 0.0]})
+    backend = FakeEmbeddingBackend({"xyz totally unrelated": [1.0, 0.0]})
+    fallback = FallbackRetrieval(KeywordGraphRetrieval(), SemanticRetrieval(backend))
+
+    candidates = fallback.candidates(conn, "xyz totally unrelated", hint_services=None, max_candidates=10)
+
+    assert backend.calls == 1
+    assert candidates == ["notification-service"]
