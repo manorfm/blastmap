@@ -19,8 +19,9 @@ from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.discovery.base import CodeExcerpt, EndpointHint, ServiceHints, StackDetector
 from orbitkb.discovery.hashing import file_hash, git_head_commit
+from orbitkb.discovery.registry import detector_by_id
 from orbitkb.discovery.scan_helpers import SKIP_DIRS, collect_config_excerpts
-from orbitkb.discovery.walker import discover_services
+from orbitkb.discovery.walker import ServiceCandidate, discover_services
 from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.backend_base import LLMBackend, LLMUsage
 from orbitkb.generation.embeddings import EmbeddingBackend
@@ -609,17 +610,33 @@ def index_path(
     progress: ProgressReporter | None = None,
     repository_name: str | None = None,
     embedding_backend: EmbeddingBackend | None = None,
+    stack_override: str | None = None,
 ) -> list[IndexResult]:
-    candidates = discover_services(path)
-    if not candidates:
-        raise DiscoveryError(
-            f"No supported microservice detected under {path} "
-            "(looked for Node/TS, Python, JVM/Spring, and Go boundary markers)."
-        )
-    if service_override:
-        if len(candidates) != 1:
-            raise DiscoveryError("--service can only be used when <path> points at a single service")
-        candidates = [replace(candidates[0], name=service_override)]
+    if stack_override is not None:
+        # Explicit "I already know what this is" escape hatch (see `orbitkb index
+        # --stack`): skips discover_services()/matches() entirely, for a folder shape
+        # no heuristic recognizes (e.g. a library/CLI package with its manifest at
+        # the repo root and source in a subdirectory — see README's known limitation
+        # this replaces). Broadening matches() itself would reduce detection
+        # precision for real web-service targets, so this stays an explicit,
+        # single-service opt-in rather than a heuristic change.
+        if not service_override:
+            raise DiscoveryError("--stack requires --service (both must name one explicit service)")
+        detector = detector_by_id(stack_override)
+        if detector is None:
+            raise DiscoveryError(f"unknown --stack {stack_override!r}")
+        candidates = [ServiceCandidate(name=service_override, path=path.resolve(), detector=detector)]
+    else:
+        candidates = discover_services(path)
+        if not candidates:
+            raise DiscoveryError(
+                f"No supported microservice detected under {path} "
+                "(looked for Node/TS, Python, JVM/Spring, and Go boundary markers)."
+            )
+        if service_override:
+            if len(candidates) != 1:
+                raise DiscoveryError("--service can only be used when <path> points at a single service")
+            candidates = [replace(candidates[0], name=service_override)]
 
     resolved_path = path.resolve()
     repository_id = repositories_repo.ensure_repository(conn, repository_name or resolved_path.name, str(resolved_path))

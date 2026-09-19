@@ -59,6 +59,23 @@ def test_index_command_reports_error_on_empty_directory(tmp_path: Path, capsys):
     assert "error" in capsys.readouterr().err
 
 
+def test_index_command_with_stack_override_bypasses_discovery(tmp_path: Path):
+    db_path = tmp_path / "test.db"
+    unrecognizable_dir = tmp_path / "some-library"
+    unrecognizable_dir.mkdir()
+    (unrecognizable_dir / "lib.py").write_text("# just a module\n")
+    args = _parse([
+        "index", str(unrecognizable_dir), "--db", str(db_path),
+        "--service", "some-library-core", "--stack", "python",
+    ])
+
+    exit_code = cli._cmd_index(args)
+
+    assert exit_code == 0
+    conn = open_db(db_path)
+    assert services_repo.get_service_by_name(conn, "some-library-core") is not None
+
+
 def test_update_command_reindexes_known_service(tmp_path: Path, capsys):
     db_path = tmp_path / "test.db"
     cli._cmd_index(_parse(["index", str(SAMPLE_ROOT), "--db", str(db_path)]))

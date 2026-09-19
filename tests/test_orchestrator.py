@@ -234,6 +234,48 @@ def test_index_path_service_override_requires_single_candidate(tmp_path: Path):
         index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend(), service_override="custom-name")
 
 
+def test_index_path_with_service_and_stack_override_bypasses_discovery(tmp_path: Path):
+    """A folder discover_services() would never recognize on its own (no manifest,
+    no entry-point file at all — the exact shape of a library/CLI package like
+    orbitkb itself) still indexes successfully when the caller explicitly names both
+    --service and --stack, per generation/orchestrator.py's documented escape hatch."""
+    conn = open_db(tmp_path / "test.db")
+    unrecognizable_dir = tmp_path / "some-library"
+    unrecognizable_dir.mkdir()
+    (unrecognizable_dir / "lib.py").write_text("# just a module, no manifest, no entrypoint\n")
+
+    results = index_path(
+        conn, unrecognizable_dir, FakeOrchestratorBackend(),
+        service_override="some-library-core", stack_override="python",
+    )
+
+    assert len(results) == 1
+    assert results[0].service_name == "some-library-core"
+    assert results[0].status == "ok"
+    assert services_repo.get_service_by_name(conn, "some-library-core") is not None
+
+
+def test_index_path_stack_override_without_service_override_is_rejected(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    unrecognizable_dir = tmp_path / "some-library"
+    unrecognizable_dir.mkdir()
+
+    with pytest.raises(DiscoveryError):
+        index_path(conn, unrecognizable_dir, FakeOrchestratorBackend(), stack_override="python")
+
+
+def test_index_path_stack_override_rejects_an_unknown_stack_id(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    unrecognizable_dir = tmp_path / "some-library"
+    unrecognizable_dir.mkdir()
+
+    with pytest.raises(DiscoveryError):
+        index_path(
+            conn, unrecognizable_dir, FakeOrchestratorBackend(),
+            service_override="x", stack_override="rust",
+        )
+
+
 class FakeEmbeddingBackend:
     model_name = "fake-embedding-model"
 

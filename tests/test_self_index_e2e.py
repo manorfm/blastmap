@@ -1,44 +1,80 @@
-"""Self-indexing end-to-end suite: orbitkb indexes its own source tree, then
-answers a find_change_surface query about itself. This is the project's own
-dogfooding check — real discovery heuristics run against a real, non-trivial
-codebase (this one), with only the LLM backend faked (deterministic, no real
-`claude`/`codex` CLI call, consistent with the rest of the suite).
+"""Self-indexing end-to-end suite: orbitkb indexes its own source tree through the
+real CLI path (discover/bypass -> orchestrator -> SQLite -> MCP), the same one a
+real user runs — not a shortcut through internal functions. This is the project's
+own dogfooding check, and it doubles as proof that the `--stack` escape hatch (see
+cli.py, generation/orchestrator.py) genuinely fixes the documented discovery gap:
+orbitkb's own repo root has no main.py/app.py/wsgi.py (the Python heuristic's
+entry-file signal for a web service — see discovery/python_stack.py's
+PythonDetector.matches), because orbitkb is a library/CLI/MCP server, not a web
+microservice, and `matches()` deliberately isn't broadened to cover this (see
+README's "Known limitations" — that would reduce detection precision for real
+targets).
 
-Note on why this calls index_service directly instead of the index_path/CLI
-discovery path: orbitkb's own repo root has no main.py/app.py/wsgi.py (the
-Python discovery heuristic's entry-file signal for a web service — see
-discovery/python_stack.py's PythonDetector.matches), because orbitkb is a
-library/CLI/MCP-server, not a web microservice. That mismatch is itself an honest
-example of the documented discovery-heuristic limitation (see README's
-"Limitações conhecidas"). index_service is a first-class public function already
-called directly by `orbitkb update` and by test_orchestrator.py — supplying the
-detector explicitly here is the documented way to index a shape auto-discovery
-doesn't recognize, not a workaround.
+In the same database, this suite also indexes verify/sample_project — a second,
+independent `orbitkb index` call — making the "knowledge is cumulative across
+independently-indexed roots" story concrete instead of only a README claim.
+
+Only the LLM backend is faked (deterministic, no real `claude`/`codex` CLI call,
+consistent with the rest of the suite); everything else — real discovery, real file
+hashing, real SQLite writes, the real MCP query layer, real architecture-smell/
+change-surface computation over the combined graph — runs for real.
 """
 from pathlib import Path
 
+import pytest
+
+from orbitkb import cli
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import indexed_files as indexed_files_repo
+from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
-from orbitkb.discovery.python_stack import PythonDetector
 from orbitkb.generation import change_surface
-from orbitkb.generation.orchestrator import index_service
 from orbitkb.mcp import queries
 
-from tests.test_orchestrator import FakeOrchestratorBackend
+from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
 
-SELF_ROOT = Path(__file__).resolve().parents[1] / "orbitkb"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SELF_ROOT = REPO_ROOT / "orbitkb"
 
 
-def test_indexing_orbitkbs_own_source_tree_succeeds(tmp_path: Path):
-    conn = open_db(tmp_path / "self.db")
-    backend = FakeOrchestratorBackend()
+@pytest.fixture
+def fake_backends(monkeypatch):
+    """Patches cli.resolve_backend to hand out a fresh FakeOrchestratorBackend per
+    call, while keeping a reference to each one so a test can inspect e.g. how many
+    LLM calls a specific `orbitkb index` invocation actually made."""
+    created: list[FakeOrchestratorBackend] = []
 
-    result = index_service(conn, "orbitkb-core", SELF_ROOT, PythonDetector(), backend)
+    def _factory(*args, **kwargs):
+        backend = FakeOrchestratorBackend()
+        created.append(backend)
+        return backend
 
-    assert result.status == "ok"
+    monkeypatch.setattr(cli, "resolve_backend", _factory)
+    return created
+
+
+def _parse(argv: list[str]):
+    return cli.build_parser().parse_args(argv)
+
+
+def _index_self(db_path: Path, force: bool = False) -> int:
+    return cli._cmd_index(_parse([
+        "index", str(SELF_ROOT), "--db", str(db_path),
+        "--service", "orbitkb-core", "--stack", "python",
+        *(["--force"] if force else []),
+    ]))
+
+
+def test_indexing_orbitkbs_own_source_tree_through_the_real_cli_succeeds(tmp_path: Path, fake_backends):
+    db_path = tmp_path / "self.db"
+
+    exit_code = _index_self(db_path)
+
+    assert exit_code == 0
+    conn = open_db(db_path)
     row = services_repo.get_service_by_name(conn, "orbitkb-core")
     assert row is not None
+    assert row["short_desc"]  # FakeOrchestratorBackend's canned overview
     # Dogfooding finding: orbitkb has no FastAPI/Flask/Django endpoints, no
     # SQLAlchemy/Django models and no queue calls (it's a CLI/library/MCP server,
     # not a web microservice), so PythonDetector's heuristics find zero "relevant"
@@ -46,42 +82,64 @@ def test_indexing_orbitkbs_own_source_tree_succeeds(tmp_path: Path):
     # the folder tree alone. This is the discovery-heuristic gap the module
     # docstring above describes, made concrete instead of just asserted in prose.
     assert indexed_files_repo.get_indexed_file_hashes(conn, row["id"]) == {}
-    assert result.llm_calls == 1  # exactly the overview unit
+    assert fake_backends[0].calls == 1  # exactly the overview unit
 
 
-def test_reindexing_after_a_real_local_edit_only_regenerates_the_changed_unit(tmp_path: Path):
-    conn = open_db(tmp_path / "self2.db")
-    backend = FakeOrchestratorBackend()
-    index_service(conn, "orbitkb-core", SELF_ROOT, PythonDetector(), backend)
-    calls_after_first_run = backend.calls
+def test_reindexing_after_no_real_change_regenerates_nothing(tmp_path: Path, fake_backends):
+    db_path = tmp_path / "self2.db"
+    _index_self(db_path)
+    calls_after_first_run = fake_backends[0].calls
 
-    second_backend = FakeOrchestratorBackend()
-    result = index_service(conn, "orbitkb-core", SELF_ROOT, PythonDetector(), second_backend)
+    exit_code = _index_self(db_path)
 
-    assert result.status == "ok"
-    assert second_backend.calls == 0  # nothing changed on disk since the first run
-    assert calls_after_first_run > 0
+    assert exit_code == 0
+    assert calls_after_first_run > 0  # sanity: the first run did do real work
+    assert fake_backends[1].calls == 0  # nothing changed on disk since the first run
 
 
-def test_describe_and_search_work_against_the_self_indexed_service(tmp_path: Path):
-    conn = open_db(tmp_path / "self3.db")
-    index_service(conn, "orbitkb-core", SELF_ROOT, PythonDetector(), FakeOrchestratorBackend())
+def test_describe_and_search_work_against_the_self_indexed_service(tmp_path: Path, fake_backends):
+    db_path = tmp_path / "self3.db"
+    _index_self(db_path)
 
+    conn = open_db(db_path)
     described = queries.describe_service(conn, "orbitkb-core")
     assert described["name"] == "orbitkb-core"
-    assert described["short_desc"]  # FakeOrchestratorBackend's canned overview
+    assert described["short_desc"]
     assert "freshness" in described
 
 
-def test_find_change_surface_against_self_indexed_knowledge(tmp_path: Path):
-    conn = open_db(tmp_path / "self4.db")
-    index_service(conn, "orbitkb-core", SELF_ROOT, PythonDetector(), FakeOrchestratorBackend())
-    backend = FakeOrchestratorBackend()  # its .generate() also answers the change_surface schema shape
+def test_knowledge_is_cumulative_across_two_independently_indexed_roots(tmp_path: Path, fake_backends):
+    """One database, two separate `orbitkb index` invocations — orbitkb's own
+    source and the project's own sample fixture — proving the "index one repo at a
+    time, or a monorepo, into the same accumulating DB" story concretely instead of
+    only in the README. find_architecture_smells and find_change_surface are then
+    exercised against the combined, cumulative knowledge model, including
+    orbitkb's own architecture — the most direct proof the pipeline works end to
+    end against real, non-trivial code."""
+    db_path = tmp_path / "cumulative.db"
+
+    self_exit_code = _index_self(db_path)
+    sample_exit_code = cli._cmd_index(_parse([
+        "index", str(SAMPLE_ROOT), "--db", str(db_path), "--repository-name", "sample-project",
+    ]))
+
+    assert self_exit_code == 0
+    assert sample_exit_code == 0
+    conn = open_db(db_path)
+    repository_names = {r["name"] for r in repositories_repo.list_repositories(conn)}
+    assert "sample-project" in repository_names
+    assert SELF_ROOT.name in repository_names  # default repository name: the indexed folder's own name
+
+    services = {s["name"] for s in services_repo.list_services(conn)}
+    assert services == {"orbitkb-core", "orders-service", "payments-service", "inventory-service"}
+
+    smells = queries.find_architecture_smells(conn)
+    assert smells["run_id"] is not None  # recomputed over the whole cumulative graph, not just one root
 
     result = change_surface.analyze_change_surface(
-        conn, "Split the repository layer into smaller modules", backend, hint_services=["orbitkb-core"],
+        conn, "Split the repository layer into smaller modules", FakeOrchestratorBackend(),
+        hint_services=["orbitkb-core"],
     )
-
     # hint_services anchors the search directly, since the fake overview text
     # won't keyword-match a specific engineering task the way a real LLM summary would.
     assert "recommended_next_queries" in result

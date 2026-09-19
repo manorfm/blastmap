@@ -31,6 +31,7 @@ def _cmd_index(args: argparse.Namespace) -> int:
             results = index_path(
                 conn, Path(args.path), backend, service_override=args.service, force=args.force,
                 progress=progress, repository_name=args.repository_name, embedding_backend=embedding_backend,
+                stack_override=args.stack,
             )
     except (DiscoveryError, GenerationError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -222,11 +223,19 @@ def build_parser() -> argparse.ArgumentParser:
             "  orbitkb index ~/code/orders-service\n"
             "  orbitkb index ~/code/my-monorepo --repository-name my-monorepo\n"
             "  orbitkb index . --service custom-name --force\n"
+            "  # --stack bypasses auto-detection for a folder no heuristic recognizes\n"
+            "  # (e.g. a library/CLI package, not a web microservice):\n"
+            "  orbitkb index . --service orbitkb-core --stack python\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_index.add_argument("path", help="A single service's root, or a monorepo root containing several")
     p_index.add_argument("--service", default=None, help="Override the inferred service name (only valid for a single-service path)")
+    p_index.add_argument(
+        "--stack", default=None, choices=["node-ts", "python", "jvm-spring", "go"],
+        help="Explicit stack, bypassing auto-detection entirely — requires --service too. "
+             "For a folder shape auto-detection can't recognize (e.g. a library/CLI package).",
+    )
     p_index.add_argument("--repository-name", default=None, help="Explicit repository name; avoids collisions when indexing several repos into one shared DB")
     p_index.add_argument("--force", action="store_true", help="Regenerate everything, ignoring file-hash skip")
     add_backend_args(p_index)
