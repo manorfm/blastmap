@@ -156,10 +156,15 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         vendor). Each finding carries a plain-language reason and the services
         involved, in risk language ('likely', 'worth checking') — never a confirmed
         verdict; this describes structure, not a judgment call only a human/LLM
-        synthesis over real evidence could make. Call this for a system-wide health
-        check without reading any source file. Next: get_relationships/trace_flow on a
-        flagged service to see the edges behind a finding, or describe_service to
-        understand why it's shaped that way."""
+        synthesis over real evidence could make. When a prior run exists, the response
+        also includes trend: new_findings (appeared since the last index/update),
+        resolved_findings (gone since then) and count_deltas (a fan_in/fan_out count
+        that changed while the finding itself persisted) — computed for free from
+        already-stored runs, no re-detection. trend is omitted entirely (not an empty
+        object) on the very first run ever, since there's nothing yet to compare
+        against. Call this for a system-wide health check without reading any source
+        file. Next: get_relationships/trace_flow on a flagged service to see the edges
+        behind a finding, or describe_service to understand why it's shaped that way."""
         with closing(_conn()) as conn:
             return queries.find_architecture_smells(conn)
 

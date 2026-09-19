@@ -9,6 +9,7 @@ from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import (
+    diff_architecture_runs,
     find_cycles,
     find_duplicate_external_integrations,
     find_fan_imbalance,
@@ -162,3 +163,91 @@ def test_recompute_architecture_view_creates_a_fresh_run_each_time(tmp_path: Pat
 
     assert run_1 != run_2
     assert architecture_repo.latest_run_id(conn) == run_2
+
+
+def test_diff_architecture_runs_reports_a_new_finding(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    a = services_repo.ensure_service(conn, "a-service", "/tmp/a", "python")
+    services_repo.ensure_service(conn, "b-service", "/tmp/b", "python")
+    a_api = apis_repo.upsert_api(conn, a, "GET", "/a", "s", "d", [], EVIDENCE)
+    run_1 = recompute_architecture_view(conn)  # no edges yet: no findings
+
+    _call(conn, a, a_api, "b-service")
+    service_calls_repo.reconcile_service_call_targets(conn)
+    b = services_repo.get_service_by_name(conn, "b-service")["id"]
+    b_api = apis_repo.upsert_api(conn, b, "GET", "/b", "s", "d", [], EVIDENCE)
+    _call(conn, b, b_api, "a-service")
+    service_calls_repo.reconcile_service_call_targets(conn)
+    run_2 = recompute_architecture_view(conn)  # cycle now exists
+
+    diff = diff_architecture_runs(conn, run_1, run_2)
+
+    assert len(diff["new_findings"]) == 1
+    assert diff["new_findings"][0]["kind"] == "cycle"
+    assert diff["resolved_findings"] == []
+    assert diff["count_deltas"] == []
+
+
+def test_diff_architecture_runs_reports_a_resolved_finding(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    a = services_repo.ensure_service(conn, "a-service", "/tmp/a", "python")
+    b = services_repo.ensure_service(conn, "b-service", "/tmp/b", "python")
+    a_api = apis_repo.upsert_api(conn, a, "GET", "/a", "s", "d", [], EVIDENCE)
+    b_api = apis_repo.upsert_api(conn, b, "GET", "/b", "s", "d", [], EVIDENCE)
+    _call(conn, a, a_api, "b-service")
+    _call(conn, b, b_api, "a-service")
+    service_calls_repo.reconcile_service_call_targets(conn)
+    run_1 = recompute_architecture_view(conn)  # cycle exists
+
+    service_calls_repo.replace_calls_for_api(conn, b, b_api, [], EVIDENCE)  # break the cycle
+    service_calls_repo.reconcile_service_call_targets(conn)
+    run_2 = recompute_architecture_view(conn)
+
+    diff = diff_architecture_runs(conn, run_1, run_2)
+
+    assert diff["new_findings"] == []
+    assert len(diff["resolved_findings"]) == 1
+    assert diff["resolved_findings"][0]["kind"] == "cycle"
+
+
+def test_diff_architecture_runs_reports_a_fan_in_count_delta(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    services_repo.ensure_service(conn, "hub-service", "/tmp/hub", "python")
+    for i in range(4):
+        caller = services_repo.ensure_service(conn, f"caller-{i}-service", f"/tmp/c{i}", "python")
+        api_id = apis_repo.upsert_api(conn, caller, "GET", "/x", "s", "d", [], EVIDENCE)
+        _call(conn, caller, api_id, "hub-service")
+    service_calls_repo.reconcile_service_call_targets(conn)
+    run_1 = recompute_architecture_view(conn)  # fan_in count = 4
+
+    caller_5 = services_repo.ensure_service(conn, "caller-5-service", "/tmp/c5", "python")
+    api_5 = apis_repo.upsert_api(conn, caller_5, "GET", "/x", "s", "d", [], EVIDENCE)
+    _call(conn, caller_5, api_5, "hub-service")
+    service_calls_repo.reconcile_service_call_targets(conn)
+    run_2 = recompute_architecture_view(conn)  # fan_in count = 5
+
+    diff = diff_architecture_runs(conn, run_1, run_2)
+
+    assert diff["new_findings"] == []
+    assert diff["resolved_findings"] == []
+    fan_in_delta = next(d for d in diff["count_deltas"] if d["kind"] == "fan_in")
+    assert fan_in_delta["previous_count"] == 4
+    assert fan_in_delta["current_count"] == 5
+    assert fan_in_delta["services"] == ["hub-service"]
+
+
+def test_diff_architecture_runs_is_empty_when_nothing_changed(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    a = services_repo.ensure_service(conn, "a-service", "/tmp/a", "python")
+    b = services_repo.ensure_service(conn, "b-service", "/tmp/b", "python")
+    a_api = apis_repo.upsert_api(conn, a, "GET", "/a", "s", "d", [], EVIDENCE)
+    b_api = apis_repo.upsert_api(conn, b, "GET", "/b", "s", "d", [], EVIDENCE)
+    _call(conn, a, a_api, "b-service")
+    _call(conn, b, b_api, "a-service")
+    service_calls_repo.reconcile_service_call_targets(conn)
+    run_1 = recompute_architecture_view(conn)
+    run_2 = recompute_architecture_view(conn)  # nothing changed on disk
+
+    diff = diff_architecture_runs(conn, run_1, run_2)
+
+    assert diff == {"new_findings": [], "resolved_findings": [], "count_deltas": []}

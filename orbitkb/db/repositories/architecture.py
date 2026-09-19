@@ -35,6 +35,15 @@ def latest_run_id(conn: sqlite3.Connection) -> int | None:
     return row["id"] if row else None
 
 
+def previous_run_id(conn: sqlite3.Connection, before_run_id: int) -> int | None:
+    """The run immediately before `before_run_id` — None when it was the first run
+    ever, so callers can skip trend reporting instead of diffing against nothing."""
+    row = conn.execute(
+        "SELECT id FROM architecture_runs WHERE id < ? ORDER BY id DESC LIMIT 1", (before_run_id,)
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def list_findings(conn: sqlite3.Connection, run_id: int) -> list[sqlite3.Row]:
     return conn.execute(
         """SELECT kind, severity, services_json, detail_json, reason

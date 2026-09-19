@@ -40,3 +40,20 @@ def test_latest_run_id(tmp_path: Path):
     second = architecture_repo.start_run(conn, services_indexed=1)
 
     assert architecture_repo.latest_run_id(conn) == second
+
+
+def test_previous_run_id_returns_the_run_before_the_given_one(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    first = architecture_repo.start_run(conn, services_indexed=1)
+    second = architecture_repo.start_run(conn, services_indexed=1)
+    third = architecture_repo.start_run(conn, services_indexed=1)
+
+    assert architecture_repo.previous_run_id(conn, third) == second
+    assert architecture_repo.previous_run_id(conn, second) == first
+
+
+def test_previous_run_id_is_none_for_the_first_run_ever(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    first = architecture_repo.start_run(conn, services_indexed=1)
+
+    assert architecture_repo.previous_run_id(conn, first) is None

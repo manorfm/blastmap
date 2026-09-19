@@ -8,6 +8,7 @@ indexed to tell".
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections import defaultdict
 
@@ -179,6 +180,49 @@ def find_duplicate_external_integrations(conn: sqlite3.Connection) -> list[dict]
 
 
 _DETECTORS = (find_cycles, find_fan_imbalance, find_shared_database, find_duplicate_external_integrations)
+
+
+def _findings_by_identity(conn: sqlite3.Connection, run_id: int) -> dict[tuple[str, tuple[str, ...]], dict]:
+    """A finding's identity across runs is (kind, sorted services) — the same finding
+    re-detected on a later run keeps that identity even if its row id changed, since
+    every run re-inserts findings from scratch (see recompute_architecture_view)."""
+    identified: dict[tuple[str, tuple[str, ...]], dict] = {}
+    for f in architecture_repo.list_findings(conn, run_id):
+        services = tuple(sorted(json.loads(f["services_json"])))
+        identified[(f["kind"], services)] = {
+            "kind": f["kind"], "services": list(services), "detail": json.loads(f["detail_json"] or "{}"),
+        }
+    return identified
+
+
+def diff_architecture_runs(conn: sqlite3.Connection, previous_run_id: int, current_run_id: int) -> dict:
+    """Pure SQL/in-memory diff between two already-computed architecture runs — no
+    LLM, no re-detection: new_findings/resolved_findings by (kind, services)
+    identity, plus a numeric count_deltas entry for any fan_in/fan_out finding that
+    persisted across both runs but whose count changed. Recomputed for free from
+    data find_architecture_smells already has to read anyway.
+    """
+    previous = _findings_by_identity(conn, previous_run_id)
+    current = _findings_by_identity(conn, current_run_id)
+
+    new_findings = [finding for key, finding in current.items() if key not in previous]
+    resolved_findings = [finding for key, finding in previous.items() if key not in current]
+
+    count_deltas = []
+    for key, current_finding in current.items():
+        if key not in previous:
+            continue
+        previous_count = previous[key]["detail"].get("count")
+        current_count = current_finding["detail"].get("count")
+        if previous_count is not None and current_count is not None and previous_count != current_count:
+            count_deltas.append({
+                "kind": current_finding["kind"],
+                "services": current_finding["services"],
+                "previous_count": previous_count,
+                "current_count": current_count,
+            })
+
+    return {"new_findings": new_findings, "resolved_findings": resolved_findings, "count_deltas": count_deltas}
 
 
 def recompute_architecture_view(conn: sqlite3.Connection) -> int:

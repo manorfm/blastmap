@@ -12,6 +12,7 @@ from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import recompute_architecture_view
+from orbitkb.mcp import queries
 
 from tests.mcp_test_helpers import content_json, server_params
 
@@ -55,6 +56,27 @@ async def test_find_architecture_smells_reports_a_cycle(tmp_path: Path):
             cycle_findings = [f for f in result["findings"] if f["kind"] == "cycle"]
             assert len(cycle_findings) == 1
             assert set(cycle_findings[0]["services"]) == {"a-service", "b-service"}
+
+
+def test_find_architecture_smells_omits_trend_on_the_first_run_ever(tmp_path: Path):
+    db_path = tmp_path / "trend_first.db"
+    _build_fixture_db(db_path)  # runs recompute_architecture_view exactly once
+
+    result = queries.find_architecture_smells(open_db(db_path))
+
+    assert "trend" not in result
+
+
+def test_find_architecture_smells_reports_trend_after_a_second_run(tmp_path: Path):
+    db_path = tmp_path / "trend_second.db"
+    _build_fixture_db(db_path)
+    conn = open_db(db_path)
+    recompute_architecture_view(conn)  # nothing changed on disk, same cycle finding persists
+
+    result = queries.find_architecture_smells(conn)
+
+    assert "trend" in result
+    assert result["trend"] == {"new_findings": [], "resolved_findings": [], "count_deltas": []}
 
 
 @pytest.mark.anyio

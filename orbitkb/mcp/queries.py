@@ -17,6 +17,7 @@ from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation import change_surface
+from orbitkb.generation.architecture import diff_architecture_runs
 from orbitkb.generation.backend_base import LLMBackend
 from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.provenance import infer_provenance
@@ -316,7 +317,7 @@ def find_architecture_smells(conn: sqlite3.Connection) -> dict:
     if run_id is None:
         return {"findings": [], "run_id": None, "note": "no architecture run yet — index at least one service first"}
     findings = architecture_repo.list_findings(conn, run_id)
-    return {
+    response = {
         "run_id": run_id,
         "findings": [
             {
@@ -329,6 +330,13 @@ def find_architecture_smells(conn: sqlite3.Connection) -> dict:
             for f in findings
         ],
     }
+    previous_run_id = architecture_repo.previous_run_id(conn, run_id)
+    if previous_run_id is not None:
+        # Omitted entirely (not an empty/null trend) on the very first run ever —
+        # there's nothing honest to compare against yet, same "don't fabricate when
+        # there's nothing to say" convention as find_change_surface's own fields.
+        response["trend"] = diff_architecture_runs(conn, previous_run_id, run_id)
+    return response
 
 
 def find_change_surface(
