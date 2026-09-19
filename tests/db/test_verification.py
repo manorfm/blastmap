@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import change_surface as change_surface_repo
-from orbitkb.db.repositories import verification as verification_repo
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import change_surface as change_surface_repo
+from impactmesh.db.repositories import verification as verification_repo
 
 SAMPLE_RESULT = {
     "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9, "evidence": []}],

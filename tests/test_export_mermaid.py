@@ -1,13 +1,13 @@
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import apis as apis_repo
-from orbitkb.db.repositories import messages as messages_repo
-from orbitkb.db.repositories import persistence as persistence_repo
-from orbitkb.db.repositories import service_calls as service_calls_repo
-from orbitkb.db.repositories import services as services_repo
-from orbitkb.export.mermaid import export_mermaid, generate_er_diagram, generate_topology_diagram
-from orbitkb.generation.architecture import recompute_architecture_view
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import apis as apis_repo
+from impactmesh.db.repositories import messages as messages_repo
+from impactmesh.db.repositories import persistence as persistence_repo
+from impactmesh.db.repositories import service_calls as service_calls_repo
+from impactmesh.db.repositories import services as services_repo
+from impactmesh.export.mermaid import export_mermaid, generate_er_diagram, generate_topology_diagram
+from impactmesh.generation.architecture import recompute_architecture_view
 
 EVIDENCE = [{"file": "main.py", "start_line": 1, "end_line": 5}]
 

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import architecture as architecture_repo
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import architecture as architecture_repo
 
 
 def test_start_run_and_record_finding(tmp_path: Path):

@@ -4,7 +4,7 @@ derived on demand (never persisted), so it can never itself go stale."""
 import subprocess
 from pathlib import Path
 
-from orbitkb.generation.freshness import compute_freshness
+from impactmesh.generation.freshness import compute_freshness
 
 
 def _init_git_repo(root: Path) -> str:

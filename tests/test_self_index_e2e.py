@@ -1,17 +1,17 @@
-"""Self-indexing end-to-end suite: orbitkb indexes its own source tree through the
+"""Self-indexing end-to-end suite: impactmesh indexes its own source tree through the
 real CLI path (discover/bypass -> orchestrator -> SQLite -> MCP), the same one a
 real user runs — not a shortcut through internal functions. This is the project's
 own dogfooding check, and it doubles as proof that the `--stack` escape hatch (see
 cli.py, generation/orchestrator.py) genuinely fixes the documented discovery gap:
-orbitkb's own repo root has no main.py/app.py/wsgi.py (the Python heuristic's
+impactmesh's own repo root has no main.py/app.py/wsgi.py (the Python heuristic's
 entry-file signal for a web service — see discovery/python_stack.py's
-PythonDetector.matches), because orbitkb is a library/CLI/MCP server, not a web
+PythonDetector.matches), because impactmesh is a library/CLI/MCP server, not a web
 microservice, and `matches()` deliberately isn't broadened to cover this (see
 README's "Known limitations" — that would reduce detection precision for real
 targets).
 
 In the same database, this suite also indexes verify/sample_project — a second,
-independent `orbitkb index` call — making the "knowledge is cumulative across
+independent `impactmesh index` call — making the "knowledge is cumulative across
 independently-indexed roots" story concrete instead of only a README claim.
 
 Only the LLM backend is faked (deterministic, no real `claude`/`codex` CLI call,
@@ -23,25 +23,25 @@ from pathlib import Path
 
 import pytest
 
-from orbitkb import cli
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import indexed_files as indexed_files_repo
-from orbitkb.db.repositories import repositories as repositories_repo
-from orbitkb.db.repositories import services as services_repo
-from orbitkb.generation import change_surface
-from orbitkb.mcp import queries
+from impactmesh import cli
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import indexed_files as indexed_files_repo
+from impactmesh.db.repositories import repositories as repositories_repo
+from impactmesh.db.repositories import services as services_repo
+from impactmesh.generation import change_surface
+from impactmesh.mcp import queries
 
 from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SELF_ROOT = REPO_ROOT / "orbitkb"
+SELF_ROOT = REPO_ROOT / "impactmesh"
 
 
 @pytest.fixture
 def fake_backends(monkeypatch):
     """Patches cli.resolve_backend to hand out a fresh FakeOrchestratorBackend per
     call, while keeping a reference to each one so a test can inspect e.g. how many
-    LLM calls a specific `orbitkb index` invocation actually made."""
+    LLM calls a specific `impactmesh index` invocation actually made."""
     created: list[FakeOrchestratorBackend] = []
 
     def _factory(*args, **kwargs):
@@ -60,22 +60,22 @@ def _parse(argv: list[str]):
 def _index_self(db_path: Path, force: bool = False) -> int:
     return cli._cmd_index(_parse([
         "index", str(SELF_ROOT), "--db", str(db_path),
-        "--service", "orbitkb-core", "--stack", "python",
+        "--service", "impactmesh-core", "--stack", "python",
         *(["--force"] if force else []),
     ]))
 
 
-def test_indexing_orbitkbs_own_source_tree_through_the_real_cli_succeeds(tmp_path: Path, fake_backends):
+def test_indexing_impactmeshs_own_source_tree_through_the_real_cli_succeeds(tmp_path: Path, fake_backends):
     db_path = tmp_path / "self.db"
 
     exit_code = _index_self(db_path)
 
     assert exit_code == 0
     conn = open_db(db_path)
-    row = services_repo.get_service_by_name(conn, "orbitkb-core")
+    row = services_repo.get_service_by_name(conn, "impactmesh-core")
     assert row is not None
     assert row["short_desc"]  # FakeOrchestratorBackend's canned overview
-    # Dogfooding finding: orbitkb has no FastAPI/Flask/Django endpoints, no
+    # Dogfooding finding: impactmesh has no FastAPI/Flask/Django endpoints, no
     # SQLAlchemy/Django models and no queue calls (it's a CLI/library/MCP server,
     # not a web microservice), so PythonDetector's heuristics find zero "relevant"
     # files to hash-track here — only the always-generated overview unit runs, from
@@ -102,19 +102,19 @@ def test_describe_and_search_work_against_the_self_indexed_service(tmp_path: Pat
     _index_self(db_path)
 
     conn = open_db(db_path)
-    described = queries.describe_service(conn, "orbitkb-core")
-    assert described["name"] == "orbitkb-core"
+    described = queries.describe_service(conn, "impactmesh-core")
+    assert described["name"] == "impactmesh-core"
     assert described["short_desc"]
     assert "freshness" in described
 
 
 def test_knowledge_is_cumulative_across_two_independently_indexed_roots(tmp_path: Path, fake_backends):
-    """One database, two separate `orbitkb index` invocations — orbitkb's own
+    """One database, two separate `impactmesh index` invocations — impactmesh's own
     source and the project's own sample fixture — proving the "index one repo at a
     time, or a monorepo, into the same accumulating DB" story concretely instead of
     only in the README. find_architecture_smells and find_change_surface are then
     exercised against the combined, cumulative knowledge model, including
-    orbitkb's own architecture — the most direct proof the pipeline works end to
+    impactmesh's own architecture — the most direct proof the pipeline works end to
     end against real, non-trivial code."""
     db_path = tmp_path / "cumulative.db"
 
@@ -131,14 +131,14 @@ def test_knowledge_is_cumulative_across_two_independently_indexed_roots(tmp_path
     assert SELF_ROOT.name in repository_names  # default repository name: the indexed folder's own name
 
     services = {s["name"] for s in services_repo.list_services(conn)}
-    assert services == {"orbitkb-core", "orders-service", "payments-service", "inventory-service"}
+    assert services == {"impactmesh-core", "orders-service", "payments-service", "inventory-service"}
 
     smells = queries.find_architecture_smells(conn)
     assert smells["run_id"] is not None  # recomputed over the whole cumulative graph, not just one root
 
     result = change_surface.analyze_change_surface(
         conn, "Split the repository layer into smaller modules", FakeOrchestratorBackend(),
-        hint_services=["orbitkb-core"],
+        hint_services=["impactmesh-core"],
     )
     # hint_services anchors the search directly, since the fake overview text
     # won't keyword-match a specific engineering task the way a real LLM summary would.

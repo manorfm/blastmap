@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import apis as apis_repo
-from orbitkb.db.repositories import messages as messages_repo
-from orbitkb.db.repositories import persistence as persistence_repo
-from orbitkb.db.repositories import service_calls as service_calls_repo
-from orbitkb.db.repositories import services as services_repo
-from orbitkb.export.markdown import export_markdown
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import apis as apis_repo
+from impactmesh.db.repositories import messages as messages_repo
+from impactmesh.db.repositories import persistence as persistence_repo
+from impactmesh.db.repositories import service_calls as service_calls_repo
+from impactmesh.db.repositories import services as services_repo
+from impactmesh.export.markdown import export_markdown
 
 
 def _seed(conn):

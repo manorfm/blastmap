@@ -8,11 +8,11 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import apis as apis_repo
-from orbitkb.db.repositories import search as search_repo
-from orbitkb.db.repositories import service_calls as service_calls_repo
-from orbitkb.db.repositories import services as services_repo
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import apis as apis_repo
+from impactmesh.db.repositories import search as search_repo
+from impactmesh.db.repositories import service_calls as service_calls_repo
+from impactmesh.db.repositories import services as services_repo
 
 
 def build_catalog_fixture(db_path: Path) -> sqlite3.Connection:

@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from impactmesh.discovery.base import (
+    EndpointHint,
+    MessagingHint,
+    OutboundCallHint,
+    PersistenceHint,
+    ServiceHints,
+)
+from impactmesh.discovery.scan_helpers import (
+    ENDPOINT_AFTER,
+    ENDPOINT_BEFORE,
+    component_hint_for,
+    engine_hint_from_manifest,
+    excerpt_around,
+    find_matches,
+    resolve_local_calls,
+)
+
+_MANIFEST_FILES = ("pom.xml", "build.gradle", "build.gradle.kts")
+_ENGINE_DRIVER_KEYWORDS = {
+    "postgresql": "postgres",
+    "mysql-connector": "mysql",
+    "mongodb-driver": "mongodb",
+    "spring-boot-starter-data-mongodb": "mongodb",
+    "lettuce": "redis",
+    "jedis": "redis",
+    "spring-boot-starter-data-cassandra": "cassandra",
+    "cassandra-driver": "cassandra",
+    "datastax": "cassandra",
+}
+
+EXTENSIONS = (".java", ".kt")
+
+_MAPPING_RE = re.compile(
+    r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping|RequestMapping)"
+    r"\s*\(\s*(?:value\s*=\s*)?['\"]?([^'\")]*)['\"]?\s*\)?"
+)
+_REST_CONTROLLER_RE = re.compile(r"@RestController")
+
+_METHOD_BY_ANNOTATION = {
+    "GetMapping": "GET",
+    "PostMapping": "POST",
+    "PutMapping": "PUT",
+    "PatchMapping": "PATCH",
+    "DeleteMapping": "DELETE",
+    "RequestMapping": "REQUEST",
+}
+
+_OUTBOUND_RE = re.compile(r"\b(RestTemplate|WebClient)\b.*?\.(get|post|put|patch|delete|exchange)\s*\(", re.DOTALL)
+_FEIGN_CLIENT_RE = re.compile(r"@FeignClient\s*\(\s*(?:name\s*=\s*)?['\"]?([^'\")]*)['\"]?")
+_GRPC_STUB_RE = re.compile(r"(\w*Grpc\.\w*Stub)\s+\w+")
+_STREAM_SEND_RE = re.compile(r"\bStreamBridge\.\w*send\s*\(\s*['\"]?([^'\")]*)")
+
+_KAFKA_LISTENER_RE = re.compile(r"@KafkaListener\s*\(\s*(?:topics\s*=\s*)?['\"]?([^'\")]*)['\"]?")
+_KAFKA_SEND_RE = re.compile(r"\bKafkaTemplate\b.*?\.send\s*\(\s*['\"]?([^'\")]*)", re.DOTALL)
+_RABBIT_LISTENER_RE = re.compile(r"@RabbitListener\s*\(\s*(?:queues\s*=\s*)?['\"]?([^'\")]*)['\"]?")
+_RABBIT_SEND_RE = re.compile(r"\bRabbitTemplate\b.*?\.convertAndSend\s*\(\s*['\"]?([^'\")]*)", re.DOTALL)
+# JMS is a vendor-agnostic Java API (ActiveMQ, IBM MQ, Rabbit-via-JMS, ...) — the
+# concrete broker is only visible in a ConnectionFactory bean/application.properties,
+# never in the annotation/template call itself.
+_JMS_LISTENER_RE = re.compile(r"@JmsListener\s*\(\s*(?:destination\s*=\s*)?['\"]?([^'\")]*)['\"]?")
+_JMS_SEND_RE = re.compile(r"\bJmsTemplate\b.*?\.convertAndSend\s*\(\s*['\"]?([^'\")]*)", re.DOTALL)
+
+_JPA_ENTITY_RE = re.compile(r"@Entity\b.*?\bclass\s+(\w+)", re.DOTALL)
+_SPRING_DATA_REPO_RE = re.compile(r"interface\s+(\w+)\s+extends\s+\w*Repository")
+
+_CLASS_RE = re.compile(r"^\s*(?:public\s+|private\s+)?(?:class|interface)\s+(\w+)")
+
+
+def _def_pattern(name: str) -> re.Pattern[str]:
+    escaped = re.escape(name)
+    return re.compile(rf"^\s*fun\s+{escaped}\s*\(|^\s*[\w<>\[\],\s]+\s+{escaped}\s*\([^)]*\)\s*\{{", re.MULTILINE)
+
+
+def _endpoint_hint(method: str, path_value: str, file_path: Path, folder: Path, line_no: int) -> EndpointHint:
+    excerpt = excerpt_around(file_path, folder, line_no, before=ENDPOINT_BEFORE, after=ENDPOINT_AFTER)
+    component_hint = component_hint_for(file_path, line_no, _CLASS_RE)
+    extra_excerpts = resolve_local_calls(
+        file_path, folder, excerpt.text, _def_pattern, (excerpt.start_line, excerpt.end_line),
+    )
+    return EndpointHint(
+        method=method, path=path_value, component_hint=component_hint,
+        excerpt=excerpt, extra_excerpts=extra_excerpts,
+    )
+
+
+def _has_spring_boot_dependency(folder: Path) -> bool:
+    pom = folder / "pom.xml"
+    if pom.is_file() and "spring-boot" in pom.read_text(encoding="utf-8", errors="ignore"):
+        return True
+    for gradle_name in ("build.gradle", "build.gradle.kts"):
+        gradle = folder / gradle_name
+        if gradle.is_file() and "spring-boot" in gradle.read_text(encoding="utf-8", errors="ignore"):
+            return True
+    return False
+
+
+class JvmSpringDetector:
+    id = "jvm-spring"
+
+    def matches(self, folder: Path) -> bool:
+        has_build_file = (folder / "pom.xml").is_file() or (folder / "build.gradle").is_file() or (folder / "build.gradle.kts").is_file()
+        if not has_build_file:
+            return False
+        if _has_spring_boot_dependency(folder):
+            return True
+        src = folder / "src" / "main"
+        if src.is_dir():
+            for path, _line_no, _m in find_matches(src, EXTENSIONS, re.compile(r"@SpringBootApplication")):
+                return True
+        return False
+
+    def collect_hints(self, folder: Path) -> ServiceHints:
+        hints = ServiceHints()
+        engine_hint = engine_hint_from_manifest(folder, _MANIFEST_FILES, _ENGINE_DRIVER_KEYWORDS)
+        src = folder / "src" / "main"
+        scan_root = src if src.is_dir() else folder
+
+        entry_matches = find_matches(scan_root, EXTENSIONS, re.compile(r"@SpringBootApplication"))
+        if entry_matches:
+            path, line_no, _m = entry_matches[0]
+            hints.entry_excerpt = excerpt_around(path, folder, line_no, context=20)
+
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _MAPPING_RE):
+            annotation, route = match.group(1), match.group(2) or "/"
+            hints.endpoints.append(_endpoint_hint(_METHOD_BY_ANNOTATION[annotation], route, path, folder, line_no))
+
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _OUTBOUND_RE):
+            hints.outbound_calls.append(
+                OutboundCallHint(call_kind="http", target_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no))
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _FEIGN_CLIENT_RE):
+            hints.outbound_calls.append(
+                OutboundCallHint(call_kind="http", target_hint=match.group(1) or "?", excerpt=excerpt_around(path, folder, line_no))
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _GRPC_STUB_RE):
+            hints.outbound_calls.append(
+                OutboundCallHint(call_kind="grpc", target_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no))
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _STREAM_SEND_RE):
+            hints.messaging.append(
+                MessagingHint(
+                    direction="publishes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="abstracted",
+                )
+            )
+
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _KAFKA_LISTENER_RE):
+            hints.messaging.append(
+                MessagingHint(
+                    direction="consumes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="kafka",
+                )
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _KAFKA_SEND_RE):
+            hints.messaging.append(
+                MessagingHint(
+                    direction="publishes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="kafka",
+                )
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _RABBIT_LISTENER_RE):
+            hints.messaging.append(
+                MessagingHint(
+                    direction="consumes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="rabbitmq",
+                )
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _RABBIT_SEND_RE):
+            hints.messaging.append(
+                MessagingHint(
+                    direction="publishes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="rabbitmq",
+                )
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _JMS_LISTENER_RE):
+            hints.messaging.append(
+                MessagingHint(
+                    direction="consumes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="abstracted",
+                )
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _JMS_SEND_RE):
+            hints.messaging.append(
+                MessagingHint(
+                    direction="publishes", channel_hint=match.group(1) or "?",
+                    excerpt=excerpt_around(path, folder, line_no), provider_hint="abstracted",
+                )
+            )
+
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _JPA_ENTITY_RE):
+            hints.persistence.append(
+                PersistenceHint(
+                    kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no),
+                    engine_hint=engine_hint,
+                )
+            )
+        for path, line_no, match in find_matches(scan_root, EXTENSIONS, _SPRING_DATA_REPO_RE):
+            hints.persistence.append(
+                PersistenceHint(
+                    kind="sql_table", name_hint=match.group(1), excerpt=excerpt_around(path, folder, line_no),
+                    engine_hint=engine_hint,
+                )
+            )
+
+        return hints

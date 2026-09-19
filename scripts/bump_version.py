@@ -3,7 +3,7 @@
 
     python scripts/bump_version.py <major|minor|patch>
 
-Updates the version string in both pyproject.toml and orbitkb/__init__.py.
+Updates the version string in both pyproject.toml and impactmesh/__init__.py.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = REPO_ROOT / "pyproject.toml"
-INIT_FILE = REPO_ROOT / "orbitkb" / "__init__.py"
+INIT_FILE = REPO_ROOT / "impactmesh" / "__init__.py"
 
 _KINDS = ("major", "minor", "patch")
 

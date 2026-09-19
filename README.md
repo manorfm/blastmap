@@ -1,11 +1,11 @@
-# orbitkb
+# impactmesh
 
 <!-- BADGES:START -->
-[![PyPI](https://img.shields.io/pypi/v/orbitkb.svg)](https://pypi.org/project/orbitkb/)
-[![Python versions](https://img.shields.io/pypi/pyversions/orbitkb.svg)](https://pypi.org/project/orbitkb/)
-[![CI](https://github.com/manorfm/orbitkb/actions/workflows/ci.yml/badge.svg)](https://github.com/manorfm/orbitkb/actions/workflows/ci.yml)
-[![Security](https://github.com/manorfm/orbitkb/actions/workflows/security.yml/badge.svg)](https://github.com/manorfm/orbitkb/actions/workflows/security.yml)
-[![License](https://img.shields.io/pypi/l/orbitkb.svg)](https://pypi.org/project/orbitkb/)
+[![PyPI](https://img.shields.io/pypi/v/impactmesh.svg)](https://pypi.org/project/impactmesh/)
+[![Python versions](https://img.shields.io/pypi/pyversions/impactmesh.svg)](https://pypi.org/project/impactmesh/)
+[![CI](https://github.com/manorfm/impactmesh/actions/workflows/ci.yml/badge.svg)](https://github.com/manorfm/impactmesh/actions/workflows/ci.yml)
+[![Security](https://github.com/manorfm/impactmesh/actions/workflows/security.yml/badge.svg)](https://github.com/manorfm/impactmesh/actions/workflows/security.yml)
+[![License](https://img.shields.io/pypi/l/impactmesh.svg)](https://pypi.org/project/impactmesh/)
 <!-- BADGES:END -->
 
 Task-aware change intelligence for AI coding agents: given an engineering task, what
@@ -30,7 +30,7 @@ code — with evidence, confidence and freshness made explicit, instead of impli
 
 AI agents that need to understand a microservices system today only have two
 paths: read the entire source code (expensive in tokens, slow) or rely on manual
-documentation that goes stale. `orbitkb` "grinds" one or several code trees —
+documentation that goes stale. `impactmesh` "grinds" one or several code trees —
 repository by repository, or a whole monorepo at once, cumulatively into the same
 database — uses an LLM (Claude Code or Codex, via headless CLI, using your
 subscription instead of paid API) to synthesize lean, **semantic** documentation
@@ -96,26 +96,26 @@ calls just because they were in the same service) and a shallow overview
 
 From PyPI:
 ```bash
-pip install orbitkb
+pip install impactmesh
 # or, for an isolated CLI install:
-pipx install orbitkb
+pipx install impactmesh
 ```
 
 From source:
 ```bash
-git clone https://github.com/manorfm/orbitkb.git
-cd orbitkb
+git clone https://github.com/manorfm/impactmesh.git
+cd impactmesh
 pip install -e ".[dev]"
 ```
 
-Either way, `orbitkb` needs a headless LLM CLI on `PATH` to actually generate
+Either way, `impactmesh` needs a headless LLM CLI on `PATH` to actually generate
 anything: `claude` (Claude Code) or `codex` (OpenAI Codex CLI), authenticated
 with your normal subscription session — see `--backend` in "Basic usage" below.
 Commands that only read the already-indexed SQLite database (`list`, `status`,
 `export`, and every MCP tool except `find_change_surface`) don't need either
 CLI at all.
 
-Optional: `pip install orbitkb[semantic]` (or `pip install -e ".[dev,semantic]"`
+Optional: `pip install impactmesh[semantic]` (or `pip install -e ".[dev,semantic]"`
 from source) adds a local, CPU-only semantic-retrieval fallback for
 `find_change_surface` — see "Semantic retrieval fallback" below. It's never
 required; without it, retrieval stays exactly keyword-only (FTS5), same as
@@ -127,27 +127,27 @@ offline.
 
 ### MCP client (Claude Code, Codex, etc.)
 
-Register `orbitkb serve` as an MCP server. For Claude Code, add this to your
+Register `impactmesh serve` as an MCP server. For Claude Code, add this to your
 MCP client config (e.g. `~/.claude.json`'s `mcpServers`, or a project's
 `.mcp.json`):
 ```json
 {
   "mcpServers": {
-    "orbitkb": {
+    "impactmesh": {
       "type": "stdio",
-      "command": "orbitkb",
+      "command": "impactmesh",
       "args": ["serve", "--backend", "claude"]
     }
   }
 }
 ```
-If `orbitkb` isn't on `PATH` in the environment your MCP client launches from,
-use its absolute path instead — e.g. whatever `which orbitkb` prints, often
-`<your-venv>/bin/orbitkb` for a source/editable install.
+If `impactmesh` isn't on `PATH` in the environment your MCP client launches from,
+use its absolute path instead — e.g. whatever `which impactmesh` prints, often
+`<your-venv>/bin/impactmesh` for a source/editable install.
 
 ### Environment variables
 
-- `ORBITKB_BACKEND` — default backend (`claude` or `codex`) when `--backend`
+- `IMPACTMESH_BACKEND` — default backend (`claude` or `codex`) when `--backend`
   isn't passed explicitly. Defaults to `claude` when unset.
 - `ANTHROPIC_API_KEY` — only read when `--claude-bare` is passed (metered API
   billing instead of the Claude Code subscription session).
@@ -156,7 +156,7 @@ use its absolute path instead — e.g. whatever `which orbitkb` prints, often
 
 ### Database location
 
-Defaults to `~/.orbitkb/orbitkb.db`, shared across every command unless you
+Defaults to `~/.impactmesh/impactmesh.db`, shared across every command unless you
 pass `--db <path>` explicitly (every subcommand accepts it). One database can
 accumulate multiple repositories (see "Basic usage" below), so a single default
 location is usually what you want; pass `--db` to keep separate projects in
@@ -165,23 +165,23 @@ separate databases.
 ## Basic usage
 
 ```bash
-orbitkb index /path/to/repository --backend claude   # or --backend codex
-orbitkb index /another/repository --repository-name another-repo  # multiple repos in the same DB, cumulative
-orbitkb list
-orbitkb status [service]
-orbitkb export md --out docs/
-orbitkb export mermaid --out docs/   # topology diagram + one ER diagram per service
-orbitkb serve --backend claude   # MCP server (stdio); backend only used by find_change_surface
-orbitkb analyze "Add Pix support to checkout" --backend claude   # runs find_change_surface directly, no MCP session needed
-orbitkb verify <run_id> --repository <name> --since <commit>   # checks a prediction against the real git diff
+impactmesh index /path/to/repository --backend claude   # or --backend codex
+impactmesh index /another/repository --repository-name another-repo  # multiple repos in the same DB, cumulative
+impactmesh list
+impactmesh status [service]
+impactmesh export md --out docs/
+impactmesh export mermaid --out docs/   # topology diagram + one ER diagram per service
+impactmesh serve --backend claude   # MCP server (stdio); backend only used by find_change_surface
+impactmesh analyze "Add Pix support to checkout" --backend claude   # runs find_change_surface directly, no MCP session needed
+impactmesh verify <run_id> --repository <name> --since <commit>   # checks a prediction against the real git diff
 ```
 
-Every subcommand is self-explanatory via `--help` (e.g. `orbitkb index --help`),
-with a ready-to-copy example. `orbitkb --help` explains the whole flow: **index
+Every subcommand is self-explanatory via `--help` (e.g. `impactmesh index --help`),
+with a ready-to-copy example. `impactmesh --help` explains the whole flow: **index
 → ask → verify**.
 
 Knowledge is cumulative by nature: you can index one repository at a time
-(`orbitkb index <repo1>`, then `orbitkb index <repo2> --repository-name
+(`impactmesh index <repo1>`, then `impactmesh index <repo2> --repository-name
 <repo2>`, ...) as they become available, or point at a monorepo root all at once
 — the same SQLite database accumulates both cases without name collisions, and
 `find_change_surface`/`search` always see everything indexed so far, not just the
@@ -553,7 +553,7 @@ the agent) explaining why — without calling the LLM.
 
 `find_change_surface`/`search`'s primary retrieval is always FTS5 keyword
 matching — free, no model, same as before. When the optional `semantic` extra
-is installed (`pip install orbitkb[semantic]`, see "Installation"), a second
+is installed (`pip install impactmesh[semantic]`, see "Installation"), a second
 strategy is layered on top as a **fallback only**: if keyword retrieval finds
 zero candidates, a local, CPU-only embedding model
 (`generation/embeddings.FastEmbedBackend`, via the `fastembed` package — no
@@ -582,7 +582,7 @@ a minimum of 3 accumulated feedback entries, and as a light adjustment (30%) on
 top of the LLM's fresh guess, never replacing the judgment made from the current
 task's evidence.
 
-### Ground truth via git: `verify_change_surface` / `orbitkb verify`
+### Ground truth via git: `verify_change_surface` / `impactmesh verify`
 
 Instead of relying only on the agent remembering to report the outcome, you can
 check a past prediction against a repository's real `git diff` since a commit:
@@ -605,17 +605,17 @@ The MCP version is read-only (it doesn't record feedback on its own); the CLI
 has a `--record-feedback` flag that optionally records `confirmed`/`rejected`
 automatically from the result:
 ```bash
-orbitkb verify 1 --repository my-monorepo --since a1b2c3d --record-feedback
+impactmesh verify 1 --repository my-monorepo --since a1b2c3d --record-feedback
 ```
 Every verification is saved (`change_surface_verifications`) and shows up in
-`orbitkb status`. It's intentionally scoped to **one repository at a time** —
+`impactmesh status`. It's intentionally scoped to **one repository at a time** —
 comparing several unrelated git histories under a single `--since` wouldn't make
 sense; in a cumulative multi-repository setup, you run one `verify` per
 repository, the same way indexing is also done one repository at a time.
 
 ## Token/cost accounting
 
-Every `index_runs` row (one per `orbitkb index`/`update` invocation) and every
+Every `index_runs` row (one per `impactmesh index`/`update` invocation) and every
 `change_surface_runs` row (one per `find_change_surface`/`analyze` call) carries
 best-effort `input_tokens`, `output_tokens` and `cost_usd`, read from whatever
 the `claude`/`codex` CLI's own JSON output reports for that call
@@ -626,11 +626,11 @@ added, so extraction is defensive (`payload.get(...)`) and every field stays
 honestly `None` instead of raising or guessing when the CLI doesn't carry it —
 same posture as `persistence_entities.engine = "unknown"`.
 
-`orbitkb index`/`update` print each service's `cost_usd` on completion;
-`orbitkb status` prints tokens/cost per recent run plus a cumulative total
-(service-scoped with `orbitkb status <service>`, whole-DB otherwise):
+`impactmesh index`/`update` print each service's `cost_usd` on completion;
+`impactmesh status` prints tokens/cost per recent run plus a cumulative total
+(service-scoped with `impactmesh status <service>`, whole-DB otherwise):
 ```
-$ orbitkb status orders-service
+$ impactmesh status orders-service
 service: orders-service (python) — /path/to/orders-service
 last_commit: a1b2c3d
 indexed files: 4
@@ -643,7 +643,7 @@ what one call cost.
 
 ## Diagrams (Mermaid)
 
-`orbitkb export mermaid --out docs/` generates:
+`impactmesh export mermaid --out docs/` generates:
 - **`topology.mmd`** — a `graph TD` of the whole system: every indexed service is
   a node, every external vendor reached is a rounded node, edges from
   `service_calls` and `MESSAGE_LINK` connect everything. Services involved in a
@@ -705,7 +705,7 @@ generated 100% from SQLite, with no LLM cost.
 - **Token/cost accounting** (`generation/backend_base.LLMUsage`,
   best-effort, honestly `None` when unavailable — see "Token/cost accounting"
   above): summed per `index`/`update` run and per `find_change_surface`/`analyze`
-  call, surfaced via `orbitkb status` and `run_cost_usd`.
+  call, surfaced via `impactmesh status` and `run_cost_usd`.
 - **Bounded, paginated MCP list responses** (`describe_service`, `list_apis`,
   `describe_persistence`, `describe_messages` — see "Pagination" above): a real
   service's endpoint/entity/message count no longer determines the response
@@ -714,17 +714,17 @@ generated 100% from SQLite, with no LLM cost.
   `generation/retrieval.SemanticRetrieval`/`FallbackRetrieval` — see "Semantic
   retrieval fallback" above), and **`similar_past_tasks` historical
   precedent** in `find_change_surface`, reusing the same embedding
-  infrastructure — both opt-in via `pip install orbitkb[semantic]`, both
+  infrastructure — both opt-in via `pip install impactmesh[semantic]`, both
   degrade to today's exact behavior (empty/absent, never an error) when not
   installed.
 - **Architecture-smells trend** (`generation/architecture.diff_architecture_runs`,
   `find_architecture_smells`'s `trend` field — see above): new/resolved
   findings and fan-in/fan-out count deltas between the two most recent runs,
   pure SQL/in-memory diff, no LLM, no re-detection.
-- **Explicit self-indexing via `--stack`** (`orbitkb index . --service <name>
+- **Explicit self-indexing via `--stack`** (`impactmesh index . --service <name>
   --stack <node-ts|python|jvm-spring|go>`, `discovery/registry.detector_by_id`):
   bypasses `discover_services()`/`matches()` entirely for a folder shape no
-  heuristic recognizes (a library/CLI package, exactly `orbitkb`'s own shape),
+  heuristic recognizes (a library/CLI package, exactly `impactmesh`'s own shape),
   without weakening detection precision for the default heuristic path. This
   is what `tests/test_self_index_e2e.py` now drives through the real CLI, and
   what also proves cumulative multi-repository indexing end to end in the same
@@ -764,7 +764,7 @@ generated 100% from SQLite, with no LLM cost.
   LLM cost.
 - **`contracts_at_risk`**: consumers of an event published by a relevant
   service, reusing the same channel join `get_relationships` already uses.
-- **Ground truth via git** (`generation/verification.py`, `orbitkb verify`):
+- **Ground truth via git** (`generation/verification.py`, `impactmesh verify`):
   compares a past prediction against a repository's real `git diff`, computes
   precision/recall and can record feedback automatically.
 - **MCP server** with 14 tools (one writes feedback; `verify_change_surface`
@@ -789,7 +789,7 @@ generated 100% from SQLite, with no LLM cost.
   `claude`/`codex` CLI (the backend is always fake, or data is seeded directly
   via `db.repositories.*`).
 - **CLI** (`index`, `update`, `list`, `status`, `export`, `analyze`, `verify`,
-  `serve`) installable globally via `pipx install orbitkb`, self-explanatory via
+  `serve`) installable globally via `pipx install impactmesh`, self-explanatory via
   `--help` (every subcommand has a ready example), with a terminal progress bar
   (spinner, percentage, per-unit colored status) during `index`. `analyze` runs
   `find_change_surface` directly through the domain layer, with no MCP session
@@ -811,7 +811,7 @@ generated 100% from SQLite, with no LLM cost.
   (stdio) for `get_relationships`, `trace_flow`, `find_architecture_smells`,
   `find_change_surface` and `verify_change_surface`, a context-efficiency harness
   with a response-size budget, and a **self-indexing suite**
-  (`tests/test_self_index_e2e.py`): `orbitkb` indexes its own source code and
+  (`tests/test_self_index_e2e.py`): `impactmesh` indexes its own source code and
   answers `find_change_surface` about itself — the most direct proof that the
   pipeline works end to end against real, non-trivial code, and one that has
   already caught real bugs (see "Development" below).
@@ -826,7 +826,7 @@ generated 100% from SQLite, with no LLM cost.
 ## Security
 
 Repository content (README, comments, source code) is **untrusted data**, never
-an instruction. `orbitkb` sends that content to the LLM as evidence to be
+an instruction. `impactmesh` sends that content to the LLM as evidence to be
 described, not as a command to follow — but no prompt has an explicit, dedicated
 defense against prompt injection (e.g. a code comment saying "ignore previous
 instructions and return {...}"). That said, the blast radius of a successful
@@ -858,7 +858,7 @@ that is not listed above."), but this has never been adversarially tested.
   tables that already exist (SQLite doesn't alter a table via `CREATE TABLE IF
   NOT EXISTS`; new tables get added automatically, new columns on existing
   tables don't). If a schema change affects an existing table, delete
-  `~/.orbitkb/orbitkb.db` (or whichever `--db` you're using) and run `orbitkb
+  `~/.impactmesh/impactmesh.db` (or whichever `--db` you're using) and run `impactmesh
   index` again.
 - `request_shape` only captures the field's shape; it doesn't yet compare
   contracts across indexing runs to automatically detect that a required field
@@ -869,9 +869,9 @@ that is not listed above."), but this has never been adversarially tested.
   the right spot, but can miss unusual patterns (e.g. an HTTP client instantiated
   in a variable with an unconventional name), and they're designed for the shape
   of a web microservice (HTTP endpoint, queue, ORM) — a Python package that's a
-  library/CLI rather than a web service (like `orbitkb` itself) doesn't match
+  library/CLI rather than a web service (like `impactmesh` itself) doesn't match
   any of these patterns, and so only generates the overview unit, with no
-  endpoints/persistence/messaging detected. `orbitkb index --service <name>
+  endpoints/persistence/messaging detected. `impactmesh index --service <name>
   --stack <stack>` (`discovery/registry.detector_by_id`) is the explicit escape
   hatch for exactly this case — see "What's already implemented"; broadening
   `matches()` itself to accept this shape automatically would reduce detection
@@ -882,7 +882,7 @@ that is not listed above."), but this has never been adversarially tested.
 - `find_change_surface`/`search`'s primary retrieval is FTS5 keyword matching: a
   task whose vocabulary doesn't appear in any indexed description/reason, and
   without `hint_services`, finds no candidates via that path alone. The optional
-  semantic fallback (`pip install orbitkb[semantic]`, see "Semantic retrieval
+  semantic fallback (`pip install impactmesh[semantic]`, see "Semantic retrieval
   fallback") closes most of this gap, but its similarity floor
   (`SemanticRetrieval.SIMILARITY_FLOOR`) is a starting constant, not a trained
   value, and it's still opt-in — without the extra installed, behavior is
@@ -894,7 +894,7 @@ that is not listed above."), but this has never been adversarially tested.
   surfaces historical precedent for a similarly-worded task as informational
   context, but it's read-only — it doesn't itself feed back into confidence
   recalibration, which remains exact-service-name-only.
-- `verify_change_surface`/`orbitkb verify` are scoped to one repository at a
+- `verify_change_surface`/`impactmesh verify` are scoped to one repository at a
   time — there's no notion of a "cumulative diff" across several unrelated
   repositories under a single reference commit.
 - The deterministic `target_kind`/`resource_type` heuristic
@@ -938,7 +938,7 @@ make verify           # test + lint + sast + sca + dast, fanned out in parallel
 make build            # sdist + wheel into dist/
 ```
 (every target is a thin wrapper — see the `Makefile` for the exact command it
-runs, e.g. `pytest tests/ --cov=orbitkb --cov-report=term-missing` for
+runs, e.g. `pytest tests/ --cov=impactmesh --cov-report=term-missing` for
 `coverage`.)
 
 CI (`.github/workflows/ci.yml`) runs exactly the deterministic test suite on
@@ -948,7 +948,7 @@ failure).
 
 `get_relationships`/`trace_flow`/`find_architecture_smells`/`find_change_surface`/
 `verify_change_surface` are exercised via a real MCP session (stdio), which
-spins up `orbitkb.mcp.server` in a **subprocess** — for coverage to see that
+spins up `impactmesh.mcp.server` in a **subprocess** — for coverage to see that
 subprocess (instead of reporting `mcp/server.py`/`mcp/queries.py` as 0% even
 though they're tested), you need a `coverage` hook in the venv's site-packages
 plus the `COVERAGE_PROCESS_START` variable:
@@ -961,31 +961,31 @@ python -m coverage combine && python -m coverage report -m
 The automated suite never calls a real LLM (fake/deterministic backends, DBs
 seeded directly via `db.repositories.*`) — including the self-indexing suite
 (`tests/test_self_index_e2e.py`), which drives real discovery against
-`orbitkb`'s own source code through the real CLI path (`cli._cmd_index`, with
+`impactmesh`'s own source code through the real CLI path (`cli._cmd_index`, with
 `--stack python` — see "What's already implemented") with a fake backend, and
 also indexes `verify/sample_project` into the same database to prove
 cumulative multi-repository indexing concretely. To validate the real pipeline
 end to end — discovery → real LLM generation → SQLite → MCP —, use the
 project's own fixture as a manual e2e test:
 ```bash
-orbitkb index verify/sample_project --backend claude --db verify/sample_project.db
+impactmesh index verify/sample_project --backend claude --db verify/sample_project.db
 pytest tests/test_mcp_tools.py   # skipped before this; runs for real against that DB
 ```
 This is also what populates `verify/sample_project.db` (gitignored, not
 versioned — each dev/CI generates its own).
 
-Self-indexing `orbitkb` itself with a **real** backend now works via the CLI
+Self-indexing `impactmesh` itself with a **real** backend now works via the CLI
 directly, using the same `--stack` escape hatch the automated suite exercises
 with a fake one:
 ```bash
-orbitkb index orbitkb --service orbitkb-core --stack python --backend claude --db verify/self_index.db
+impactmesh index impactmesh --service impactmesh-core --stack python --backend claude --db verify/self_index.db
 ```
 This is exactly the real validation done during development (back when this
 required calling `generation.orchestrator.index_service()` directly with an
 explicit detector, before `--stack` existed): the generated overview correctly
 described the project's own architecture (CLI/MCP, the 4 discovery stacks, the
 generation pipeline, the exports), and `find_change_surface("Add NATS support
-to Go-stack discovery")` pointed at `orbitkb-core` as `primary` with 0.9
+to Go-stack discovery")` pointed at `impactmesh-core` as `primary` with 0.9
 confidence and the right reason — the scanner itself is what would need to
 change.
 
@@ -1009,7 +1009,7 @@ it proves nothing about the system's judgment:
   all services indexed in that task's fixture, what fraction
   `KeywordGraphRetrieval` did **not** need to put forward as a candidate — the
   deterministic, non-circular half of "exploration reduction" (the other half —
-  comparing an agent's tool calls/tokens with and without real `orbitkb` — would
+  comparing an agent's tool calls/tokens with and without real `impactmesh` — would
   require simulating a "baseline agent", which would be fabricated and
   unverifiable, so it stays a manual methodology, not code). This number depends
   heavily on the size/connectivity of the indexed system: in this benchmark's
@@ -1027,12 +1027,12 @@ it proves nothing about the system's judgment:
 - **Real precision/recall (manual, doesn't run in CI)**: only a real LLM can
   answer whether `find_change_surface`'s *judgment* is actually right. After
   indexing `verify/sample_project` (or another real project) with a real
-  backend, run `orbitkb analyze "<task>" --backend claude --db
+  backend, run `impactmesh analyze "<task>" --backend claude --db
   verify/sample_project.db` for each task in `benchmark/tasks.py` (no need to
   spin up an MCP session) and compare `primary`/`secondary` against
   `expected_services` by hand — the same manual treatment
   `verify/sample_project.db`'s real e2e already gets.
-  `verify_change_surface`/`orbitkb verify` automates that comparison once a
+  `verify_change_surface`/`impactmesh verify` automates that comparison once a
   real "after" commit exists to compare against via `git diff`.
 
 As real engineering tasks happen on this project (or another one indexed by it),
@@ -1070,7 +1070,7 @@ Before the first tag push, configure Trusted Publishing on PyPI: on the
 project's page (or, before it exists yet, at
 https://pypi.org/manage/account/publishing/), add a pending publisher with:
 - Repository owner: `manorfm`
-- Repository name: `orbitkb`
+- Repository name: `impactmesh`
 - Workflow name: `publish.yml`
 - Environment name: `pypi`
 
@@ -1095,7 +1095,7 @@ Both forms run the same pipeline:
    (`scripts/versioning.py`, the same logic the `commit-msg` hook previews on
    every commit — see "What's already implemented" above);
    `release-patch|minor|major` use the forced kind instead.
-4. Bumps `pyproject.toml` + `orbitkb/__init__.py`
+4. Bumps `pyproject.toml` + `impactmesh/__init__.py`
    (`scripts/bump_version.py`), refreshes the README badges
    (`scripts/ensure_badges.py`), commits, tags `vX.Y.Z`, and pushes both the
    commit and the tag.
@@ -1110,10 +1110,10 @@ the release stops before touching git — see `scripts/preflight.sh` and the
 
 ## Quick reference
 
-**CLI** (`orbitkb <command> --help` for examples): `index`, `update`, `list`,
+**CLI** (`impactmesh <command> --help` for examples): `index`, `update`, `list`,
 `status`, `export` (`md`|`mermaid`), `analyze`, `verify`, `serve`, `--version`.
 
-**MCP** (`orbitkb serve`): `list_repositories`, `list_services`,
+**MCP** (`impactmesh serve`): `list_repositories`, `list_services`,
 `describe_service`, `list_apis`, `describe_api`, `describe_persistence`,
 `describe_messages`, `search`, `get_relationships`, `trace_flow`,
 `find_architecture_smells`, `find_change_surface`, `record_change_surface_feedback`,

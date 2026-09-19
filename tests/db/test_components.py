@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import components as components_repo
-from orbitkb.db.repositories import services as services_repo
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import components as components_repo
+from impactmesh.db.repositories import services as services_repo
 
 
 def test_upsert_component_inserts_a_new_row(tmp_path: Path):

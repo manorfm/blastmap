@@ -23,6 +23,6 @@ def server_params(db_path, *extra_args: str) -> StdioServerParameters:
         env["COVERAGE_PROCESS_START"] = os.environ["COVERAGE_PROCESS_START"]
     return StdioServerParameters(
         command=sys.executable,
-        args=["-m", "orbitkb.mcp.server", "--db", str(db_path), *extra_args],
+        args=["-m", "impactmesh.mcp.server", "--db", str(db_path), *extra_args],
         env=env,
     )

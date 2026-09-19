@@ -8,11 +8,11 @@ from pathlib import Path
 
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import apis as apis_repo
-from orbitkb.db.repositories import services as services_repo
-from orbitkb.generation import change_surface
-from orbitkb.mcp import queries
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import apis as apis_repo
+from impactmesh.db.repositories import services as services_repo
+from impactmesh.generation import change_surface
+from impactmesh.mcp import queries
 
 # Budget: find_change_surface's whole point is a small, progressive-disclosure
 # response an agent can act on without pulling in a service's full documentation —

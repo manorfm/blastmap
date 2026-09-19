@@ -3,11 +3,11 @@ computed into a small, ranked list of MCP tool calls worth making next — purel
 already-indexed data, no extra LLM call and no extra SQL beyond what's already read."""
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import apis as apis_repo
-from orbitkb.db.repositories import messages as messages_repo
-from orbitkb.db.repositories import services as services_repo
-from orbitkb.generation.next_queries import NextQueryRecommender
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import apis as apis_repo
+from impactmesh.db.repositories import messages as messages_repo
+from impactmesh.db.repositories import services as services_repo
+from impactmesh.generation.next_queries import NextQueryRecommender
 
 
 def _seed_service_with_api(conn, name: str) -> int:

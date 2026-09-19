@@ -7,8 +7,8 @@ and deterministic regardless of whether the `semantic` extra happens to be
 installed in a given environment."""
 import pytest
 
-import orbitkb.generation.embeddings as embeddings_module
-from orbitkb.generation.embeddings import FastEmbedBackend, cosine_similarity
+import impactmesh.generation.embeddings as embeddings_module
+from impactmesh.generation.embeddings import FastEmbedBackend, cosine_similarity
 
 
 def test_cosine_similarity_of_identical_vectors_is_one():

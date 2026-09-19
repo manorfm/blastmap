@@ -3,14 +3,14 @@ extracted out of generation/change_surface.py (Strategy pattern: a future retrie
 approach can implement CandidateRetrieval without touching change_surface.py)."""
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import apis as apis_repo
-from orbitkb.db.repositories import messages as messages_repo
-from orbitkb.db.repositories import search as search_repo
-from orbitkb.db.repositories import service_calls as service_calls_repo
-from orbitkb.db.repositories import services as services_repo
-from orbitkb.db.repositories import embeddings as embeddings_repo
-from orbitkb.generation.retrieval import FallbackRetrieval, KeywordGraphRetrieval, SemanticRetrieval
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import apis as apis_repo
+from impactmesh.db.repositories import messages as messages_repo
+from impactmesh.db.repositories import search as search_repo
+from impactmesh.db.repositories import service_calls as service_calls_repo
+from impactmesh.db.repositories import services as services_repo
+from impactmesh.db.repositories import embeddings as embeddings_repo
+from impactmesh.generation.retrieval import FallbackRetrieval, KeywordGraphRetrieval, SemanticRetrieval
 
 
 def _seed_db(db_path: Path):

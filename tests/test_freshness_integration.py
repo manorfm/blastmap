@@ -3,11 +3,11 @@
 import subprocess
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import search as search_repo
-from orbitkb.db.repositories import services as services_repo
-from orbitkb.generation import change_surface
-from orbitkb.mcp import queries
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import search as search_repo
+from impactmesh.db.repositories import services as services_repo
+from impactmesh.generation import change_surface
+from impactmesh.mcp import queries
 
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
 

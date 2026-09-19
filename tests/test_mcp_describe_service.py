@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import components as components_repo
-from orbitkb.db.repositories import services as services_repo
-from orbitkb.mcp import queries
+from impactmesh.db.connection import open_db
+from impactmesh.db.repositories import components as components_repo
+from impactmesh.db.repositories import services as services_repo
+from impactmesh.mcp import queries
 
 
 def test_describe_service_includes_its_components(tmp_path: Path):
