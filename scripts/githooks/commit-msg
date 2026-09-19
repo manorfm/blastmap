@@ -1,0 +1,8 @@
+#!/bin/sh
+# Installed via `make hooks` (git config core.hooksPath scripts/githooks).
+# Enforces Conventional Commits so `make release` can compute the next
+# version from commit history instead of a human picking patch/minor/major
+# by hand. See scripts/versioning.py for the type -> bump mapping.
+set -e
+repo_root=$(git rev-parse --show-toplevel)
+exec python3 "$repo_root/scripts/versioning.py" validate-message "$1"

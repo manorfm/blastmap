@@ -1,5 +1,13 @@
 # orbitkb
 
+<!-- BADGES:START -->
+[![PyPI](https://img.shields.io/pypi/v/orbitkb.svg)](https://pypi.org/project/orbitkb/)
+[![Python versions](https://img.shields.io/pypi/pyversions/orbitkb.svg)](https://pypi.org/project/orbitkb/)
+[![CI](https://github.com/manorfm/orbitkb/actions/workflows/ci.yml/badge.svg)](https://github.com/manorfm/orbitkb/actions/workflows/ci.yml)
+[![Security](https://github.com/manorfm/orbitkb/actions/workflows/security.yml/badge.svg)](https://github.com/manorfm/orbitkb/actions/workflows/security.yml)
+[![License](https://img.shields.io/pypi/l/orbitkb.svg)](https://pypi.org/project/orbitkb/)
+<!-- BADGES:END -->
+
 Task-aware change intelligence for AI coding agents: given an engineering task, what
 is the smallest architectural surface an agent needs to understand before touching
 code — with evidence, confidence and freshness made explicit, instead of implied.
@@ -798,10 +806,13 @@ generated 100% from SQLite, with no LLM cost.
   answers `find_change_surface` about itself — the most direct proof that the
   pipeline works end to end against real, non-trivial code, and one that has
   already caught real bugs (see "Development" below).
-- **Manual, deliberate versioning**: `python scripts/bump_version.py
-  <major|minor|patch>` updates `pyproject.toml` and `orbitkb/__init__.py`
-  together, as part of the release step — no commit hook trying to guess the
-  right bump.
+- **Conventional-commit versioning**: a `commit-msg` git hook
+  (`scripts/githooks/commit-msg`, installed by `make hooks`/`make dev`)
+  requires every commit subject to be `<type>[(scope)][!]: description` and
+  previews the bump it would trigger; `make release` computes the actual
+  major/minor/patch from commit history since the last tag
+  (`scripts/versioning.py`) — `make release-patch|minor|major` to force one
+  instead. See "CI/CD and releases" below.
 
 ## Security
 
@@ -905,13 +916,16 @@ that is not listed above."), but this has never been adversarially tested.
 ## Development
 
 ```bash
-make dev              # pip install -e ".[dev]"
+make dev              # pip install -e ".[dev]" + install git hooks
+make hooks            # install git hooks on their own (core.hooksPath=scripts/githooks)
 make test             # pytest tests/
 make coverage         # pytest with coverage report
 make lint             # ruff (unused imports/vars) + vulture (dead code)
 make sast             # bandit static security scan
 make sca              # pip-audit dependency vulnerability scan
 make security         # sast + sca
+make dast             # live MCP server adversarial-input test
+make verify           # test + lint + sast + sca + dast, fanned out in parallel
 make build            # sdist + wheel into dist/
 ```
 (every target is a thin wrapper — see the `Makefile` for the exact command it
@@ -1032,10 +1046,14 @@ Three GitHub Actions workflows, all in `.github/workflows/`:
   '1'='1` reached FTS5's parser as a bare, unquoted `OR` token and raised
   `sqlite3.OperationalError` instead of just matching nothing — fixed in
   `db/repositories/search.py`'s `_build_fts_query` by quoting every token).
-- **`publish.yml`** — on a `v*.*.*` tag push: reruns the tests, builds the
-  sdist/wheel, and publishes to PyPI via
+- **`publish.yml`** — on a `v*.*.*` tag push: `test`, `lint`, `sast`, `sca` and
+  `dast` fan out as independent jobs; a `gate` job fans back in on all five
+  (`needs: [test, lint, sast, sca, dast]`); `build` and `publish` only run if
+  `gate` does. Publish pushes to PyPI via
   [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC — no
-  long-lived token stored as a repo secret).
+  long-lived token stored as a repo secret). This is the *authoritative* gate —
+  a broken check here blocks PyPI no matter what a developer's local `make
+  verify` reported.
 
 ### One-time PyPI setup
 
@@ -1054,13 +1072,32 @@ its identity to PyPI at publish time.
 ### Cutting a release
 
 ```bash
-make release-patch   # or release-minor / release-major
-git push && git push origin v<the new version>
+make release          # bump computed from Conventional Commits since the last tag
+make release-patch    # or release-minor / release-major, to force one instead
 ```
-`make release-*` bumps the version (`scripts/bump_version.py`), commits
-`pyproject.toml` + `orbitkb/__init__.py`, and creates a local `vX.Y.Z` tag — it
-deliberately does **not** push. Review the diff, then push both the commit and
-the tag yourself; pushing the tag is what triggers `publish.yml`.
+Both forms run the same pipeline:
+
+1. **Fan-out/fan-in locally** (`make verify` → `scripts/preflight.sh`):
+   `test`, `lint`, `sast`, `sca`, `dast` run concurrently; any failure aborts
+   the release right here — nothing is bumped, committed, tagged or pushed.
+2. Refuses to continue unless you're on `main`, the working tree is clean, and
+   local `main` isn't behind `origin/main`.
+3. `make release` computes the bump from commit history since the last tag
+   (`scripts/versioning.py`, the same logic the `commit-msg` hook previews on
+   every commit — see "What's already implemented" above);
+   `release-patch|minor|major` use the forced kind instead.
+4. Bumps `pyproject.toml` + `orbitkb/__init__.py`
+   (`scripts/bump_version.py`), refreshes the README badges
+   (`scripts/ensure_badges.py`), commits, tags `vX.Y.Z`, and pushes both the
+   commit and the tag.
+5. Pushing the tag triggers `publish.yml`, which reruns the same five checks
+   in CI — the actual gate, since that's the only place holding the PyPI
+   Trusted Publishing credential — and only then builds and publishes.
+
+There's no "review the diff before pushing" step anymore: the fan-out/fan-in
+gate (local, then CI) is what stands in for that review. If any check is red,
+the release stops before touching git — see `scripts/preflight.sh` and the
+`gate` job in `publish.yml`.
 
 ## Quick reference
 
