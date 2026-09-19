@@ -10,10 +10,10 @@ TIMEOUT_SECONDS = 180
 
 
 class ClaudeBackend:
-    """Headless Claude Code CLI backend.
+    """Headless Claude CLI CLI backend.
 
     Uses the normal OAuth/subscription session by default (no --bare, no API key),
-    so generation cost counts against the user's existing Claude Code plan rather
+    so generation cost counts against the user's existing Claude CLI plan rather
     than metered API billing. Pass bare=True to opt into ANTHROPIC_API_KEY billing
     instead (useful for CI where no interactive login is available).
     """

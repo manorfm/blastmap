@@ -60,3 +60,55 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
         ("graphql", "MUTATION", "createOrder")
     ]
     assert any(edge.kind == "publishes" and edge.target == "channel.publish" for edge in result.edges)
+
+
+def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_path: Path):
+    source = tmp_path / "consumer.ts"
+    source.write_text(
+        '''channel.consume("orders.created", async (message) => {
+  await orderService.handle(message);
+});
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(entry.kind, entry.method, entry.name) for entry in result.entrypoints] == [
+        ("message", "CONSUME", "orders.created")
+    ]
+    assert any(edge.source == "message.consume:orders.created" and edge.target == "orderService.handle" for edge in result.edges)
+
+
+def test_kotlin_analyzer_exposes_rabbit_listener_and_its_handler_flow(tmp_path: Path):
+    source = tmp_path / "OrderListener.kt"
+    source.write_text(
+        '''class OrderListener {
+  @RabbitListener(queues = ["orders.created"])
+  fun consume(message: String) { orderService.handle(message) }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(entry.kind, entry.method, entry.name) for entry in result.entrypoints] == [
+        ("message", "CONSUME", "orders.created")
+    ]
+    assert any(edge.source == "OrderListener.consume" and edge.target == "orderService.handle" for edge in result.edges)
+
+
+def test_service_create_is_not_misclassified_as_direct_persistence(tmp_path: Path):
+    source = tmp_path / "resolvers.ts"
+    source.write_text(
+        '''export const resolvers = {
+  Mutation: { createOrder: (_, input, { service }) => service.create(input) }
+};
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert any(edge.kind == "invokes" and edge.target == "service.create" for edge in result.edges)

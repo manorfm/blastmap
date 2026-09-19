@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from impactmesh import cli
+from impactmesh.analysis.engine import StaticAnalysisEngine
 from impactmesh.db.connection import open_db
 from impactmesh.db.repositories import indexed_files as indexed_files_repo
 from impactmesh.db.repositories import repositories as repositories_repo
@@ -35,6 +36,15 @@ from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SELF_ROOT = REPO_ROOT / "impactmesh"
+
+
+def test_static_analysis_dogfoods_the_project_cli_entrypoint():
+    result = StaticAnalysisEngine().analyze(SELF_ROOT, "python")
+
+    entrypoint = next(entry for entry in result.entrypoints if entry.symbol == "cli.main")
+    assert entrypoint.kind == "cli"
+    assert entrypoint.evidence.file_path == "cli.py"
+    assert result.edges
 
 
 @pytest.fixture
@@ -75,6 +85,11 @@ def test_indexing_impactmeshs_own_source_tree_through_the_real_cli_succeeds(tmp_
     row = services_repo.get_service_by_name(conn, "impactmesh-core")
     assert row is not None
     assert row["short_desc"]  # FakeOrchestratorBackend's canned overview
+    entrypoints = queries.list_entrypoints(conn, "impactmesh-core")
+    assert any(entry["symbol"] == "cli.main" for entry in entrypoints["entrypoints"])
+    flow = queries.describe_entrypoint(conn, "impactmesh-core", "cli", "command", "cli")
+    assert flow["entrypoint"]["symbol"] == "cli.main"
+    assert flow["flow"]  # persisted through the real CLI -> index -> SQLite pipeline
     # Dogfooding finding: impactmesh has no FastAPI/Flask/Django endpoints, no
     # SQLAlchemy/Django models and no queue calls (it's a CLI/library/MCP server,
     # not a web microservice), so PythonDetector's heuristics find zero "relevant"

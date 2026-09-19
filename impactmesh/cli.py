@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import impactmesh
+from impactmesh.analysis.depth import DepthMode, resolve_depth_provider
 from impactmesh.cli_progress import RichProgressReporter
 from impactmesh.config import resolve_backend
 from impactmesh.db.connection import DEFAULT_DB_PATH, open_db
@@ -27,13 +28,16 @@ def _cmd_index(args: argparse.Namespace) -> int:
     backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
     embedding_backend = try_create_default_backend()
     try:
+        depth_provider = resolve_depth_provider(
+            DepthMode(args.depth_mode), args.depth_command, tuple(args.depth_arg), args.depth_tool,
+        )
         with RichProgressReporter() as progress:
             results = index_path(
                 conn, Path(args.path), backend, service_override=args.service, force=args.force,
                 progress=progress, repository_name=args.repository_name, embedding_backend=embedding_backend,
-                stack_override=args.stack,
+                stack_override=args.stack, depth_provider=depth_provider,
             )
-    except (DiscoveryError, GenerationError) as exc:
+    except (DiscoveryError, GenerationError, ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     for r in results:
@@ -66,11 +70,18 @@ def _cmd_update(args: argparse.Namespace) -> int:
         return 1
     backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
     embedding_backend = try_create_default_backend()
-    with RichProgressReporter() as progress:
-        result = index_service(
-            conn, args.service, root, detector, backend, force=args.force, progress=progress,
-            embedding_backend=embedding_backend,
+    try:
+        depth_provider = resolve_depth_provider(
+            DepthMode(args.depth_mode), args.depth_command, tuple(args.depth_arg), args.depth_tool,
         )
+        with RichProgressReporter() as progress:
+            result = index_service(
+                conn, args.service, root, detector, backend, force=args.force, progress=progress,
+                embedding_backend=embedding_backend, depth_provider=depth_provider,
+            )
+    except (ValueError, RuntimeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     print(
         f"{result.service_name}: status={result.status} files_changed={result.files_changed} "
         f"llm_calls={result.llm_calls} cost_usd={result.cost_usd}"
@@ -212,9 +223,18 @@ def build_parser() -> argparse.ArgumentParser:
     def add_backend_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--backend", choices=["claude", "codex"], default=None, help="LLM backend to shell out to headless (default: whichever CLI is on PATH)")
         p.add_argument("--model", default=None, help="Override the backend's default model")
-        p.add_argument("--claude-bare", action="store_true", help="Use ANTHROPIC_API_KEY billing instead of the Claude Code subscription session")
+        p.add_argument("--claude-bare", action="store_true", help="Use ANTHROPIC_API_KEY billing instead of the Claude CLI subscription session")
         p.add_argument("--codex-api-key", action="store_true", help="Use CODEX_API_KEY billing instead of the ChatGPT subscription session")
         p.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
+
+    def add_depth_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--depth-mode", choices=[mode.value for mode in DepthMode], default=DepthMode.OFF.value,
+            help="Flow depth: off (static analysis only), augment (optional MCP enrichment), or require.",
+        )
+        p.add_argument("--depth-command", default=None, help="External code-intelligence MCP executable for augment/require mode.")
+        p.add_argument("--depth-arg", action="append", default=[], help="One argument for --depth-command; repeat for multiple arguments.")
+        p.add_argument("--depth-tool", default="trace_entrypoint", help="MCP tool returning the documented bounded edge payload.")
 
     p_index = sub.add_parser(
         "index", help="Index a monorepo root or a single service repo",
@@ -239,6 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_index.add_argument("--repository-name", default=None, help="Explicit repository name; avoids collisions when indexing several repos into one shared DB")
     p_index.add_argument("--force", action="store_true", help="Regenerate everything, ignoring file-hash skip")
     add_backend_args(p_index)
+    add_depth_args(p_index)
     p_index.set_defaults(func=_cmd_index)
 
     p_update = sub.add_parser(
@@ -249,6 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("service", help="Exact name shown by `impactmesh list`")
     p_update.add_argument("--force", action="store_true", help="Regenerate everything, ignoring file-hash skip")
     add_backend_args(p_update)
+    add_depth_args(p_update)
     p_update.set_defaults(func=_cmd_update)
 
     p_list = sub.add_parser("list", help="List indexed services")
@@ -312,7 +334,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve = sub.add_parser(
         "serve", help="Run the MCP server (stdio)",
         epilog=(
-            "example (register with an MCP client, e.g. Claude Code/Codex):\n"
+            "example (register with an MCP client, e.g. Claude CLI/Codex):\n"
             "  impactmesh serve --backend claude\n"
             "  impactmesh serve --db ~/.impactmesh/impactmesh.db --backend codex\n"
         ),

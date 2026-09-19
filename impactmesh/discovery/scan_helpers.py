@@ -114,9 +114,17 @@ def component_hint_for(path: Path, line_no: int, class_pattern: re.Pattern[str] 
 
 _CONFIG_FILE_NAMES = (
     "application.properties", "application.yml", "application.yaml",
-    ".env", "docker-compose.yml", "docker-compose.yaml",
+    "docker-compose.yml", "docker-compose.yaml",
 )
 MAX_CONFIG_FILE_CHARS = 4_000
+_SECRET_CONFIG_LINE = re.compile(
+    r"(?im)^(?P<prefix>\s*[^#\n:=]*?(?:password|secret|token|api[_-]?key|credential|private[_-]?key)[^:=]*?\s*[:=]\s*)(?P<value>[^\n]*)$"
+)
+
+
+def _redact_config(text: str) -> str:
+    """Keep topology-bearing settings while never passing credential values to an LLM."""
+    return _SECRET_CONFIG_LINE.sub(r"\g<prefix>[REDACTED]", text)
 
 
 def collect_config_excerpts(folder: Path) -> list[CodeExcerpt]:
@@ -136,7 +144,7 @@ def collect_config_excerpts(folder: Path) -> list[CodeExcerpt]:
         text = read_text(path)
         if not text:
             continue
-        truncated = text[:MAX_CONFIG_FILE_CHARS]
+        truncated = _redact_config(text)[:MAX_CONFIG_FILE_CHARS]
         line_count = truncated.count("\n") + 1
         excerpts.append(CodeExcerpt(file_path=filename, start_line=1, end_line=line_count, text=truncated))
     return excerpts

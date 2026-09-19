@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from impactmesh.analysis.engine import StaticAnalysisEngine
+from impactmesh.analysis.depth import DepthProvider, NoopDepthProvider
 from impactmesh.db.repositories import apis as apis_repo
 from impactmesh.db.repositories import components as components_repo
 from impactmesh.db.repositories import embeddings as embeddings_repo
@@ -513,6 +514,7 @@ def index_service(
     progress: ProgressReporter | None = None,
     repository_id: int | None = None,
     embedding_backend: EmbeddingBackend | None = None,
+    depth_provider: DepthProvider | None = None,
 ) -> IndexResult:
     failures_root = failures_root or (Path.home() / ".impactmesh" / "failures")
     progress = progress or NullProgressReporter()
@@ -527,7 +529,9 @@ def index_service(
     existing = services_repo.get_service_by_name(conn, name)
     is_new = existing is None
     service_id = services_repo.ensure_service(conn, name, str(root), detector.id, repository_id=repository_id)
-    flows_repo.replace_analysis(conn, service_id, StaticAnalysisEngine().analyze(root, detector.id))
+    flows_repo.replace_analysis(
+        conn, service_id, StaticAnalysisEngine(depth_provider or NoopDepthProvider()).analyze(root, detector.id)
+    )
 
     old_hashes = indexed_files_repo.get_indexed_file_hashes(conn, service_id)
     relevant = hints.relevant_files()
@@ -614,6 +618,7 @@ def index_path(
     repository_name: str | None = None,
     embedding_backend: EmbeddingBackend | None = None,
     stack_override: str | None = None,
+    depth_provider: DepthProvider | None = None,
 ) -> list[IndexResult]:
     if stack_override is not None:
         # Explicit "I already know what this is" escape hatch (see `impactmesh index
@@ -647,7 +652,7 @@ def index_path(
     return [
         index_service(
             conn, c.name, c.path, c.detector, backend, force=force, progress=progress,
-            repository_id=repository_id, embedding_backend=embedding_backend,
+            repository_id=repository_id, embedding_backend=embedding_backend, depth_provider=depth_provider,
         )
         for c in candidates
     ]

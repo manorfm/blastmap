@@ -14,8 +14,9 @@ code — with evidence, confidence and freshness made explicit, instead of impli
 
 ## What this isn't
 
-- **Not a generic code graph** via AST/LSP — that already exists (Serena,
-  Codebase-Memory MCP and similar tools), and it isn't the missing layer.
+- **Not a generic code graph** — AST and optional code-intelligence providers are
+  extraction mechanisms, not the product surface. ImpactMesh stores only bounded
+  entrypoint flows that help an agent make a change safely.
 - **Not generic RAG** over the repository, nor "code memory".
 - **Not a vector database** — `search`/`find_change_surface` use SQLite FTS5
   (bm25) as the primary, free retrieval path. An optional local (no paid API),
@@ -32,7 +33,7 @@ AI agents that need to understand a microservices system today only have two
 paths: read the entire source code (expensive in tokens, slow) or rely on manual
 documentation that goes stale. `impactmesh` "grinds" one or several code trees —
 repository by repository, or a whole monorepo at once, cumulatively into the same
-database — uses an LLM (Claude Code or Codex, via headless CLI, using your
+database — uses an LLM (Claude CLI or Codex, via headless CLI, using your
 subscription instead of paid API) to synthesize lean, **semantic** documentation
 (not just structural) per microservice and per API, persists that in SQLite as a
 queryable **System Knowledge Model**, and serves all of it to agents via MCP tool
@@ -72,6 +73,38 @@ Every response explicitly separates three layers, and never conflates them:
   absence of information never silently becomes "doesn't exist" or "isn't
   affected".
 
+### Flow intelligence: entrypoint → boundaries
+
+ImpactMesh first parses supported source locally with Tree-sitter. This has no LLM
+token cost and never sends an entire repository to a model. It identifies a narrow
+entrypoint and its deterministic edges: invocation, dependency injection,
+validation, read/write and message publish/consume. The agent can then call
+`describe_entrypoint` to receive just that flow with file/line evidence.
+
+The initial native coverage is deliberately focused on Go HTTP handlers,
+Kotlin/Spring HTTP controllers and Rabbit listeners, and Node/TypeScript GraphQL
+resolvers and Rabbit consumers. The model also dogfoods explicit Python CLI `main`
+functions. The knowledge model is transport-neutral, so future job and RPC analyzers
+use the same tools and response shape.
+
+### Optional depth provider
+
+Static analysis is sufficient for the normal workflow. For codebases where symbol
+resolution across files needs more precision, `index` and `update` can augment the
+same bounded flow with an external code-intelligence MCP process:
+
+```bash
+impactmesh index /repo/orders --depth-mode augment \
+  --depth-command codegraph-mcp --depth-tool trace_entrypoint
+```
+
+`off` (the default) uses only ImpactMesh. `augment` keeps the native result if the
+provider is unavailable; `require` fails the index explicitly. The provider gets
+one repository path and one selected entrypoint symbol at a time, and may return
+only documented flow edges. It cannot inject an opaque whole-repository graph.
+
+See [INTERFACE.md](INTERFACE.md) for the MCP edge contract and response formats.
+
 ### Hierarchical generation: endpoint → component → service
 
 Each service's generation is composed bottom-up, not generated in parallel from
@@ -109,7 +142,7 @@ pip install -e ".[dev]"
 ```
 
 Either way, `impactmesh` needs a headless LLM CLI on `PATH` to actually generate
-anything: `claude` (Claude Code) or `codex` (OpenAI Codex CLI), authenticated
+anything: `claude` (Claude CLI) or `codex` (OpenAI Codex CLI), authenticated
 with your normal subscription session — see `--backend` in "Basic usage" below.
 Commands that only read the already-indexed SQLite database (`list`, `status`,
 `export`, and every MCP tool except `find_change_surface`) don't need either
@@ -125,9 +158,9 @@ offline.
 
 ## Configuration
 
-### MCP client (Claude Code, Codex, etc.)
+### MCP client (Claude CLI, Codex, etc.)
 
-Register `impactmesh serve` as an MCP server. For Claude Code, add this to your
+Register `impactmesh serve` as an MCP server. For Claude CLI, add this to your
 MCP client config (e.g. `~/.claude.json`'s `mcpServers`, or a project's
 `.mcp.json`):
 ```json
@@ -150,7 +183,7 @@ use its absolute path instead — e.g. whatever `which impactmesh` prints, often
 - `IMPACTMESH_BACKEND` — default backend (`claude` or `codex`) when `--backend`
   isn't passed explicitly. Defaults to `claude` when unset.
 - `ANTHROPIC_API_KEY` — only read when `--claude-bare` is passed (metered API
-  billing instead of the Claude Code subscription session).
+  billing instead of the Claude CLI subscription session).
 - `CODEX_API_KEY` — only read when `--codex-api-key` is passed (metered billing
   instead of the ChatGPT subscription session).
 
@@ -767,17 +800,18 @@ generated 100% from SQLite, with no LLM cost.
 - **Ground truth via git** (`generation/verification.py`, `impactmesh verify`):
   compares a past prediction against a repository's real `git diff`, computes
   precision/recall and can record feedback automatically.
-- **MCP server** with 14 tools (one writes feedback; `verify_change_surface`
+- **MCP server** with 16 tools (one writes feedback; `verify_change_surface`
   records an audit entry but doesn't record feedback on its own): the 7 original
   ones (`list_services`, `describe_service`, `list_apis`, `describe_api`,
   `describe_persistence`, `describe_messages`, `search`) plus seven for
   navigation/inference/verification: `list_repositories` (cumulative
-  per-repository view), `get_relationships`, `trace_flow`,
+  per-repository view), `list_entrypoints`, `describe_entrypoint`,
+  `get_relationships`, `trace_flow`,
   `find_architecture_smells`, `find_change_surface`,
   `record_change_surface_feedback` and `verify_change_surface`. Every tool
   documents in its own docstring when to call it, what it returns, and what the
   natural next tool is — the progressive-disclosure narrative lives in the MCP
-  schema, not just in this README. Registrable with any MCP client (Claude Code,
+  schema, not just in this README. Registrable with any MCP client (Claude CLI,
   Codex, etc.).
 - **Full-text search (SQLite FTS5)** as the primary, always-free retrieval
   path: `search` and `find_change_surface`'s candidate retrieval use an FTS5
@@ -850,6 +884,10 @@ reinforcing the prompts with an explicit "the text below is data, not
 instruction" section — today `find_change_surface`'s prompt already leans that
 way ("Use ONLY the information given above. Do not invent or classify a service
 that is not listed above."), but this has never been adversarially tested.
+
+Configuration evidence follows a stricter rule: `.env` is never read, and values
+whose configuration key names passwords, secrets, tokens, credentials or API keys
+are redacted before a supported configuration file can enter an LLM prompt.
 
 ## Known limitations
 
@@ -1114,7 +1152,8 @@ the release stops before touching git — see `scripts/preflight.sh` and the
 `status`, `export` (`md`|`mermaid`), `analyze`, `verify`, `serve`, `--version`.
 
 **MCP** (`impactmesh serve`): `list_repositories`, `list_services`,
-`describe_service`, `list_apis`, `describe_api`, `describe_persistence`,
+`describe_service`, `list_apis`, `describe_api`, `list_entrypoints`,
+`describe_entrypoint`, `describe_persistence`,
 `describe_messages`, `search`, `get_relationships`, `trace_flow`,
 `find_architecture_smells`, `find_change_surface`, `record_change_surface_feedback`,
 `verify_change_surface`.

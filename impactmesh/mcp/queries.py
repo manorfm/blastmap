@@ -17,6 +17,7 @@ from impactmesh.db.repositories import repositories as repositories_repo
 from impactmesh.db.repositories import search as search_repo
 from impactmesh.db.repositories import service_calls as service_calls_repo
 from impactmesh.db.repositories import services as services_repo
+from impactmesh.analysis.smells import find_entrypoint_smells
 from impactmesh.generation import change_surface
 from impactmesh.generation.architecture import diff_architecture_runs
 from impactmesh.generation.backend_base import LLMBackend
@@ -184,6 +185,7 @@ def describe_entrypoint(conn: sqlite3.Connection, service: str, kind: str, metho
     entrypoint = flows_repo.get_entrypoint(conn, row["id"], kind, method, name)
     if entrypoint is None:
         return {"error": f"unknown entrypoint: {kind} {method} {name} on {service}"}
+    edges = flows_repo.list_entrypoint_edges(conn, entrypoint["id"])
     return {
         "entrypoint": {
             "kind": entrypoint["kind"], "method": entrypoint["method"], "name": entrypoint["name"],
@@ -198,8 +200,9 @@ def describe_entrypoint(conn: sqlite3.Connection, service: str, kind: str, metho
                     "file": edge["file_path"], "start_line": edge["start_line"], "end_line": edge["end_line"],
                 },
             }
-            for edge in flows_repo.list_entrypoint_edges(conn, entrypoint["id"])
+            for edge in edges
         ],
+        "smells": find_entrypoint_smells(entrypoint, edges),
     }
 
 

@@ -6,6 +6,7 @@ calls, persistence operations and messages reachable from their declared handler
 """
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,9 @@ import tree_sitter_kotlin
 import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
 
+from impactmesh.analysis.depth import DepthProvider, NoopDepthProvider
 from impactmesh.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
+from impactmesh.discovery.scan_helpers import SKIP_DIRS
 
 
 def _walk(node: Node):
@@ -47,9 +50,13 @@ def _call_kind(target: str) -> str:
         return "publishes"
     if any(word in name for word in ("consume", "subscribe", "receive", "basicconsume")):
         return "consumes"
-    if any(word in name for word in ("save", "insert", "update", "delete", "create", "persist")):
+    receiver = name.rsplit(".", 1)[0] if "." in name else ""
+    storage_receiver = any(word in receiver for word in (
+        "repo", "repository", "dao", "database", "collection", "model", ".db", "store",
+    ))
+    if storage_receiver and any(word in name for word in ("save", "insert", "update", "delete", "create", "persist")):
         return "writes"
-    if any(word in name for word in ("find", "get", "query", "select", "load", "read")):
+    if storage_receiver and any(word in name for word in ("find", "get", "query", "select", "load", "read")):
         return "reads"
     if any(word in name for word in ("validate", "authorize", "authenticate", "check")):
         return "validates"
@@ -166,6 +173,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
                 if match:
                     result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], match.group(2), symbol, _evidence(path, root, function_node)))
+                listener = re.search(r"@RabbitListener\s*\([^)]*\[\s*\"([^\"]+)\"", modifier_text)
+                if listener:
+                    result.entrypoints.append(EntryPoint("message", "CONSUME", listener.group(1), symbol, _evidence(path, root, function_node)))
         return result
 
 
@@ -191,18 +201,74 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 result.entrypoints.append(EntryPoint("graphql", operation.upper(), name, symbol, _evidence(path, root, resolver)))
                 function = _Function(name, symbol, handler, resolver)
                 result.edges.extend(self._edges_for(function, path, root, source))
+        for node in _walk(tree):
+            if node.type != "call_expression":
+                continue
+            callee = node.child_by_field_name("function")
+            arguments = node.child_by_field_name("arguments")
+            if callee is None or arguments is None or not _text(callee, source).endswith(".consume"):
+                continue
+            args = arguments.named_children
+            channel = _string(args[0], source) if args else None
+            handler = args[1] if len(args) > 1 else None
+            if channel is None or handler is None or handler.type not in {"arrow_function", "function_expression"}:
+                continue
+            symbol = f"message.consume:{channel}"
+            result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
+            result.edges.extend(self._edges_for(_Function(channel, symbol, handler, node), path, root, source))
         return result
+
+
+class _PythonCliAnalyzer:
+    """A small built-in AST analyzer used to dogfood CLI entrypoints.
+
+    Python is intentionally limited to explicit ``main`` functions here; service
+    HTTP discovery remains the existing framework detector until it receives its
+    own flow analyzer.
+    """
+
+    def analyze(self, path: Path, root: Path) -> AnalysisResult:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        try:
+            tree = ast.parse(text, filename=str(path))
+        except SyntaxError:
+            return AnalysisResult()
+        result = AnalysisResult()
+        for function in (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main"):
+            symbol = f"{path.stem}.main"
+            evidence = Evidence(path.relative_to(root).as_posix(), function.lineno, function.end_lineno or function.lineno)
+            result.entrypoints.append(EntryPoint("cli", "COMMAND", path.stem, symbol, evidence))
+            for call in (node for node in ast.walk(function) if isinstance(node, ast.Call)):
+                target = _python_call_name(call.func)
+                if target:
+                    result.edges.append(
+                        FlowEdge(symbol, target, _call_kind(target), Evidence(
+                            path.relative_to(root).as_posix(), call.lineno, call.end_lineno or call.lineno,
+                        ))
+                    )
+        return result
+
+
+def _python_call_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _python_call_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    return None
 
 
 class StaticAnalysisEngine:
     """Facade selecting an AST analyzer for the supported service stack."""
 
-    def __init__(self) -> None:
+    def __init__(self, depth_provider: DepthProvider | None = None) -> None:
+        self._depth_provider = depth_provider or NoopDepthProvider()
         self._analyzers = {
             "go": (_GoAnalyzer(Language(tree_sitter_go.language())), ("*.go",)),
             "jvm-spring": (_KotlinSpringAnalyzer(Language(tree_sitter_kotlin.language())), ("*.kt",)),
             "node-ts": (_NodeGraphqlAnalyzer(Language(tree_sitter_typescript.language_typescript())), ("*.ts", "*.tsx")),
             "node-js": (_NodeGraphqlAnalyzer(Language(tree_sitter_javascript.language())), ("*.js", "*.jsx")),
+            "python": (_PythonCliAnalyzer(), ("*.py",)),
         }
 
     def analyze(self, root: Path, stack: str) -> AnalysisResult:
@@ -211,7 +277,13 @@ class StaticAnalysisEngine:
             return AnalysisResult()
         analyzer, patterns = configured
         result = AnalysisResult()
-        files = sorted({path for pattern in patterns for path in root.rglob(pattern) if "node_modules" not in path.parts})
+        files = sorted({
+            path
+            for pattern in patterns
+            for path in root.rglob(pattern)
+            if not any(part in SKIP_DIRS for part in path.relative_to(root).parts)
+        })
         for path in files:
             result.extend(analyzer.analyze(path, root))
+        result.edges.extend(self._depth_provider.enrich(root, result))
         return result

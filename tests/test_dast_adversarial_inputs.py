@@ -85,6 +85,7 @@ async def test_adversarial_service_names_never_crash_or_corrupt_the_database(tmp
                     ("list_apis", "service"),
                     ("describe_persistence", "service"),
                     ("describe_messages", "service"),
+                    ("list_entrypoints", "service"),
                     ("get_relationships", "service"),
                 ):
                     result = await session.call_tool(tool, {arg_name: payload})
@@ -116,6 +117,10 @@ async def test_adversarial_describe_api_inputs_never_crash(tmp_path: Path):
                 )
                 body = content_json(result)
                 assert "error" in body
+                result = await session.call_tool(
+                    "describe_entrypoint", {"service": payload, "kind": payload, "method": payload, "name": payload}
+                )
+                assert "error" in content_json(result)
 
 
 @pytest.mark.anyio
@@ -150,7 +155,7 @@ async def test_adversarial_pagination_params_never_crash(tmp_path: Path):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
-            for tool in ("describe_service", "list_apis", "describe_persistence", "describe_messages"):
+            for tool in ("describe_service", "list_apis", "list_entrypoints", "describe_persistence", "describe_messages"):
                 for value in PAGINATION_PAYLOADS:
                     for arg_name in ("limit", "offset"):
                         result = await session.call_tool(tool, {"service": "orders-service", arg_name: value})
