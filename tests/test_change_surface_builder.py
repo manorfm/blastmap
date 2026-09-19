@@ -18,6 +18,7 @@ def test_build_emits_empty_lists_by_default():
         "freshness": {},
         "unknowns": [],
         "recommended_next_queries": [],
+        "similar_past_tasks": [],
     }
 
 
@@ -52,6 +53,7 @@ def test_builder_methods_are_chainable():
         .with_unmapped_internal_hint([{"service": "fraud-service"}])
         .with_persistence_affected([{"service": "a", "entity": "orders", "kind": "sql_table"}])
         .with_freshness({"a": {"stale": False}})
+        .with_similar_past_tasks([{"run_id": 1, "task": "t", "similarity": 0.9, "primary_services": ["a"], "outcome": "no feedback yet"}])
         .build()
     )
 
@@ -60,3 +62,4 @@ def test_builder_methods_are_chainable():
     assert result["unmapped_internal_hint"] == [{"service": "fraud-service"}]
     assert result["persistence_affected"] == [{"service": "a", "entity": "orders", "kind": "sql_table"}]
     assert result["freshness"] == {"a": {"stale": False}}
+    assert result["similar_past_tasks"][0]["run_id"] == 1

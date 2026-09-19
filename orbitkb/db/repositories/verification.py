@@ -44,3 +44,9 @@ def latest_verifications(conn: sqlite3.Connection, limit: int = 10) -> list[sqli
     return conn.execute(
         "SELECT * FROM change_surface_verifications ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()
+
+
+def list_verifications_for_run(conn: sqlite3.Connection, run_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM change_surface_verifications WHERE run_id = ? ORDER BY id DESC", (run_id,)
+    ).fetchall()

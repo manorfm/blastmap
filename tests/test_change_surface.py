@@ -156,9 +156,91 @@ def test_default_retrieval_uses_semantic_fallback_when_available(tmp_path: Path,
 
     result = change_surface.analyze_change_surface(conn, "xyz totally unrelated", backend)
 
-    assert embedding_backend.calls == 1
+    # Once for the fallback retrieval itself, once more to embed+store this run's own
+    # task text for future historical-precedent lookups (see similar_past_tasks below).
+    assert embedding_backend.calls == 2
     assert backend.calls == 1  # keyword retrieval found nothing, semantic fallback did, so the LLM ran
     assert result["primary"][0]["service"] == "notification-service"
+
+
+def test_similar_past_tasks_is_empty_when_no_embedding_backend_available(tmp_path: Path, monkeypatch):
+    conn = _build_pix_fixture(tmp_path / "similar_none.db")
+    monkeypatch.setattr(change_surface.embeddings, "try_create_default_backend", lambda: None)
+    backend = FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "r", "confidence": 0.9}], "secondary": [], "no_change": [],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
+
+    assert result["similar_past_tasks"] == []
+
+
+def test_similar_past_tasks_surfaces_a_prior_run_with_its_verified_outcome(tmp_path: Path, monkeypatch):
+    conn = _build_pix_fixture(tmp_path / "similar1.db")
+    vectors = {
+        "Add support for Pix in checkout": [1.0, 0.0],
+        "Add another payment method to checkout": [0.99, 0.01],
+    }
+    embedding_backend = FakeEmbeddingBackend(vectors)
+    monkeypatch.setattr(change_surface.embeddings, "try_create_default_backend", lambda: embedding_backend)
+
+    first = change_surface.analyze_change_surface(
+        conn, "Add support for Pix in checkout",
+        FakeBackend({
+            "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+            "secondary": [], "no_change": [],
+        }),
+    )
+    from orbitkb.db.repositories import verification as verification_repo
+
+    verification_repo.record_verification(
+        conn, first["run_id"], repository="checkout-repo", since_commit="c1",
+        precision=1.0, recall=1.0, true_positives=["checkout-service"], false_positives=[], false_negatives=[],
+    )
+
+    second = change_surface.analyze_change_surface(
+        conn, "Add another payment method to checkout",
+        FakeBackend({
+            "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.8}],
+            "secondary": [], "no_change": [],
+        }),
+    )
+
+    assert len(second["similar_past_tasks"]) == 1
+    similar = second["similar_past_tasks"][0]
+    assert similar["run_id"] == first["run_id"]
+    assert similar["task"] == "Add support for Pix in checkout"
+    assert similar["primary_services"] == ["checkout-service"]
+    assert "precision=1.0" in similar["outcome"]
+    # the FIRST run must not see itself (nothing existed to compare against yet)
+    assert first["similar_past_tasks"] == []
+
+
+def test_similar_past_tasks_reports_no_feedback_yet_when_nothing_recorded(tmp_path: Path, monkeypatch):
+    conn = _build_pix_fixture(tmp_path / "similar2.db")
+    vectors = {
+        "Add support for Pix in checkout": [1.0, 0.0],
+        "Add another payment method to checkout": [0.99, 0.01],
+    }
+    embedding_backend = FakeEmbeddingBackend(vectors)
+    monkeypatch.setattr(change_surface.embeddings, "try_create_default_backend", lambda: embedding_backend)
+    change_surface.analyze_change_surface(
+        conn, "Add support for Pix in checkout",
+        FakeBackend({
+            "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+            "secondary": [], "no_change": [],
+        }),
+    )
+
+    second = change_surface.analyze_change_surface(
+        conn, "Add another payment method to checkout",
+        FakeBackend({
+            "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.8}],
+            "secondary": [], "no_change": [],
+        }),
+    )
+
+    assert second["similar_past_tasks"][0]["outcome"] == "no feedback yet"
 
 
 def test_hallucinated_service_is_filtered_and_evidence_confidence_attached(tmp_path: Path):

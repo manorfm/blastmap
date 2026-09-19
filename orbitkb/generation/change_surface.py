@@ -17,12 +17,15 @@ from pathlib import Path
 
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
+from orbitkb.db.repositories import embeddings as embeddings_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
+from orbitkb.db.repositories import verification as verification_repo
 from orbitkb.generation import embeddings
 from orbitkb.generation.backend_base import LLMBackend
+from orbitkb.generation.embeddings import EmbeddingBackend, cosine_similarity
 from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 from orbitkb.generation.next_queries import NextQueryRecommender
@@ -51,6 +54,7 @@ class ChangeSurfaceBuilder:
     freshness: dict[str, dict] = field(default_factory=dict)
     unknowns: list[dict] = field(default_factory=list)
     recommended_next_queries: list[dict] = field(default_factory=list)
+    similar_past_tasks: list[dict] = field(default_factory=list)
     note: str | None = None
 
     def with_findings(self, primary: list[dict], secondary: list[dict], no_change_hint: list[dict]) -> "ChangeSurfaceBuilder":
@@ -91,6 +95,10 @@ class ChangeSurfaceBuilder:
         self.recommended_next_queries = items
         return self
 
+    def with_similar_past_tasks(self, items: list[dict]) -> "ChangeSurfaceBuilder":
+        self.similar_past_tasks = items
+        return self
+
     def with_note(self, note: str) -> "ChangeSurfaceBuilder":
         self.note = note
         return self
@@ -108,6 +116,7 @@ class ChangeSurfaceBuilder:
             "freshness": self.freshness,
             "unknowns": self.unknowns,
             "recommended_next_queries": self.recommended_next_queries,
+            "similar_past_tasks": self.similar_past_tasks,
         }
         if self.note is not None:
             result["note"] = self.note
@@ -330,16 +339,63 @@ def _derive_unknowns_from_unmapped(unmapped_internal_hint: list[dict]) -> list[d
     ]
 
 
-def _default_retrieval() -> CandidateRetrieval:
+def _default_retrieval(embedding_backend: EmbeddingBackend | None) -> CandidateRetrieval:
     """Keyword retrieval is always free and stays the primary strategy; semantic
     retrieval (local embeddings, see generation/embeddings.py) is only added as a
     FallbackRetrieval secondary when the optional `semantic` extra is installed —
     a query whose vocabulary already matches something indexed never pays the extra
     encode cost."""
-    semantic_backend = embeddings.try_create_default_backend()
-    if semantic_backend is None:
+    if embedding_backend is None:
         return KeywordGraphRetrieval()
-    return FallbackRetrieval(KeywordGraphRetrieval(), SemanticRetrieval(semantic_backend))
+    return FallbackRetrieval(KeywordGraphRetrieval(), SemanticRetrieval(embedding_backend))
+
+
+def _describe_outcome(conn: sqlite3.Connection, run_id: int) -> str:
+    """Honest summary of what happened after a past run, in priority order: a real
+    git-verified precision/recall (verify_change_surface) beats self-reported
+    feedback (record_change_surface_feedback), which beats nothing at all — never
+    fabricated when there's genuinely no signal yet."""
+    verifications = verification_repo.list_verifications_for_run(conn, run_id)
+    if verifications:
+        latest = verifications[0]
+        return f"verified precision={latest['precision']} recall={latest['recall']}"
+    feedback = change_surface_repo.list_feedback_for_run(conn, run_id)
+    if feedback:
+        confirmed = sum(1 for f in feedback if f["outcome"] == "confirmed")
+        rejected = sum(1 for f in feedback if f["outcome"] == "rejected")
+        return f"feedback: {confirmed} confirmed, {rejected} rejected"
+    return "no feedback yet"
+
+
+def _find_similar_past_tasks(conn: sqlite3.Connection, task_vector: list[float], top_k: int = 3) -> list[dict]:
+    """Historical precedent: past find_change_surface runs ranked by cosine
+    similarity of their task text to this one, each restated with what it predicted
+    and — when known — what actually happened (see _describe_outcome). Zero extra
+    LLM cost: reuses the same local embedding already computed for this run. Called
+    before this run's own embedding is inserted, so there's nothing to exclude.
+    """
+    rows = embeddings_repo.get_all_change_surface_run_embeddings(conn)
+    scored = sorted(
+        ((cosine_similarity(task_vector, json.loads(row["vector_json"])), row["run_id"]) for row in rows),
+        key=lambda item: item[0], reverse=True,
+    )
+    results = []
+    for score, run_id in scored[:top_k]:
+        run = change_surface_repo.get_change_surface_run(conn, run_id)
+        if run is None:
+            continue
+        findings = change_surface_repo.list_change_surface_findings(conn, run_id)
+        primary_services = [f["service"] for f in findings if f["role"] == "primary"]
+        results.append(
+            {
+                "run_id": run_id,
+                "task": run["task_text"],
+                "similarity": round(score, 4),
+                "primary_services": primary_services,
+                "outcome": _describe_outcome(conn, run_id),
+            }
+        )
+    return results
 
 
 def analyze_change_surface(
@@ -350,7 +406,8 @@ def analyze_change_surface(
     max_candidates: int = MAX_CANDIDATES,
     retrieval: CandidateRetrieval | None = None,
 ) -> dict:
-    retrieval = retrieval or _default_retrieval()
+    embedding_backend = embeddings.try_create_default_backend()
+    retrieval = retrieval or _default_retrieval(embedding_backend)
     candidates = retrieval.candidates(conn, task, hint_services, max_candidates)
     if not candidates:
         note = "no indexed service matched this task; pass hint_services or index more of the system"
@@ -380,6 +437,13 @@ def analyze_change_surface(
     next_queries = NextQueryRecommender().recommend(conn, primary_names, secondary_names, unmapped_internal_hint)
     freshness = _compute_freshness_for(conn, relevant)
     unknowns = _derive_unknowns_from_unmapped(unmapped_internal_hint) + _derive_stale_unknowns(freshness)
+
+    # Computed once here (not inside the Builder) so the SAME vector is both looked
+    # up against past runs and, further below, persisted as this run's own — never
+    # re-embedded twice for two different purposes.
+    task_vector = embedding_backend.embed([task])[0] if embedding_backend is not None else None
+    similar_past_tasks = _find_similar_past_tasks(conn, task_vector) if task_vector is not None else []
+
     response = (
         ChangeSurfaceBuilder()
         .with_findings(primary, secondary, no_change)
@@ -391,6 +455,7 @@ def analyze_change_surface(
         .with_freshness(freshness)
         .with_unknowns(unknowns)
         .with_recommended_next_queries(next_queries)
+        .with_similar_past_tasks(similar_past_tasks)
         .build()
     )
     response["run_id"] = change_surface_repo.record_change_surface_run(
@@ -400,4 +465,8 @@ def analyze_change_surface(
         cost_usd=generation.usage.cost_usd,
     )
     response["run_cost_usd"] = generation.usage.cost_usd
+    if task_vector is not None:
+        embeddings_repo.upsert_change_surface_run_embedding(
+            conn, response["run_id"], embedding_backend.model_name, task_vector
+        )
     return response

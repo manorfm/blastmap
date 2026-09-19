@@ -191,7 +191,14 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         The response includes a run_id — pass it to record_change_surface_feedback once
         you know whether the findings were actually right, to improve future confidence
         for this service. run_cost_usd reports this call's own LLM cost when the
-        backend's CLI exposed it, and null (never fabricated as 0) when it didn't."""
+        backend's CLI exposed it, and null (never fabricated as 0) when it didn't.
+        similar_past_tasks lists up to 3 earlier find_change_surface runs whose task
+        text was semantically closest to this one (only populated when the optional
+        `semantic` extra is installed — empty otherwise, never an error), each with
+        its own primary_services and an honest outcome ('verified precision=...
+        recall=...' from a real git check, 'feedback: N confirmed, M rejected' from
+        self-reported outcomes, or 'no feedback yet') — historical precedent for
+        whether a similarly-worded task actually panned out."""
         with closing(_conn()) as conn:
             return queries.find_change_surface(conn, resolved_backend, task, hint_services)
 

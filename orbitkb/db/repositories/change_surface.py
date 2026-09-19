@@ -69,6 +69,12 @@ def record_change_surface_feedback(conn: sqlite3.Connection, run_id: int, servic
     conn.commit()
 
 
+def list_feedback_for_run(conn: sqlite3.Connection, run_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT service, outcome, recorded_at FROM change_surface_feedback WHERE run_id = ? ORDER BY id", (run_id,)
+    ).fetchall()
+
+
 def get_feedback_stats(conn: sqlite3.Connection, service: str) -> dict[str, int]:
     row = conn.execute(
         """SELECT

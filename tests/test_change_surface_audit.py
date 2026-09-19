@@ -79,6 +79,28 @@ def test_feedback_stats_start_empty_and_accumulate(tmp_path: Path):
     assert repository.get_feedback_stats(conn, "some-other-service") == {"confirmed": 0, "rejected": 0}
 
 
+def test_list_feedback_for_run_returns_only_that_runs_entries(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    run_id = repository.record_change_surface_run(conn, "task", "claude", SAMPLE_RESULT)
+    other_run_id = repository.record_change_surface_run(conn, "other task", "claude", SAMPLE_RESULT)
+    repository.record_change_surface_feedback(conn, run_id, "checkout-service", "confirmed")
+    repository.record_change_surface_feedback(conn, run_id, "order-service", "rejected")
+    repository.record_change_surface_feedback(conn, other_run_id, "checkout-service", "rejected")
+
+    feedback = repository.list_feedback_for_run(conn, run_id)
+
+    assert {(f["service"], f["outcome"]) for f in feedback} == {
+        ("checkout-service", "confirmed"), ("order-service", "rejected"),
+    }
+
+
+def test_list_feedback_for_run_is_empty_when_none_recorded(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    run_id = repository.record_change_surface_run(conn, "task", "claude", SAMPLE_RESULT)
+
+    assert repository.list_feedback_for_run(conn, run_id) == []
+
+
 def test_record_feedback_query_validates_run_and_service(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     run_id = repository.record_change_surface_run(conn, "task", "claude", SAMPLE_RESULT)

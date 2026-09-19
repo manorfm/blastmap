@@ -90,7 +90,7 @@ def test_no_match_short_circuit_is_tiny_and_free(tmp_path: Path):
     result = change_surface.analyze_change_surface(conn, "completely unrelated xyz task", backend)
 
     assert backend.calls == 0  # no LLM cost paid for a query that matches nothing
-    assert len(json.dumps(result)) < 500
+    assert len(json.dumps(result)) < 550  # was 500; similar_past_tasks: [] added a fixed, honest ~25 bytes
 
 
 def test_describe_service_default_page_stays_bounded_for_a_huge_real_service(tmp_path: Path):
