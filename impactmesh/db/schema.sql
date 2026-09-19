@@ -1,4 +1,4 @@
--- context_insight SQLite schema. Single source of DDL truth.
+-- ImpactMesh SQLite schema. Single source of DDL truth.
 -- No backward compatibility is maintained across versions: this file is the only
 -- shape a database is expected to have. Breaking changes replace old columns/tables
 -- outright instead of growing compatibility shims.
