@@ -138,10 +138,13 @@ CREATE TABLE IF NOT EXISTS indexed_files (
 -- report back (record_change_surface_feedback), which recalibrate_confidence()
 -- folds into future task inferences for that service.
 CREATE TABLE IF NOT EXISTS change_surface_runs (
-    id         INTEGER PRIMARY KEY,
-    task_text  TEXT NOT NULL,
-    backend    TEXT,
-    created_at TEXT NOT NULL
+    id            INTEGER PRIMARY KEY,
+    task_text     TEXT NOT NULL,
+    backend       TEXT,
+    created_at    TEXT NOT NULL,
+    input_tokens  INTEGER,
+    output_tokens INTEGER,
+    cost_usd      REAL
 );
 
 CREATE TABLE IF NOT EXISTS change_surface_findings (
@@ -193,7 +196,13 @@ CREATE TABLE IF NOT EXISTS index_runs (
     backend       TEXT,
     files_changed INTEGER DEFAULT 0,
     llm_calls     INTEGER DEFAULT 0,
-    notes         TEXT
+    notes         TEXT,
+    -- Best-effort token/cost accounting summed across every unit generated in this
+    -- run (see generation.backend_base.LLMUsage) — NULL, never a guess, whenever the
+    -- backend's CLI output didn't carry it. See generation/llm_harness.py.
+    input_tokens  INTEGER,
+    output_tokens INTEGER,
+    cost_usd      REAL
 );
 
 -- Deterministic, whole-graph structural findings (cycles, fan-in/out imbalance, shared

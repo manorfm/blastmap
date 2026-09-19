@@ -34,7 +34,10 @@ def _cmd_index(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     for r in results:
-        print(f"{r.service_name}: status={r.status} files_changed={r.files_changed} llm_calls={r.llm_calls}")
+        print(
+            f"{r.service_name}: status={r.status} files_changed={r.files_changed} llm_calls={r.llm_calls} "
+            f"cost_usd={r.cost_usd}"
+        )
     return 0 if all(r.status == "ok" for r in results) else 1
 
 
@@ -61,7 +64,10 @@ def _cmd_update(args: argparse.Namespace) -> int:
     backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
     with RichProgressReporter() as progress:
         result = index_service(conn, args.service, root, detector, backend, force=args.force, progress=progress)
-    print(f"{result.service_name}: status={result.status} files_changed={result.files_changed} llm_calls={result.llm_calls}")
+    print(
+        f"{result.service_name}: status={result.status} files_changed={result.files_changed} "
+        f"llm_calls={result.llm_calls} cost_usd={result.cost_usd}"
+    )
     return 0 if result.status == "ok" else 1
 
 
@@ -90,8 +96,15 @@ def _cmd_status(args: argparse.Namespace) -> int:
         for run in index_runs_repo.recent_index_runs(conn, row["id"], limit=5):
             print(
                 f"  run#{run['id']} {run['started_at']} status={run['status']} backend={run['backend']} "
-                f"files_changed={run['files_changed']} llm_calls={run['llm_calls']} notes={run['notes']}"
+                f"files_changed={run['files_changed']} llm_calls={run['llm_calls']} "
+                f"tokens=(in={run['input_tokens']},out={run['output_tokens']}) cost_usd={run['cost_usd']} "
+                f"notes={run['notes']}"
             )
+        totals = index_runs_repo.usage_totals(conn, row["id"])
+        print(
+            f"cumulative usage: input_tokens={totals['input_tokens']} output_tokens={totals['output_tokens']} "
+            f"cost_usd={totals['cost_usd']}"
+        )
     else:
         services = services_repo.list_services(conn)
         print(f"services indexed: {len(services)}")
@@ -100,8 +113,13 @@ def _cmd_status(args: argparse.Namespace) -> int:
             name = svc["name"] if svc else "?"
             print(
                 f"  run#{run['id']} service={name} status={run['status']} backend={run['backend']} "
-                f"files_changed={run['files_changed']} llm_calls={run['llm_calls']}"
+                f"files_changed={run['files_changed']} llm_calls={run['llm_calls']} cost_usd={run['cost_usd']}"
             )
+        totals = index_runs_repo.usage_totals(conn)
+        print(
+            f"cumulative usage: input_tokens={totals['input_tokens']} output_tokens={totals['output_tokens']} "
+            f"cost_usd={totals['cost_usd']}"
+        )
         verifications = verification_repo.latest_verifications(conn, limit=5)
         if verifications:
             print("recent change surface verifications:")

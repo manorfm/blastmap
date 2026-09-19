@@ -18,10 +18,19 @@ _ROLE_BY_RESULT_KEY = {
 }
 
 
-def record_change_surface_run(conn: sqlite3.Connection, task_text: str, backend: str, result: dict) -> int:
+def record_change_surface_run(
+    conn: sqlite3.Connection,
+    task_text: str,
+    backend: str,
+    result: dict,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cost_usd: float | None = None,
+) -> int:
     cur = conn.execute(
-        "INSERT INTO change_surface_runs (task_text, backend, created_at) VALUES (?, ?, ?)",
-        (task_text, backend, now()),
+        """INSERT INTO change_surface_runs (task_text, backend, created_at, input_tokens, output_tokens, cost_usd)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (task_text, backend, now(), input_tokens, output_tokens, cost_usd),
     )
     run_id = cur.lastrowid
     rows = [

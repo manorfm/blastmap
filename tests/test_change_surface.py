@@ -14,6 +14,7 @@ from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation import change_surface
+from orbitkb.generation.backend_base import GenerationOutcome
 
 
 class FakeBackend:
@@ -23,9 +24,9 @@ class FakeBackend:
         self.response = response
         self.calls = 0
 
-    def generate(self, prompt: str, schema: dict, cwd: Path) -> dict:
+    def generate(self, prompt: str, schema: dict, cwd: Path) -> GenerationOutcome:
         self.calls += 1
-        return self.response
+        return GenerationOutcome(structured=self.response)
 
 
 def _build_pix_fixture(db_path: Path):
@@ -248,6 +249,10 @@ def test_analyze_change_surface_persists_a_run_and_returns_its_id(tmp_path: Path
     assert "run_id" in result
     findings = change_surface_repo.list_change_surface_findings(conn, result["run_id"])
     assert any(f["service"] == "checkout-service" and f["role"] == "primary" for f in findings)
+    # FakeBackend never reports usage — stays honestly None, not fabricated as 0.
+    assert result["run_cost_usd"] is None
+    run = change_surface_repo.get_change_surface_run(conn, result["run_id"])
+    assert run["cost_usd"] is None
 
 
 def test_confidence_is_recalibrated_from_historical_feedback(tmp_path: Path):

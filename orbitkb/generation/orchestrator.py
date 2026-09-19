@@ -21,7 +21,7 @@ from orbitkb.discovery.hashing import file_hash, git_head_commit
 from orbitkb.discovery.scan_helpers import SKIP_DIRS, collect_config_excerpts
 from orbitkb.discovery.walker import discover_services
 from orbitkb.generation.architecture import recompute_architecture_view
-from orbitkb.generation.backend_base import LLMBackend
+from orbitkb.generation.backend_base import LLMBackend, LLMUsage
 from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 
 MAX_EXCERPT_CHARS = 20_000
@@ -38,6 +38,9 @@ class IndexResult:
     files_changed: int
     llm_calls: int
     status: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float | None = None
 
 
 class ProgressReporter(Protocol):
@@ -230,6 +233,7 @@ class UnitOutcome:
     llm_calls: int = 0
     had_failure: bool = False
     failed_files: set[str] = field(default_factory=set)
+    usage: LLMUsage = field(default_factory=LLMUsage)
 
 
 @dataclass
@@ -280,15 +284,16 @@ class EndpointGenerator:
                 continue
             ctx.progress.unit_started(ctx.name, label)
             prompt = _render_api_detail_prompt(ctx.name, ctx.detector.id, endpoint, ctx.hints)
-            result = generate_with_retry(
+            generation = generate_with_retry(
                 ctx.backend, prompt, load_schema("api_detail"), ctx.root, ctx.failures_root,
                 f"{ctx.name}-{endpoint.method}-{endpoint.path}",
             )
-            if not result:
+            if not generation:
                 outcome.had_failure = True
                 outcome.failed_files |= dep_files
                 ctx.progress.unit_finished(ctx.name, label, "failed")
                 continue
+            result = generation.structured
             evidence = _evidence_from_excerpts([endpoint.excerpt, *endpoint.extra_excerpts])
             api_id = apis_repo.upsert_api(
                 ctx.conn, ctx.service_id, endpoint.method, endpoint.path,
@@ -298,6 +303,7 @@ class EndpointGenerator:
             apis_repo.replace_api_validations(ctx.conn, api_id, result["validations"])
             service_calls_repo.replace_calls_for_api(ctx.conn, ctx.service_id, api_id, result["calls"], evidence)
             outcome.llm_calls += 1
+            outcome.usage = outcome.usage + generation.usage
             ctx.any_endpoint_regenerated = True
             ctx.progress.unit_finished(ctx.name, label, "ok")
 
@@ -334,20 +340,22 @@ class ComponentGenerator:
                     summary_lines.append(f"- {endpoint.method} {endpoint.path}: {api_row['summary']}")
             endpoint_summaries = "\n".join(summary_lines) or "(no endpoint summaries available yet)"
             prompt = _render_component_prompt(ctx.name, component_name, component_file, endpoint_summaries)
-            result = generate_with_retry(
+            generation = generate_with_retry(
                 ctx.backend, prompt, load_schema("component"), ctx.root, ctx.failures_root,
                 f"{ctx.name}-component-{component_name}",
             )
-            if not result:
+            if not generation:
                 outcome.had_failure = True
                 outcome.failed_files |= group_dep_files
                 ctx.progress.unit_finished(ctx.name, label, "failed")
                 continue
+            result = generation.structured
             evidence = _evidence_from_excerpts([endpoint.excerpt for endpoint in group])
             components_repo.upsert_component(
                 ctx.conn, ctx.service_id, component_name, component_file, result["summary"], evidence
             )
             outcome.llm_calls += 1
+            outcome.usage = outcome.usage + generation.usage
             ctx.any_component_regenerated = True
             ctx.progress.unit_finished(ctx.name, label, "ok")
 
@@ -372,10 +380,11 @@ class PersistenceGenerator:
             collect_config_excerpts(ctx.root) if _persistence_needs_config_evidence(ctx.hints) else []
         )
         prompt = _render_persistence_prompt(ctx.name, ctx.detector.id, ctx.hints, persistence_config_excerpts)
-        result = generate_with_retry(
+        generation = generate_with_retry(
             ctx.backend, prompt, load_schema("persistence"), ctx.root, ctx.failures_root, f"{ctx.name}-persistence"
         )
-        if result:
+        if generation:
+            result = generation.structured
             entities = [
                 {"name": e["name"], "kind": e["kind"], "engine": e["engine"], "schema_json": e["fields"]}
                 for e in result["entities"]
@@ -383,6 +392,7 @@ class PersistenceGenerator:
             evidence = _evidence_from_excerpts([p.excerpt for p in ctx.hints.persistence] + persistence_config_excerpts)
             persistence_repo.replace_persistence_entities(ctx.conn, ctx.service_id, entities, evidence)
             outcome.llm_calls += 1
+            outcome.usage = outcome.usage + generation.usage
             ctx.progress.unit_finished(ctx.name, "persistence", "ok")
         else:
             outcome.had_failure = True
@@ -406,10 +416,11 @@ class MessagingGenerator:
         ctx.progress.unit_started(ctx.name, "messaging")
         config_excerpts = collect_config_excerpts(ctx.root) if _needs_config_evidence(ctx.hints) else []
         prompt = _render_messaging_prompt(ctx.name, ctx.detector.id, ctx.hints, config_excerpts)
-        result = generate_with_retry(
+        generation = generate_with_retry(
             ctx.backend, prompt, load_schema("messaging"), ctx.root, ctx.failures_root, f"{ctx.name}-messaging"
         )
-        if result:
+        if generation:
+            result = generation.structured
             messages = [
                 {
                     "direction": m["direction"],
@@ -423,6 +434,7 @@ class MessagingGenerator:
             evidence = _evidence_from_excerpts([m.excerpt for m in ctx.hints.messaging] + config_excerpts)
             messages_repo.replace_messages(ctx.conn, ctx.service_id, messages, evidence)
             outcome.llm_calls += 1
+            outcome.usage = outcome.usage + generation.usage
             ctx.progress.unit_finished(ctx.name, "messaging", "ok")
         else:
             outcome.had_failure = True
@@ -450,12 +462,14 @@ class OverviewGenerator:
         ctx.progress.unit_started(ctx.name, "overview")
         components = components_repo.list_components(ctx.conn, ctx.service_id)
         prompt = _render_service_overview_prompt(ctx.name, ctx.detector.id, ctx.root, ctx.hints, components)
-        result = generate_with_retry(
+        generation = generate_with_retry(
             ctx.backend, prompt, load_schema("service_overview"), ctx.root, ctx.failures_root, f"{ctx.name}-overview"
         )
-        if result:
+        if generation:
+            result = generation.structured
             services_repo.update_service_overview(ctx.conn, ctx.service_id, result["short_desc"], result["long_desc"])
             outcome.llm_calls += 1
+            outcome.usage = outcome.usage + generation.usage
             ctx.progress.unit_finished(ctx.name, "overview", "ok")
         else:
             outcome.had_failure = True
@@ -522,11 +536,13 @@ def index_service(
     # NOT persisted to indexed_files below, so next run sees them as "changed" again
     # and retries instead of silently skipping a permanently-broken unit forever.
     failed_files: set[str] = set()
+    total_usage = LLMUsage()
     for generator in UNIT_GENERATORS:
         outcome = generator.run(ctx)
         llm_calls += outcome.llm_calls
         had_failure = had_failure or outcome.had_failure
         failed_files |= outcome.failed_files
+        total_usage = total_usage + outcome.usage
 
     route_files = {e.excerpt.file_path for e in hints.endpoints}
     persistence_files = {p.excerpt.file_path for p in hints.persistence}
@@ -551,12 +567,14 @@ def index_service(
     index_runs_repo.finish_index_run(
         conn, run_id, status, len(changed) + len(removed), llm_calls,
         "some units failed, see failures dir" if had_failure else None,
+        input_tokens=total_usage.input_tokens, output_tokens=total_usage.output_tokens, cost_usd=total_usage.cost_usd,
     )
     progress.service_finished(name)
 
     return IndexResult(
         service_name=name, service_id=service_id,
         files_changed=len(changed) + len(removed), llm_calls=llm_calls, status=status,
+        input_tokens=total_usage.input_tokens, output_tokens=total_usage.output_tokens, cost_usd=total_usage.cost_usd,
     )
 
 

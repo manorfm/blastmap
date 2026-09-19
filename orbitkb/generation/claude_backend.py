@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from orbitkb.generation.backend_base import GenerationError
+from orbitkb.generation.backend_base import GenerationError, GenerationOutcome, LLMUsage
 
 TIMEOUT_SECONDS = 180
 
@@ -24,7 +24,7 @@ class ClaudeBackend:
         self.model = model
         self.bare = bare
 
-    def generate(self, prompt: str, schema: dict, cwd: Path) -> dict:
+    def generate(self, prompt: str, schema: dict, cwd: Path) -> GenerationOutcome:
         cmd = [
             "claude", "-p", prompt,
             "--output-format", "json",
@@ -58,4 +58,21 @@ class ClaudeBackend:
         structured = payload.get("structured_output")
         if structured is None:
             raise GenerationError(f"claude response had no structured_output: {result.stdout[-2000:]}")
-        return structured
+        return GenerationOutcome(structured=structured, usage=self._extract_usage(payload))
+
+    @staticmethod
+    def _extract_usage(payload: dict) -> LLMUsage:
+        """Best-effort only: besides is_error/result/structured_output, no other key
+        of `claude -p --output-format json`'s payload has ever been verified against
+        a real invocation in this codebase. Every field stays None instead of raising
+        when it's absent or shaped differently than expected here."""
+        usage = payload.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
+        cost = payload.get("total_cost_usd")
+        return LLMUsage(
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            cached_input_tokens=usage.get("cache_read_input_tokens"),
+            cost_usd=cost if isinstance(cost, (int, float)) else None,
+        )

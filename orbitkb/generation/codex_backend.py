@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from orbitkb.generation.backend_base import GenerationError
+from orbitkb.generation.backend_base import GenerationError, GenerationOutcome, LLMUsage
 
 TIMEOUT_SECONDS = 180
 
@@ -24,7 +24,7 @@ class CodexBackend:
         self.model = model
         self.api_key = api_key
 
-    def generate(self, prompt: str, schema: dict, cwd: Path) -> dict:
+    def generate(self, prompt: str, schema: dict, cwd: Path) -> GenerationOutcome:
         with tempfile.TemporaryDirectory() as tmp:
             schema_path = Path(tmp) / "schema.json"
             output_path = Path(tmp) / "output.txt"
@@ -64,6 +64,36 @@ class CodexBackend:
 
             raw = output_path.read_text(encoding="utf-8").strip()
             try:
-                return json.loads(raw)
+                structured = json.loads(raw)
             except json.JSONDecodeError as exc:
                 raise GenerationError(f"codex final message was not valid JSON: {exc}\n{raw[-2000:]}") from exc
+            return GenerationOutcome(structured=structured, usage=self._extract_usage(result.stdout))
+
+    @staticmethod
+    def _extract_usage(stdout: str) -> LLMUsage:
+        """Best-effort only: `codex exec --json` streams one JSON event per line to
+        stdout; this looks for the last line carrying a top-level `usage` object and
+        never raises when none is found or it's shaped differently than expected —
+        the same never-verified-against-a-real-payload caveat as ClaudeBackend's."""
+        usage = LLMUsage()
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            candidate = event.get("usage")
+            if not isinstance(candidate, dict):
+                continue
+            cost = event.get("total_cost_usd")
+            usage = LLMUsage(
+                input_tokens=candidate.get("input_tokens"),
+                output_tokens=candidate.get("output_tokens"),
+                cached_input_tokens=candidate.get("cached_input_tokens"),
+                cost_usd=cost if isinstance(cost, (int, float)) else None,
+            )
+        return usage

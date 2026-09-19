@@ -111,6 +111,7 @@ def test_status_command_for_one_service(tmp_path: Path, capsys):
     out = capsys.readouterr().out
     assert "orders-service" in out
     assert "run#" in out
+    assert "cumulative usage:" in out
 
 
 def test_status_command_global(tmp_path: Path, capsys):
@@ -119,8 +120,20 @@ def test_status_command_global(tmp_path: Path, capsys):
 
     exit_code = cli._cmd_status(_parse(["status", "--db", str(db_path)]))
 
+    out = capsys.readouterr().out
     assert exit_code == 0
-    assert "services indexed: 3" in capsys.readouterr().out
+    assert "services indexed: 3" in out
+    assert "cumulative usage:" in out
+
+
+def test_index_command_prints_cost_per_service(tmp_path: Path, capsys):
+    db_path = tmp_path / "test.db"
+    args = _parse(["index", str(SAMPLE_ROOT), "--db", str(db_path)])
+
+    cli._cmd_index(args)
+
+    out = capsys.readouterr().out
+    assert "cost_usd=" in out
 
 
 def test_status_command_global_shows_recent_verifications(tmp_path: Path, capsys):

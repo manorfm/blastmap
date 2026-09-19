@@ -14,7 +14,7 @@ from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.discovery.registry import detector_for
 from orbitkb.discovery.walker import discover_services
-from orbitkb.generation.backend_base import GenerationError
+from orbitkb.generation.backend_base import GenerationError, GenerationOutcome
 from orbitkb.generation.orchestrator import DiscoveryError, index_path, index_service
 
 SAMPLE_ROOT = Path(__file__).resolve().parent.parent / "verify" / "sample_project"
@@ -44,35 +44,37 @@ class FakeOrchestratorBackend:
             return "component"
         return "api_detail"
 
-    def generate(self, prompt: str, schema: dict, cwd: Path) -> dict:
+    def generate(self, prompt: str, schema: dict, cwd: Path) -> GenerationOutcome:
         self.calls += 1
         kind = self._kind(schema)
         if kind == self.fail_kind:
             raise GenerationError("simulated failure")
         if kind == "service_overview":
-            return {"short_desc": "Fake short description.", "long_desc": "Fake long description."}
-        if kind == "persistence":
-            return {
+            structured = {"short_desc": "Fake short description.", "long_desc": "Fake long description."}
+        elif kind == "persistence":
+            structured = {
                 "entities": [
                     {"name": "fake_table", "kind": "sql_table", "engine": "postgres", "fields": [{"field": "id", "type_desc": "string"}]}
                 ]
             }
-        if kind == "messaging":
-            return {"messages": [{"direction": "publishes", "channel": "fake_channel", "provider": "kafka", "shape": [], "description": "fake"}]}
-        if kind == "component":
-            return {"summary": "Fake component summary."}
-        return {
-            "summary": "Fake summary.",
-            "description": "Fake description.",
-            "response_shape": [{"field": "id", "type_desc": "string"}],
-            "request_shape": [{"field": "amount", "type_desc": "number", "required": True}],
-            "calls": [{
-                "to_service_name": "payments-service", "call_kind": "http", "reason": "fake reason",
-                "data_needed": ["amount"], "purpose_kind": "data_fetch", "confidence": 0.8, "target_kind": "internal",
-                "resource_type": "not_applicable",
-            }],
-            "validations": [{"kind": "authorization", "description": "fake auth rule"}],
-        }
+        elif kind == "messaging":
+            structured = {"messages": [{"direction": "publishes", "channel": "fake_channel", "provider": "kafka", "shape": [], "description": "fake"}]}
+        elif kind == "component":
+            structured = {"summary": "Fake component summary."}
+        else:
+            structured = {
+                "summary": "Fake summary.",
+                "description": "Fake description.",
+                "response_shape": [{"field": "id", "type_desc": "string"}],
+                "request_shape": [{"field": "amount", "type_desc": "number", "required": True}],
+                "calls": [{
+                    "to_service_name": "payments-service", "call_kind": "http", "reason": "fake reason",
+                    "data_needed": ["amount"], "purpose_kind": "data_fetch", "confidence": 0.8, "target_kind": "internal",
+                    "resource_type": "not_applicable",
+                }],
+                "validations": [{"kind": "authorization", "description": "fake auth rule"}],
+            }
+        return GenerationOutcome(structured=structured)
 
 
 class RecordingOrchestratorBackend(FakeOrchestratorBackend):

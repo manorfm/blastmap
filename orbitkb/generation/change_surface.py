@@ -350,9 +350,10 @@ def analyze_change_surface(
     schema = load_schema("change_surface")
     failures_dir = Path.home() / ".orbitkb" / "failures"
 
-    result = generate_with_retry(backend, prompt, schema, Path.home() / ".orbitkb", failures_dir, "change-surface")
-    if result is None:
+    generation = generate_with_retry(backend, prompt, schema, Path.home() / ".orbitkb", failures_dir, "change-surface")
+    if generation is None:
         return ChangeSurfaceBuilder().with_note("change surface synthesis failed; see ~/.orbitkb/failures").build()
+    result = generation.structured
 
     known = set(candidates)
     primary = _filter_known(conn, result.get("primary", []), known, evidence_by_service)
@@ -379,5 +380,11 @@ def analyze_change_surface(
         .with_recommended_next_queries(next_queries)
         .build()
     )
-    response["run_id"] = change_surface_repo.record_change_surface_run(conn, task, backend.name, response)
+    response["run_id"] = change_surface_repo.record_change_surface_run(
+        conn, task, backend.name, response,
+        input_tokens=generation.usage.input_tokens,
+        output_tokens=generation.usage.output_tokens,
+        cost_usd=generation.usage.cost_usd,
+    )
+    response["run_cost_usd"] = generation.usage.cost_usd
     return response

@@ -180,7 +180,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         hint_services if you already suspect specific services, to anchor the search.
         The response includes a run_id — pass it to record_change_surface_feedback once
         you know whether the findings were actually right, to improve future confidence
-        for this service."""
+        for this service. run_cost_usd reports this call's own LLM cost when the
+        backend's CLI exposed it, and null (never fabricated as 0) when it didn't."""
         with closing(_conn()) as conn:
             return queries.find_change_surface(conn, resolved_backend, task, hint_services)
 

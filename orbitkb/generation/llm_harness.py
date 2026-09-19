@@ -15,7 +15,7 @@ from string import Template
 
 import jsonschema
 
-from orbitkb.generation.backend_base import GenerationError, LLMBackend
+from orbitkb.generation.backend_base import GenerationError, GenerationOutcome, LLMBackend, LLMUsage
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +37,16 @@ def load_schema(name: str) -> dict:
 
 def generate_with_retry(
     backend: LLMBackend, prompt: str, schema: dict, cwd: Path, failures_dir: Path, label: str
-) -> dict | None:
+) -> GenerationOutcome | None:
     last_error: Exception | None = None
     current_prompt = prompt
+    total_usage = LLMUsage()
     for _attempt in range(2):
         try:
-            result = backend.generate(current_prompt, schema, cwd)
-            jsonschema.validate(result, schema)
-            return result
+            outcome = backend.generate(current_prompt, schema, cwd)
+            total_usage = total_usage + outcome.usage  # a retried call is still a billed call
+            jsonschema.validate(outcome.structured, schema)
+            return GenerationOutcome(structured=outcome.structured, usage=total_usage)
         except (GenerationError, jsonschema.ValidationError) as exc:
             last_error = exc
             current_prompt = (

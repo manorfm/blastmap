@@ -31,6 +31,29 @@ def test_record_change_surface_run_persists_all_buckets(tmp_path: Path):
     assert run["backend"] == "claude"
 
 
+def test_record_change_surface_run_persists_usage_when_given(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+
+    run_id = repository.record_change_surface_run(
+        conn, "Add Pix support", "claude", SAMPLE_RESULT, input_tokens=1500, output_tokens=300, cost_usd=0.08
+    )
+
+    run = repository.get_change_surface_run(conn, run_id)
+    assert run["input_tokens"] == 1500
+    assert run["output_tokens"] == 300
+    assert run["cost_usd"] == 0.08
+
+
+def test_record_change_surface_run_defaults_usage_to_none(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+
+    run_id = repository.record_change_surface_run(conn, "Add Pix support", "claude", SAMPLE_RESULT)
+
+    run = repository.get_change_surface_run(conn, run_id)
+    assert run["input_tokens"] is None
+    assert run["cost_usd"] is None
+
+
 def test_list_change_surface_runs_orders_most_recent_first(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     first = repository.record_change_surface_run(conn, "first task", "claude", SAMPLE_RESULT)
