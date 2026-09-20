@@ -11,8 +11,8 @@ question.
 2. Call `describe_service` only for the likely services.
 3. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
    entrypoint.
-4. Call `describe_entrypoint(service, kind, method, name)` for deterministic flow
-   evidence.
+4. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
+   reachable deterministic flow evidence.
 5. Use `describe_api`, `describe_persistence`, `describe_messages` or
    `get_relationships` only when the selected flow requires them.
 
@@ -41,7 +41,9 @@ question.
 ```
 
 `kind` is one of `invokes`, `injects`, `validates`, `reads`, `writes`,
-`publishes` or `consumes`. `origin` is `static`, `codegraph` or `runtime`. The
+`publishes` or `consumes`. The response follows only symbols reachable from the
+selected entrypoint, with a hard edge budget; unrelated service flow is omitted.
+`origin` is `static`, `codegraph` or `runtime`. The
 optional `smells` list contains explicit hypotheses, never a conclusive architecture
 classification; for example, a GraphQL mutation that directly writes state is flagged
 as possible BFF domain-policy leakage for human validation.

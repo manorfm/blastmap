@@ -5,18 +5,22 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
+from orbitkb.db.connection import open_db
+from orbitkb.generation.orchestrator import index_path
 from tests.mcp_test_helpers import content_json as _content_json
 from tests.mcp_test_helpers import server_params
-
-DB_PATH = Path(__file__).resolve().parent.parent / "verify" / "sample_project.db"
+from tests.test_orchestrator import FakeOrchestratorBackend, SAMPLE_ROOT
 
 
 @pytest.mark.anyio
-async def test_mcp_progressive_disclosure_flow():
-    if not DB_PATH.exists():
-        pytest.skip(f"no indexed sample db at {DB_PATH}; run the e2e indexing step first")
+async def test_mcp_progressive_disclosure_flow(tmp_path: Path):
+    """Indexes the fixture first, never relying on a developer's local database."""
+    db_path = tmp_path / "sample-project.db"
+    conn = open_db(db_path)
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend())
+    conn.close()
 
-    params = server_params(DB_PATH)
+    params = server_params(db_path)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import tree_sitter_go
+import tree_sitter_java
 import tree_sitter_javascript
 import tree_sitter_kotlin
 import tree_sitter_typescript
@@ -20,6 +21,7 @@ from tree_sitter import Language, Node, Parser
 
 from orbitkb.analysis.depth import DepthProvider, NoopDepthProvider
 from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
+from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 
@@ -82,15 +84,24 @@ class _FileAnalyzer:
     def _edges_for(function: _Function, path: Path, root: Path, source: bytes) -> list[FlowEdge]:
         edges = []
         for node in _walk(function.body):
-            if node.type != "call_expression":
+            if node.type not in {"call_expression", "method_invocation"}:
                 continue
             # Grammar field names differ (Kotlin exposes the callee as the first
             # named child while Go/TypeScript call it `function`). Normalize that
             # syntax detail at the parser boundary.
-            callee = node.child_by_field_name("function") or (node.named_children[0] if node.named_children else None)
-            if callee is None:
+            if node.type == "method_invocation":
+                target = ".".join(
+                    _text(child, source)
+                    for child in node.named_children
+                    if child.type in {"identifier", "type_identifier"}
+                )
+            else:
+                callee = node.child_by_field_name("function") or (node.named_children[0] if node.named_children else None)
+                if callee is None:
+                    continue
+                target = _text(callee, source)
+            if not target:
                 continue
-            target = _text(callee, source)
             edges.append(FlowEdge(function.symbol, target, _call_kind(target), _evidence(path, root, node)))
         return edges
 
@@ -159,7 +170,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
             for parameter in (node for node in _walk(class_node) if node.type == "class_parameter"):
                 types = [node for node in _walk(parameter) if node.type == "user_type"]
                 if types:
-                    result.edges.append(FlowEdge(class_name, _text(types[-1], source), "injects", _evidence(path, root, parameter)))
+                    name_match = re.search(r"(?:val|var)\s+(\w+)", _text(parameter, source))
+                    injection_symbol = f"{class_name}.{name_match.group(1)}" if name_match else class_name
+                    result.edges.append(FlowEdge(injection_symbol, _text(types[-1], source), "injects", _evidence(path, root, parameter)))
             for function_node in (node for node in _walk(class_node) if node.type == "function_declaration"):
                 name_node = function_node.child_by_field_name("name")
                 if name_node is None:
@@ -177,6 +190,54 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 if listener:
                     result.entrypoints.append(EntryPoint("message", "CONSUME", listener.group(1), symbol, _evidence(path, root, function_node)))
         return result
+
+
+class _JavaSpringAnalyzer(_FileAnalyzer):
+    ROUTES = _KotlinSpringAnalyzer.ROUTES
+
+    def analyze(self, path: Path, root: Path) -> AnalysisResult:
+        source = path.read_bytes()
+        tree = self.parse(source)
+        result = AnalysisResult()
+        for class_node in (node for node in _walk(tree) if node.type == "class_declaration"):
+            class_name_node = class_node.child_by_field_name("name")
+            class_name = _text(class_name_node, source) if class_name_node else path.stem
+            for field in (node for node in _walk(class_node) if node.type == "field_declaration"):
+                types = [node for node in _walk(field) if node.type == "type_identifier"]
+                names = [node for node in _walk(field) if node.type == "variable_declarator"]
+                if types and names:
+                    variable = names[-1].child_by_field_name("name") or names[-1].named_children[0]
+                    result.edges.append(FlowEdge(
+                        f"{class_name}.{_text(variable, source)}", _text(types[-1], source), "injects", _evidence(path, root, field),
+                    ))
+            for method_node in (node for node in _walk(class_node) if node.type == "method_declaration"):
+                name_node = method_node.child_by_field_name("name")
+                body = method_node.child_by_field_name("body")
+                if name_node is None or body is None:
+                    continue
+                name = _text(name_node, source)
+                symbol = f"{class_name}.{name}"
+                result.edges.extend(self._edges_for(_Function(name, symbol, body, method_node), path, root, source))
+                modifiers = next((node for node in method_node.named_children if node.type == "modifiers"), None)
+                modifier_text = _text(modifiers, source) if modifiers else ""
+                match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
+                if match:
+                    result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], match.group(2), symbol, _evidence(path, root, method_node)))
+                listener = re.search(r"@RabbitListener\s*\([^)]*(?:queues\s*=\s*)?\"([^\"]+)\"", modifier_text)
+                if listener:
+                    result.entrypoints.append(EntryPoint("message", "CONSUME", listener.group(1), symbol, _evidence(path, root, method_node)))
+        return result
+
+
+class _JvmSpringAnalyzer:
+    """Selects the JVM parser while keeping the public stack identifier stable."""
+
+    def __init__(self) -> None:
+        self._kotlin = _KotlinSpringAnalyzer(Language(tree_sitter_kotlin.language()))
+        self._java = _JavaSpringAnalyzer(Language(tree_sitter_java.language()))
+
+    def analyze(self, path: Path, root: Path) -> AnalysisResult:
+        return self._java.analyze(path, root) if path.suffix == ".java" else self._kotlin.analyze(path, root)
 
 
 class _NodeGraphqlAnalyzer(_FileAnalyzer):
@@ -234,10 +295,11 @@ class _PythonCliAnalyzer:
         except SyntaxError:
             return AnalysisResult()
         result = AnalysisResult()
-        for function in (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main"):
-            symbol = f"{path.stem}.main"
+        for function in (node for node in tree.body if isinstance(node, ast.FunctionDef)):
+            symbol = f"{path.stem}.{function.name}"
             evidence = Evidence(path.relative_to(root).as_posix(), function.lineno, function.end_lineno or function.lineno)
-            result.entrypoints.append(EntryPoint("cli", "COMMAND", path.stem, symbol, evidence))
+            if function.name == "main":
+                result.entrypoints.append(EntryPoint("cli", "COMMAND", path.stem, symbol, evidence))
             for call in (node for node in ast.walk(function) if isinstance(node, ast.Call)):
                 target = _python_call_name(call.func)
                 if target:
@@ -265,7 +327,7 @@ class StaticAnalysisEngine:
         self._depth_provider = depth_provider or NoopDepthProvider()
         self._analyzers = {
             "go": (_GoAnalyzer(Language(tree_sitter_go.language())), ("*.go",)),
-            "jvm-spring": (_KotlinSpringAnalyzer(Language(tree_sitter_kotlin.language())), ("*.kt",)),
+            "jvm-spring": (_JvmSpringAnalyzer(), ("*.java", "*.kt")),
             "node-ts": (_NodeGraphqlAnalyzer(Language(tree_sitter_typescript.language_typescript())), ("*.ts", "*.tsx")),
             "node-js": (_NodeGraphqlAnalyzer(Language(tree_sitter_javascript.language())), ("*.js", "*.jsx")),
             "python": (_PythonCliAnalyzer(), ("*.py",)),
@@ -285,5 +347,6 @@ class StaticAnalysisEngine:
         })
         for path in files:
             result.extend(analyzer.analyze(path, root))
+        result = BoundedFlowResolver().resolve(result)
         result.edges.extend(self._depth_provider.enrich(root, result))
         return result

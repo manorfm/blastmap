@@ -28,3 +28,27 @@ def test_entrypoint_tools_keep_transport_and_flow_context_separate(tmp_path):
     ]
     assert detail["flow"][0]["kind"] == "writes"
     assert detail["flow"][0]["origin"] == "static"
+
+
+def test_describe_entrypoint_returns_the_reachable_bounded_flow(tmp_path):
+    conn = open_db(tmp_path / "reachable-flow.db")
+    service_id = services.ensure_service(conn, "orders", "/repos/orders", "jvm-spring")
+    evidence = Evidence("OrdersController.kt", 8, 12)
+    flows.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "OrdersController.create", evidence)],
+            edges=[
+                FlowEdge("OrdersController.create", "CreateOrderUseCase.execute", "invokes", evidence),
+                FlowEdge("CreateOrderUseCase.execute", "orderRepository.save", "writes", evidence),
+            ],
+        ),
+    )
+
+    detail = queries.describe_entrypoint(conn, "orders", "http", "post", "/orders")
+
+    assert [(edge["from"], edge["to"]) for edge in detail["flow"]] == [
+        ("OrdersController.create", "CreateOrderUseCase.execute"),
+        ("CreateOrderUseCase.execute", "orderRepository.save"),
+    ]

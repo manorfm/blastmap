@@ -112,3 +112,57 @@ def test_service_create_is_not_misclassified_as_direct_persistence(tmp_path: Pat
     result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
 
     assert any(edge.kind == "invokes" and edge.target == "service.create" for edge in result.edges)
+
+
+def test_kotlin_analyzer_resolves_a_bounded_flow_across_injected_classes(tmp_path: Path):
+    (tmp_path / "OrdersController.kt").write_text(
+        '''class OrdersController(private val useCase: CreateOrderUseCase) {
+  @PostMapping("/orders")
+  fun create(request: OrderRequest) = useCase.execute(request)
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "CreateOrderUseCase.kt").write_text(
+        '''class CreateOrderUseCase {
+  fun execute(request: OrderRequest) { orderRepository.save(request) }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("OrdersController.create", "CreateOrderUseCase.execute", "invokes"),
+        ("CreateOrderUseCase.execute", "orderRepository.save", "writes"),
+    }
+
+
+def test_java_spring_analyzer_maps_controller_and_cross_file_use_case(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''@RestController
+class OrdersController {
+  private final CreateOrderUseCase useCase;
+  OrdersController(CreateOrderUseCase useCase) { this.useCase = useCase; }
+  @PostMapping("/orders")
+  Order create(Order order) { return useCase.execute(order); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "CreateOrderUseCase.java").write_text(
+        '''class CreateOrderUseCase {
+  Order execute(Order order) { return repository.save(order); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
+        ("POST", "/orders", "OrdersController.create")
+    ]
+    assert any(edge.target == "CreateOrderUseCase.execute" for edge in result.edges)
+    assert any(edge.kind == "writes" and edge.target == "repository.save" for edge in result.edges)

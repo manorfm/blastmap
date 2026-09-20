@@ -6,6 +6,7 @@ import json
 import sqlite3
 from collections import deque
 
+from orbitkb.analysis.smells import find_entrypoint_smells
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import architecture as architecture_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
@@ -17,13 +18,14 @@ from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
-from orbitkb.analysis.smells import find_entrypoint_smells
 from orbitkb.generation import change_surface
 from orbitkb.generation.architecture import diff_architecture_runs
 from orbitkb.generation.backend_base import LLMBackend
 from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.provenance import infer_provenance
-from orbitkb.generation.verification import verify_change_surface as _verify_change_surface
+from orbitkb.generation.verification import (
+    verify_change_surface as _verify_change_surface,
+)
 
 # Progressive-disclosure budget for list-shaped MCP responses (describe_service's own
 # lists, list_apis, describe_persistence, describe_messages): a real service can have
@@ -185,7 +187,7 @@ def describe_entrypoint(conn: sqlite3.Connection, service: str, kind: str, metho
     entrypoint = flows_repo.get_entrypoint(conn, row["id"], kind, method, name)
     if entrypoint is None:
         return {"error": f"unknown entrypoint: {kind} {method} {name} on {service}"}
-    edges = flows_repo.list_entrypoint_edges(conn, entrypoint["id"])
+    edges = flows_repo.list_reachable_edges(conn, row["id"], entrypoint["symbol"])
     return {
         "entrypoint": {
             "kind": entrypoint["kind"], "method": entrypoint["method"], "name": entrypoint["name"],

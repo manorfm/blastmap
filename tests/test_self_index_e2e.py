@@ -44,7 +44,7 @@ def test_static_analysis_dogfoods_the_project_cli_entrypoint():
     entrypoint = next(entry for entry in result.entrypoints if entry.symbol == "cli.main")
     assert entrypoint.kind == "cli"
     assert entrypoint.evidence.file_path == "cli.py"
-    assert result.edges
+    assert any(edge.source == "cli.main" and edge.target == "cli.build_parser" for edge in result.edges)
 
 
 @pytest.fixture
@@ -89,7 +89,7 @@ def test_indexing_orbitkbs_own_source_tree_through_the_real_cli_succeeds(tmp_pat
     assert any(entry["symbol"] == "cli.main" for entry in entrypoints["entrypoints"])
     flow = queries.describe_entrypoint(conn, "orbitkb-core", "cli", "command", "cli")
     assert flow["entrypoint"]["symbol"] == "cli.main"
-    assert flow["flow"]  # persisted through the real CLI -> index -> SQLite pipeline
+    assert any(edge["to"] == "cli.build_parser" for edge in flow["flow"])
     # Dogfooding finding: orbitkb has no FastAPI/Flask/Django endpoints, no
     # SQLAlchemy/Django models and no queue calls (it's a CLI/library/MCP server,
     # not a web microservice), so PythonDetector's heuristics find zero "relevant"

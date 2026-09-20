@@ -82,10 +82,11 @@ validation, read/write and message publish/consume. The agent can then call
 `describe_entrypoint` to receive just that flow with file/line evidence.
 
 The initial native coverage is deliberately focused on Go HTTP handlers,
-Kotlin/Spring HTTP controllers and Rabbit listeners, and Node/TypeScript GraphQL
-resolvers and Rabbit consumers. The model also dogfoods explicit Python CLI `main`
-functions. The knowledge model is transport-neutral, so future job and RPC analyzers
-use the same tools and response shape.
+Java/Kotlin Spring HTTP controllers and Rabbit listeners, and Node/TypeScript
+GraphQL resolvers and Rabbit consumers. It resolves an observed call across files
+when constructor/field injection or one unambiguous local implementation proves the
+target. The model also dogfoods explicit Python CLI `main` functions. Resolution is
+bounded by the selected entrypoint; it never builds or returns a whole code graph.
 
 ### Optional depth provider
 
