@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import apis as apis_repo
-from impactmesh.db.repositories import services as services_repo
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import services as services_repo
 
 
 def test_prune_apis_not_in(tmp_path: Path):

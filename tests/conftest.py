@@ -20,4 +20,4 @@ def no_real_semantic_backend(monkeypatch):
     def _unavailable(*args, **kwargs):
         raise ImportError("fastembed not installed (test suite default)")
 
-    monkeypatch.setattr("impactmesh.generation.embeddings.FastEmbedBackend", _unavailable, raising=False)
+    monkeypatch.setattr("orbitkb.generation.embeddings.FastEmbedBackend", _unavailable, raising=False)

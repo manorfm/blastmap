@@ -1,9 +1,9 @@
 """TDD coverage for discovery.hashing.git_changed_files, the git-diff primitive
-behind impactmesh's ground-truth verification (see generation/verification.py)."""
+behind orbitkb's ground-truth verification (see generation/verification.py)."""
 import subprocess
 from pathlib import Path
 
-from impactmesh.discovery.hashing import git_changed_files
+from orbitkb.discovery.hashing import git_changed_files
 
 
 def _init_git_repo(root: Path) -> str:

@@ -3,7 +3,7 @@ __pycache__/
 .venv/
 *.egg-info/
 .pytest_cache/
-impactmesh.egg-info/
+orbitkb.egg-info/
 .DS_Store
 
 # generated artifacts, not source
@@ -13,7 +13,6 @@ verify/sample_project.db
 .orbitkb/
 .coverage
 .coverage.*
-.impactmesh/
 :memory:.ses
 
 # build/release artifacts (produced by `make build` / CI's publish workflow)

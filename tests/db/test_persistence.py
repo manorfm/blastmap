@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import persistence as persistence_repo
-from impactmesh.db.repositories import services as services_repo
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import persistence as persistence_repo
+from orbitkb.db.repositories import services as services_repo
 
 EVIDENCE = [{"file": "main.py", "start_line": 10, "end_line": 20}]
 

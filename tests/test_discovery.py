@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from impactmesh.discovery.jvm_stack import JvmSpringDetector
-from impactmesh.discovery.node_ts import NodeTsDetector
-from impactmesh.discovery.python_stack import PythonDetector
-from impactmesh.discovery.walker import discover_services
+from orbitkb.discovery.jvm_stack import JvmSpringDetector
+from orbitkb.discovery.node_ts import NodeTsDetector
+from orbitkb.discovery.python_stack import PythonDetector
+from orbitkb.discovery.walker import discover_services
 
 SAMPLE_ROOT = Path(__file__).resolve().parent.parent / "verify" / "sample_project"
 

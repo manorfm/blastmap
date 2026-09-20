@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from impactmesh.analysis.engine import StaticAnalysisEngine
+from orbitkb.analysis.engine import StaticAnalysisEngine
 
 
 def test_go_analyzer_maps_route_to_internal_and_persistence_flow(tmp_path: Path):

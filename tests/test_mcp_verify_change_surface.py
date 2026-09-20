@@ -7,10 +7,10 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import change_surface as change_surface_repo
-from impactmesh.db.repositories import repositories as repositories_repo
-from impactmesh.db.repositories import services as services_repo
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import change_surface as change_surface_repo
+from orbitkb.db.repositories import repositories as repositories_repo
+from orbitkb.db.repositories import services as services_repo
 
 from tests.mcp_test_helpers import content_json, server_params
 

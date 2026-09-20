@@ -1,4 +1,4 @@
-from impactmesh.analysis.smells import find_entrypoint_smells
+from orbitkb.analysis.smells import find_entrypoint_smells
 
 
 def test_graphql_gateway_with_direct_write_is_a_bff_leakage_hypothesis():

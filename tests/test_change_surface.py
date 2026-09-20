@@ -5,17 +5,17 @@ deterministically without a real subprocess call — matching the harness's own
 """
 from pathlib import Path
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import apis as apis_repo
-from impactmesh.db.repositories import change_surface as change_surface_repo
-from impactmesh.db.repositories import embeddings as embeddings_repo
-from impactmesh.db.repositories import messages as messages_repo
-from impactmesh.db.repositories import persistence as persistence_repo
-from impactmesh.db.repositories import search as search_repo
-from impactmesh.db.repositories import service_calls as service_calls_repo
-from impactmesh.db.repositories import services as services_repo
-from impactmesh.generation import change_surface
-from impactmesh.generation.backend_base import GenerationOutcome
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import change_surface as change_surface_repo
+from orbitkb.db.repositories import embeddings as embeddings_repo
+from orbitkb.db.repositories import messages as messages_repo
+from orbitkb.db.repositories import persistence as persistence_repo
+from orbitkb.db.repositories import search as search_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation import change_surface
+from orbitkb.generation.backend_base import GenerationOutcome
 
 
 class FakeBackend:
@@ -191,7 +191,7 @@ def test_similar_past_tasks_surfaces_a_prior_run_with_its_verified_outcome(tmp_p
             "secondary": [], "no_change": [],
         }),
     )
-    from impactmesh.db.repositories import verification as verification_repo
+    from orbitkb.db.repositories import verification as verification_repo
 
     verification_repo.record_verification(
         conn, first["run_id"], repository="checkout-repo", since_commit="c1",

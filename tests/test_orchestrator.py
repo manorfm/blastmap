@@ -7,16 +7,16 @@ from pathlib import Path
 
 import pytest
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import apis as apis_repo
-from impactmesh.db.repositories import components as components_repo
-from impactmesh.db.repositories import embeddings as embeddings_repo
-from impactmesh.db.repositories import repositories as repositories_repo
-from impactmesh.db.repositories import services as services_repo
-from impactmesh.discovery.registry import detector_for
-from impactmesh.discovery.walker import discover_services
-from impactmesh.generation.backend_base import GenerationError, GenerationOutcome
-from impactmesh.generation.orchestrator import DiscoveryError, index_path, index_service
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import components as components_repo
+from orbitkb.db.repositories import embeddings as embeddings_repo
+from orbitkb.db.repositories import repositories as repositories_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.discovery.registry import detector_for
+from orbitkb.discovery.walker import discover_services
+from orbitkb.generation.backend_base import GenerationError, GenerationOutcome
+from orbitkb.generation.orchestrator import DiscoveryError, index_path, index_service
 
 SAMPLE_ROOT = Path(__file__).resolve().parent.parent / "verify" / "sample_project"
 
@@ -94,7 +94,7 @@ class RecordingOrchestratorBackend(FakeOrchestratorBackend):
 
 
 def test_message_provider_is_persisted_from_the_llm_result(tmp_path: Path):
-    from impactmesh.db.repositories import messages as messages_repo
+    from orbitkb.db.repositories import messages as messages_repo
 
     conn = open_db(tmp_path / "test.db")
     index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend())
@@ -239,7 +239,7 @@ def test_index_path_service_override_requires_single_candidate(tmp_path: Path):
 def test_index_path_with_service_and_stack_override_bypasses_discovery(tmp_path: Path):
     """A folder discover_services() would never recognize on its own (no manifest,
     no entry-point file at all — the exact shape of a library/CLI package like
-    impactmesh itself) still indexes successfully when the caller explicitly names both
+    orbitkb itself) still indexes successfully when the caller explicitly names both
     --service and --stack, per generation/orchestrator.py's documented escape hatch."""
     conn = open_db(tmp_path / "test.db")
     unrecognizable_dir = tmp_path / "some-library"

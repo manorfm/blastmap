@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import apis as apis_repo
-from impactmesh.db.repositories import search as search_repo
-from impactmesh.db.repositories import service_calls as service_calls_repo
-from impactmesh.db.repositories import services as services_repo
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import search as search_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
+from orbitkb.db.repositories import services as services_repo
 
 
 def test_search_finds_service_api_and_relationship(tmp_path: Path):

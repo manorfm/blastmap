@@ -1,7 +1,7 @@
-from impactmesh.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import flows, services
-from impactmesh.mcp import queries
+from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import flows, services
+from orbitkb.mcp import queries
 
 
 def test_entrypoint_tools_keep_transport_and_flow_context_separate(tmp_path):

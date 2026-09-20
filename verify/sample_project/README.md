@@ -1,11 +1,11 @@
 # verify/sample_project — the "ShopFlow" fixture
 
-This is ImpactMesh's own test fixture, not a product you run. It is a small,
+This is OrbitKB's own test fixture, not a product you run. It is a small,
 intentionally realistic e-commerce checkout system ("ShopFlow") made of three
 microservices, each built with a **different architecture style**, a
 **different database**, and at least one **deliberate, documented
 architecture smell** — so that indexing this fixture exercises far more of
-ImpactMesh's discovery/generation/analysis surface than a handful of one-file
+OrbitKB's discovery/generation/analysis surface than a handful of one-file
 toy services ever could.
 
 Every automated `pytest` assertion that depends on this fixture's exact shape
@@ -22,7 +22,7 @@ nothing here changes that.
 **What this README is for** is the other half: when someone runs the real
 pipeline against this fixture with a real LLM backend —
 ```bash
-impactmesh index verify/sample_project --backend claude --db verify/sample_project.db
+orbitkb index verify/sample_project --backend claude --db verify/sample_project.db
 ```
 — the result is not something you can byte-diff against a golden file (a
 different model, prompt revision, or temperature will phrase things
@@ -152,18 +152,18 @@ each of these, not just miss them silently:
    `orders-service/adapters/notification_client.py` and
    `payments-service/clients/notify_hub.client.js` call
    `notify-hub.vendor.io` independently, with no shared client — exactly the
-   shape `impactmesh.generation.architecture.find_duplicate_external_integrations`
+   shape `orbitkb.generation.architecture.find_duplicate_external_integrations`
    looks for once both services are indexed into the same run.
 
-None of these are bugs in ImpactMesh itself — they're planted in the fixture
+None of these are bugs in OrbitKB itself — they're planted in the fixture
 on purpose, each in exactly one place, so a validation pass has something
 concrete and unambiguous to either catch or miss.
 
 ## Known, honest detector limitations this fixture also exercises
 
 Not everything here is a "smell" — some of it is a real, acceptable gap in
-ImpactMesh's own regex-based discovery heuristics (see
-`impactmesh/discovery/*.py`), worth knowing about rather than mistaking for a
+OrbitKB's own regex-based discovery heuristics (see
+`orbitkb/discovery/*.py`), worth knowing about rather than mistaking for a
 fixture bug:
 
 - **Mongoose model names aren't captured.** `payments-service`'s two
@@ -176,15 +176,15 @@ fixture bug:
   the surrounding file, should still resolve the real names in the final
   generated output; the discovery *hint* just can't offer them for free.
 - **Cassandra engine recognition.** Before this fixture existed, none of
-  ImpactMesh's three JVM/Python/Node engine-keyword maps recognized Cassandra
+  OrbitKB's three JVM/Python/Node engine-keyword maps recognized Cassandra
   at all — a service using it would have silently produced `engine: unknown`
   everywhere, despite clear evidence in the manifest. Building this fixture
   is what surfaced that gap, so it's now fixed in
-  `impactmesh/discovery/jvm_stack.py`'s `_ENGINE_DRIVER_KEYWORDS` (recognizing
+  `orbitkb/discovery/jvm_stack.py`'s `_ENGINE_DRIVER_KEYWORDS` (recognizing
   `spring-boot-starter-data-cassandra`, `cassandra-driver`, `datastax`) and
   in the `cassandra` enum value now accepted by
-  `impactmesh/generation/schemas/persistence.schema.json`,
-  `impactmesh/db/schema.sql`'s comment, and the relevant MCP tool docstrings.
+  `orbitkb/generation/schemas/persistence.schema.json`,
+  `orbitkb/db/schema.sql`'s comment, and the relevant MCP tool docstrings.
   `inventory-service`'s persistence hint should now resolve to
   `engine_hint: "cassandra"` end to end.
 - **Only one Kafka publish call per file is guessable when several look
@@ -199,7 +199,7 @@ fixture bug:
 
 ## What a real indexing run should conclude (qualitative, not exact-match)
 
-If you're comparing a real `impactmesh index` + `describe_service` /
+If you're comparing a real `orbitkb index` + `describe_service` /
 `find_architecture_smells` run against this document, look for whether it
 correctly captures the *substance* below — exact wording, confidence scores,
 and phrasing will differ every run and should never be compared literally:

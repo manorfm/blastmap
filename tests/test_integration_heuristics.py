@@ -1,4 +1,4 @@
-from impactmesh.discovery.integration_heuristics import classify_resource_type, classify_target_kind
+from orbitkb.discovery.integration_heuristics import classify_resource_type, classify_target_kind
 
 
 def test_known_vendor_names_are_classified_external():

@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from impactmesh.analysis.depth import DepthMode, NoopDepthProvider, _parse_edges, resolve_depth_provider
-from impactmesh.analysis.engine import StaticAnalysisEngine
-from impactmesh.analysis.models import AnalysisResult, Evidence, FlowEdge
+from orbitkb.analysis.depth import DepthMode, NoopDepthProvider, _parse_edges, resolve_depth_provider
+from orbitkb.analysis.engine import StaticAnalysisEngine
+from orbitkb.analysis.models import AnalysisResult, Evidence, FlowEdge
 
 
 def test_off_mode_always_uses_a_noop_provider():

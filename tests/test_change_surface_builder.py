@@ -1,6 +1,6 @@
 """TDD coverage for ChangeSurfaceBuilder, which replaced the flat dict assembled
 inline in analyze_change_surface (see generation/change_surface.py)."""
-from impactmesh.generation.change_surface import ChangeSurfaceBuilder
+from orbitkb.generation.change_surface import ChangeSurfaceBuilder
 
 
 def test_build_emits_empty_lists_by_default():

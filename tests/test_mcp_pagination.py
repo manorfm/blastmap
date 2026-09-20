@@ -4,12 +4,12 @@ total/truncated so a real service with dozens of endpoints can't blow an
 agent's context budget by default (see README's context-efficiency notes)."""
 from pathlib import Path
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import apis as apis_repo
-from impactmesh.db.repositories import messages as messages_repo
-from impactmesh.db.repositories import persistence as persistence_repo
-from impactmesh.db.repositories import services as services_repo
-from impactmesh.mcp import queries
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import messages as messages_repo
+from orbitkb.db.repositories import persistence as persistence_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.mcp import queries
 
 
 def _seed_many_apis(conn, service_id: int, count: int) -> None:

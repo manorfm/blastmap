@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from impactmesh.generation.backend_base import GenerationError, GenerationOutcome, LLMUsage
-from impactmesh.generation.llm_harness import generate_with_retry
+from orbitkb.generation.backend_base import GenerationError, GenerationOutcome, LLMUsage
+from orbitkb.generation.llm_harness import generate_with_retry
 
 SCHEMA = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
 

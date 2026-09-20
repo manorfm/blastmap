@@ -11,16 +11,16 @@ PYTHON := $(shell test -x .venv/bin/python3 && echo .venv/bin/python3 || echo py
 endif
 
 # Also put .venv/bin first on PATH for every recipe, so things spawned as a
-# bare command (the `impactmesh` console script itself, in tests/test_rename_smoke.py)
+# bare command (the `orbitkb` console script itself, in tests/test_rename_smoke.py)
 # resolve to the venv's copy too, without requiring `source .venv/bin/activate`.
 ifneq ($(wildcard .venv/bin),)
 export PATH := $(abspath .venv/bin):$(PATH)
 endif
 
-DB_DEFAULT := $(HOME)/.impactmesh/impactmesh.db
+DB_DEFAULT := $(HOME)/.orbitkb/orbitkb.db
 
 help:
-	@echo "impactmesh — available targets:"
+	@echo "orbitkb — available targets:"
 	@echo "  install         Install the package (runtime only)"
 	@echo "  dev             Install the package with dev/test/security tooling + git hooks"
 	@echo "  hooks           Install git hooks (commit-msg: enforces Conventional Commits)"
@@ -58,11 +58,11 @@ coverage:
 	$(PYTHON) -m coverage report -m
 
 lint:
-	$(PYTHON) -m ruff check --select F401,F841 impactmesh tests scripts
-	$(PYTHON) -m vulture impactmesh --min-confidence 80
+	$(PYTHON) -m ruff check --select F401,F841 orbitkb tests scripts
+	$(PYTHON) -m vulture orbitkb --min-confidence 80
 
 sast:
-	$(PYTHON) -m bandit -c pyproject.toml -r impactmesh
+	$(PYTHON) -m bandit -c pyproject.toml -r orbitkb
 
 sca:
 	$(PYTHON) -m pip_audit
@@ -82,7 +82,7 @@ build: clean
 	$(PYTHON) -m build
 
 clean:
-	rm -rf build dist *.egg-info impactmesh.egg-info
+	rm -rf build dist *.egg-info orbitkb.egg-info
 
 # `release` computes the bump (major/minor/patch) from Conventional Commits
 # since the last tag (scripts/versioning.py — the same logic the commit-msg
@@ -117,9 +117,9 @@ _release: verify
 		echo "release: local main is behind origin/main -- pull first" >&2; exit 1; \
 	fi
 	$(PYTHON) scripts/bump_version.py $(KIND)
-	$(eval NEW_VERSION := $(shell $(PYTHON) -c "import impactmesh; print(impactmesh.__version__)"))
+	$(eval NEW_VERSION := $(shell $(PYTHON) -c "import orbitkb; print(orbitkb.__version__)"))
 	$(PYTHON) scripts/ensure_badges.py
-	git add pyproject.toml impactmesh/__init__.py README.md
+	git add pyproject.toml orbitkb/__init__.py README.md
 	git commit -m "chore: released v$(NEW_VERSION)"
 	git tag "v$(NEW_VERSION)"
 	git push origin main

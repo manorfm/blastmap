@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from impactmesh.db.connection import open_db
+from orbitkb.db.connection import open_db
 
 
 def test_schema_initializes(tmp_path: Path):

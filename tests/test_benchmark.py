@@ -7,10 +7,10 @@ from pathlib import Path
 from benchmark.runner import run_retrieval_recall
 from benchmark.tasks import TASKS, BenchmarkTask
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import embeddings as embeddings_repo
-from impactmesh.db.repositories import services as services_repo
-from impactmesh.generation.retrieval import FallbackRetrieval, KeywordGraphRetrieval, SemanticRetrieval
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import embeddings as embeddings_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation.retrieval import FallbackRetrieval, KeywordGraphRetrieval, SemanticRetrieval
 
 
 def test_every_benchmark_task_is_fully_recalled(tmp_path: Path):

@@ -1,0 +1,64 @@
+"""The `index_runs` table: one row per `index`/`update` invocation for one
+service, used by `orbitkb status` to show indexing history and token/cost usage."""
+from __future__ import annotations
+
+import sqlite3
+
+from ._util import now
+
+
+def start_index_run(conn: sqlite3.Connection, service_id: int | None, backend: str) -> int:
+    cur = conn.execute(
+        "INSERT INTO index_runs (service_id, started_at, backend, status) VALUES (?, ?, ?, 'partial')",
+        (service_id, now(), backend),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def finish_index_run(
+    conn: sqlite3.Connection,
+    run_id: int,
+    status: str,
+    files_changed: int,
+    llm_calls: int,
+    notes: str | None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cost_usd: float | None = None,
+) -> None:
+    conn.execute(
+        """UPDATE index_runs
+           SET finished_at = ?, status = ?, files_changed = ?, llm_calls = ?, notes = ?,
+               input_tokens = ?, output_tokens = ?, cost_usd = ?
+           WHERE id = ?""",
+        (now(), status, files_changed, llm_calls, notes, input_tokens, output_tokens, cost_usd, run_id),
+    )
+    conn.commit()
+
+
+def recent_index_runs(conn: sqlite3.Connection, service_id: int | None = None, limit: int = 10) -> list[sqlite3.Row]:
+    if service_id is not None:
+        return conn.execute(
+            "SELECT * FROM index_runs WHERE service_id = ? ORDER BY id DESC LIMIT ?", (service_id, limit)
+        ).fetchall()
+    return conn.execute("SELECT * FROM index_runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def usage_totals(conn: sqlite3.Connection, service_id: int | None = None) -> dict:
+    """Cumulative token/cost usage across every index_runs row (optionally scoped to
+    one service) — the number `orbitkb status` prints alongside the recent-runs list,
+    since that list is capped and shouldn't be mistaken for the full total."""
+    if service_id is not None:
+        row = conn.execute(
+            """SELECT SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+                      SUM(cost_usd) AS cost_usd
+               FROM index_runs WHERE service_id = ?""",
+            (service_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cost_usd) AS cost_usd "
+            "FROM index_runs"
+        ).fetchone()
+    return {"input_tokens": row["input_tokens"], "output_tokens": row["output_tokens"], "cost_usd": row["cost_usd"]}

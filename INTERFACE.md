@@ -1,6 +1,6 @@
-# ImpactMesh interface contract
+# OrbitKB interface contract
 
-ImpactMesh is an MCP knowledge layer. Its responses are structured JSON and use
+OrbitKB is an MCP knowledge layer. Its responses are structured JSON and use
 progressive disclosure: list a bounded set, select one item, then ask for detail.
 The server never returns a complete repository merely because an agent asks a broad
 question.
@@ -49,7 +49,7 @@ as possible BFF domain-policy leakage for human validation.
 ## External depth-provider contract
 
 Configure `--depth-command`, optional repeated `--depth-arg`, and `--depth-tool`.
-ImpactMesh starts the external process as a stdio MCP server and calls the configured
+OrbitKB starts the external process as a stdio MCP server and calls the configured
 tool once per selected entrypoint with:
 
 ```json

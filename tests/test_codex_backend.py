@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from impactmesh.generation.backend_base import GenerationError
-from impactmesh.generation.codex_backend import CodexBackend
+from orbitkb.generation.backend_base import GenerationError
+from orbitkb.generation.codex_backend import CodexBackend
 
 SCHEMA = {"type": "object", "properties": {"summary": {"type": "string"}}}
 

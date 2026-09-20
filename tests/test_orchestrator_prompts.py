@@ -1,13 +1,13 @@
 """Unit tests for prompt composition in generation/orchestrator.py — kept separate from
 test_orchestrator.py (which drives the full indexing pipeline) because these assert on
 the exact text handed to the LLM, not on what ends up persisted."""
-from impactmesh.discovery.base import (
+from orbitkb.discovery.base import (
     CodeExcerpt,
     EndpointHint,
     OutboundCallHint,
     ServiceHints,
 )
-from impactmesh.generation.orchestrator import _render_api_detail_prompt
+from orbitkb.generation.orchestrator import _render_api_detail_prompt
 
 
 def _excerpt(file_path: str) -> CodeExcerpt:

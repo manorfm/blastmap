@@ -1,6 +1,6 @@
-from impactmesh.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import flows, services
+from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import flows, services
 
 
 def test_flow_snapshot_is_replaced_per_service(tmp_path):

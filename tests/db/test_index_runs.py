@@ -2,9 +2,9 @@
 accounting (finish_index_run's new columns and usage_totals)."""
 from pathlib import Path
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import index_runs as repository
-from impactmesh.db.repositories import services as services_repo
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import index_runs as repository
+from orbitkb.db.repositories import services as services_repo
 
 
 def test_finish_index_run_persists_usage_columns(tmp_path: Path):

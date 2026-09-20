@@ -1,5 +1,5 @@
 [project]
-name = "impactmesh"
+name = "orbitkb"
 version = "1.3.0"
 description = "Task-aware change intelligence for AI coding agents, served via MCP."
 readme = "README.md"
@@ -50,25 +50,25 @@ semantic = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/manorfm/impactmesh"
-Repository = "https://github.com/manorfm/impactmesh"
-Issues = "https://github.com/manorfm/impactmesh/issues"
+Homepage = "https://github.com/manorfm/orbitkb"
+Repository = "https://github.com/manorfm/orbitkb"
+Issues = "https://github.com/manorfm/orbitkb/issues"
 
 [project.scripts]
-impactmesh = "impactmesh.cli:main"
+orbitkb = "orbitkb.cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["impactmesh*"]
+include = ["orbitkb*"]
 
 [tool.setuptools.package-data]
-impactmesh = ["db/schema.sql", "generation/prompts/*.md", "generation/schemas/*.json"]
+orbitkb = ["db/schema.sql", "generation/prompts/*.md", "generation/schemas/*.json"]
 
 [tool.coverage.run]
-source = ["impactmesh"]
+source = ["orbitkb"]
 # get_relationships/find_change_surface are exercised via a subprocess MCP server
 # (tests/test_mcp_*.py drive it over real stdio), so coverage must follow across the
 # process boundary: parallel + the COVERAGE_PROCESS_START env var + a `coverage.pth`

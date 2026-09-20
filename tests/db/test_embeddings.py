@@ -4,10 +4,10 @@ module since they're the same concern for two different aggregates."""
 import json
 from pathlib import Path
 
-from impactmesh.db.connection import open_db
-from impactmesh.db.repositories import change_surface as change_surface_repo
-from impactmesh.db.repositories import embeddings as repository
-from impactmesh.db.repositories import services as services_repo
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import change_surface as change_surface_repo
+from orbitkb.db.repositories import embeddings as repository
+from orbitkb.db.repositories import services as services_repo
 
 SAMPLE_RESULT = {
     "primary": [], "secondary": [], "no_change_hint": [], "external_integrations": [], "unmapped_internal_hint": [],
