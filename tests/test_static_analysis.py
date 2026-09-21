@@ -321,6 +321,30 @@ func register() { router.GET("/orders/{id}", Get) }
     assert [item["name"] for item in go.contracts["orders.Get"]["parameters"]] == ["id", "expand", "X-Trace"]
 
 
+def test_rest_contract_extracts_literal_response_statuses(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''class OrdersController {
+  @PostMapping("/orders") @ResponseStatus(HttpStatus.CREATED)
+  Order create(Order order) { return order; }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "orders.go").write_text(
+        '''package orders
+func Create(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusCreated) }
+func register() { router.POST("/orders", Create) }
+''',
+        encoding="utf-8",
+    )
+
+    java = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+    go = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert java.contracts["OrdersController.create"]["response_statuses"] == [{"code": 201, "name": "CREATED"}]
+    assert go.contracts["orders.Create"]["response_statuses"] == [{"code": 201, "name": "CREATED"}]
+
+
 def test_native_flow_boundaries_are_extracted_from_declared_control_flow(tmp_path: Path):
     (tmp_path / "OrdersController.java").write_text(
         '''class OrdersController {

@@ -82,6 +82,9 @@ when both source literals make the resulting route deterministic.
 HTTP `contract.parameters` lists literal `path`, `query` and `header` bindings with
 name, variable, type and required status when available. Unproven Go types remain
 `null` rather than inferred.
+HTTP `contract.response_statuses` is an optional, ordered list of source-proven
+`{code, name}` values. It is emitted only for literal Spring status declarations or
+Go `http.Status...` calls; dynamic response outcomes remain absent.
 When a local Java DTO or Go `struct` declaration is available, request/response
 objects may additionally expose `fields` with their source-declared type, required
 status and validation tags.

@@ -100,6 +100,9 @@ composed with literal handler routes; dynamic path composition is left unchanged
 REST contracts also list source-proven path, query and header bindings. Spring
 provides declared parameter types; Go HTTP extraction leaves types unknown unless a
 future local type proof is available.
+Literal response statuses are included when a Spring handler declares an HTTP status
+or a Go handler writes a literal standard-library status; dynamic outcomes are
+omitted rather than guessed.
 When a referenced Java DTO or Go `struct` is declared in the indexed source, its
 locally observed fields and validation tags are attached to that contract.
 

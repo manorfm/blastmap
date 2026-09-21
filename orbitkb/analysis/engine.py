@@ -492,13 +492,16 @@ def _go_http_contract(declaration: str) -> dict:
     decoded = re.search(r"\.Decode\s*\(\s*&?(\w+)\s*\)", declaration)
     request_name = decoded.group(1) if decoded else None
     request_type = variables.get(request_name or "")
-    return {
+    contract = {
         "request": {"name": request_name, "type": request_type, "required": True} if request_type else None,
         "returns": None,
         "validations": [],
         "authorization": [],
         "parameters": _go_bound_parameters(declaration),
     }
+    if statuses := _go_response_statuses(declaration):
+        contract["response_statuses"] = statuses
+    return contract
 
 
 def _message_contract(channel: str, declaration: str, language: str) -> dict:
@@ -550,13 +553,35 @@ def _spring_http_contract(declaration: str, annotations: str, kotlin: bool = Fal
     return_type = _spring_return_type(declaration, kotlin)
     validations = re.findall(r"@(Valid|Validated|NotNull|NotBlank|NotEmpty|Positive|Negative|Size|Pattern)\b", declaration)
     authorization = re.findall(r"@(PreAuthorize|Secured|RolesAllowed)\b", annotations)
-    return {
+    contract = {
         "request": request,
         "returns": {"type": return_type, "required": True} if return_type else None,
         "validations": validations,
         "authorization": authorization,
         "parameters": _spring_bound_parameters(declaration, kotlin),
     }
+    if statuses := _spring_response_statuses(f"{annotations}\n{declaration}"):
+        contract["response_statuses"] = statuses
+    return contract
+
+
+_HTTP_STATUS_CODES = {"OK": 200, "CREATED": 201, "ACCEPTED": 202, "NO_CONTENT": 204, "BAD_REQUEST": 400, "NOT_FOUND": 404, "CONFLICT": 409}
+
+
+def _spring_response_statuses(source: str) -> list[dict]:
+    names = re.findall(r"(?:ResponseStatus|HttpStatus\.)\s*\(?\s*HttpStatus\.([A-Z_]+)", source)
+    names += re.findall(r"HttpStatus\.([A-Z_]+)", source)
+    return _status_values(names)
+
+
+def _go_response_statuses(source: str) -> list[dict]:
+    names = re.findall(r"WriteHeader\s*\(\s*http\.Status([A-Za-z]+)\s*\)", source)
+    normalized = [re.sub(r"(?<!^)([A-Z])", r"_\1", name).upper() for name in names]
+    return _status_values(normalized)
+
+
+def _status_values(names: list[str]) -> list[dict]:
+    return [{"code": _HTTP_STATUS_CODES[name], "name": name} for name in dict.fromkeys(names) if name in _HTTP_STATUS_CODES]
 
 
 def _spring_bound_parameters(declaration: str, kotlin: bool) -> list[dict]:
