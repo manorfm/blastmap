@@ -100,6 +100,14 @@ _MONGOOSE_WRITE_METHODS = frozenset({
     "findbyidandupdate", "findoneanddelete", "findoneandupdate", "insertmany",
     "replaceone", "updatemany", "updateone",
 })
+_PRISMA_READ_METHODS = frozenset({
+    "aggregate", "count", "findfirst", "findfirstorthrow", "findmany", "findunique",
+    "finduniqueorthrow", "groupby",
+})
+_PRISMA_WRITE_METHODS = frozenset({
+    "create", "createmany", "createmanyandreturn", "delete", "deletemany",
+    "deletemanyandreturn", "update", "updatemany", "updatemanyandreturn", "upsert",
+})
 
 
 def _mongoose_model_variables(source: str) -> frozenset[str]:
@@ -117,6 +125,26 @@ def _mongoose_call_kind(target: str, model_variables: frozenset[str]) -> str | N
     if method.lower() in _MONGOOSE_READ_METHODS:
         return "reads"
     if method.lower() in _MONGOOSE_WRITE_METHODS:
+        return "writes"
+    return None
+
+
+def _prisma_client_variables(source: str) -> frozenset[str]:
+    """Return names locally constructed through the explicit Prisma client type."""
+    return frozenset(re.findall(
+        r"\b(?:const|let|var)\s+(\w+)\s*=\s*new\s+PrismaClient\s*(?:<[^>]+>)?\s*\(", source,
+    ))
+
+
+def _prisma_call_kind(target: str, client_variables: frozenset[str]) -> str | None:
+    """Classify exact model delegates on a locally constructed Prisma client."""
+    client, separator, delegate_and_method = target.partition(".")
+    delegate, separator, method = delegate_and_method.partition(".")
+    if not separator or client not in client_variables or not delegate.isidentifier():
+        return None
+    if method.lower() in _PRISMA_READ_METHODS:
+        return "reads"
+    if method.lower() in _PRISMA_WRITE_METHODS:
         return "writes"
     return None
 
@@ -380,6 +408,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         result = AnalysisResult()
         imports = _node_named_imports(source_text)
         mongoose_models = _mongoose_model_variables(source_text)
+        prisma_clients = _prisma_client_variables(source_text)
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
         for node in _walk(tree):
             if node.type != "function_declaration":
@@ -391,7 +420,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             name = _text(name_node, source)
             function = _Function(name, f"{path.stem}.{name}", body, node)
             result.symbols.append(_symbol(function, path, root, imports=imports))
-            result.edges.extend(self._edges_for_node(function, path, root, source, mongoose_models))
+            result.edges.extend(self._edges_for_node(function, path, root, source, mongoose_models, prisma_clients))
             result.boundaries.extend(self._boundaries_for(function, path, root, source))
         for parent in _walk(tree):
             if parent.type != "pair" or _text(parent.child_by_field_name("key"), source) not in {"Query", "Mutation", "Subscription"}:
@@ -410,7 +439,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 result.entrypoints.append(EntryPoint("graphql", operation.upper(), name, symbol, _evidence(path, root, resolver)))
                 function = _Function(name, symbol, handler, resolver)
                 result.symbols.append(_symbol(function, path, root, imports=imports))
-                result.edges.extend(self._edges_for_node(function, path, root, source, mongoose_models))
+                result.edges.extend(self._edges_for_node(function, path, root, source, mongoose_models, prisma_clients))
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
         for node in _walk(tree):
             if node.type != "call_expression":
@@ -428,7 +457,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
             function = _Function(channel, symbol, handler, node)
             result.symbols.append(_symbol(function, path, root, imports=imports))
-            result.edges.extend(self._edges_for_node(function, path, root, source, mongoose_models))
+            result.edges.extend(self._edges_for_node(function, path, root, source, mongoose_models, prisma_clients))
             result.boundaries.extend(self._boundaries_for(function, path, root, source))
             result.contracts[symbol] = _message_contract(channel, _text(handler, source), "node")
         return result
@@ -436,10 +465,19 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
     @staticmethod
     def _edges_for_node(
         function: _Function, path: Path, root: Path, source: bytes, mongoose_models: frozenset[str],
+        prisma_clients: frozenset[str],
     ) -> list[FlowEdge]:
         return [
-            FlowEdge(edge.source, edge.target, _mongoose_call_kind(edge.target, mongoose_models) or edge.kind,
-                     edge.evidence, edge.confidence, edge.origin)
+            FlowEdge(
+                edge.source,
+                edge.target,
+                _mongoose_call_kind(edge.target, mongoose_models)
+                or _prisma_call_kind(edge.target, prisma_clients)
+                or edge.kind,
+                edge.evidence,
+                edge.confidence,
+                edge.origin,
+            )
             for edge in _FileAnalyzer._edges_for(function, path, root, source)
         ]
 

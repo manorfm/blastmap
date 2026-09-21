@@ -122,6 +122,8 @@ separate analysis or reachability claim.
 For Node/TypeScript, Mongoose calls are classified only when the receiver was
 locally declared by `mongoose.model`; exact operation names determine `reads` or
 `writes`.
+Prisma calls are classified only for model delegates on a client locally constructed
+with `new PrismaClient`, again using exact operation names.
 
 `describe_persistence` also returns `static_facts` for locally proven JPA, GORM or
 Mongoose mappings, including entity/table or collection name, local owner and

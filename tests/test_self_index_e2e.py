@@ -468,6 +468,37 @@ export const resolvers = {
     }]
 
 
+@pytest.mark.anyio
+async def test_cli_to_mcp_exposes_prisma_persistence_operations(tmp_path: Path, fake_backends):
+    root = tmp_path / "orders"
+    root.mkdir()
+    (root / "resolvers.ts").write_text(
+        '''const prisma = new PrismaClient();
+export const resolvers = {
+  Query: { order: (_: unknown, id: string) => prisma.order.findUnique({ where: { id } }) },
+};
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "orders.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-prisma", "--stack", "node-ts",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_entrypoint", {
+            "service": "orders-prisma", "kind": "graphql", "method": "QUERY", "name": "order",
+        }))
+
+    assert result["persistence_operations"] == [{
+        "operation": "reads", "target": "prisma.order.findUnique",
+        "evidence": {"file": "resolvers.ts", "start_line": 3, "end_line": 3},
+    }]
+
+
 def test_knowledge_is_cumulative_across_two_independently_indexed_roots(tmp_path: Path, fake_backends):
     """One database, two separate `orbitkb index` invocations — orbitkb's own
     source and the project's own sample fixture — proving the "index one repo at a

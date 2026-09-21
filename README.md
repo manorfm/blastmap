@@ -133,6 +133,9 @@ Its `persistence_operations` is a compact projection of reachable `reads` and
 For Node/TypeScript, Mongoose operations enter that projection only when the
 receiver was locally declared by `mongoose.model`; exact operation names determine
 whether the operation reads or writes.
+Prisma operations are classified with the same conservative rule: the client must
+be locally constructed with `new PrismaClient`, and only exact model-delegate
+operation names are treated as reads or writes.
 
 `describe_persistence` exposes source-proven `static_facts` independently of the
 generated entity summaries. JPA `@Entity`/`@Table` and GORM-tagged structs establish

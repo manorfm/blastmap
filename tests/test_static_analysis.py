@@ -562,6 +562,23 @@ model Order {
     ]
 
 
+def test_node_analyzer_classifies_explicit_prisma_client_operations(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''const prisma = new PrismaClient();
+function findOrder(id: string) { return prisma.order.findUnique({ where: { id } }); }
+function upsertOrder(input: CreateOrderInput) { return prisma.order.upsert({ create: input }); }
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("orders.findOrder", "prisma.order.findUnique", "reads"),
+        ("orders.upsertOrder", "prisma.order.upsert", "writes"),
+    }
+
+
 def test_go_http_contract_keeps_the_json_decoded_payload_type(tmp_path: Path):
     (tmp_path / "orders.go").write_text(
         '''package orders
