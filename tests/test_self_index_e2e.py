@@ -323,6 +323,30 @@ async def test_cli_to_mcp_preserves_a_static_mongoose_persistence_fact(tmp_path:
 
 
 @pytest.mark.anyio
+async def test_cli_to_mcp_preserves_a_static_spring_mongo_persistence_fact(tmp_path: Path, fake_backends):
+    root = tmp_path / "orders"
+    root.mkdir()
+    (root / "Order.java").write_text(
+        '''@Document(collection = "orders") class Order {}''', encoding="utf-8",
+    )
+    db_path = tmp_path / "orders.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-mongo", "--stack", "jvm-spring",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_persistence", {"service": "orders-mongo"}))
+
+    assert result["static_facts"] == [{
+        "name": "orders", "kind": "document", "owner": "Order",
+        "evidence": {"file": "Order.java", "start_line": 1, "end_line": 1},
+    }]
+
+
+@pytest.mark.anyio
 async def test_cli_to_mcp_preserves_literal_rest_response_statuses(tmp_path: Path, fake_backends):
     root = tmp_path / "orders"
     root.mkdir()

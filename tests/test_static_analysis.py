@@ -509,6 +509,22 @@ def test_node_analyzer_extracts_literal_mongoose_collection_ownership(tmp_path: 
     ]
 
 
+def test_spring_analyzers_extract_literal_document_collection_ownership(tmp_path: Path):
+    (tmp_path / "Order.java").write_text(
+        '''@Document(collection = "orders") class Order {}''', encoding="utf-8",
+    )
+    (tmp_path / "Payment.kt").write_text(
+        '''@Document("payments") data class Payment(val id: String)''', encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(fact.name, fact.kind, fact.owner) for fact in result.persistence_facts] == [
+        ("orders", "document", "Order"),
+        ("payments", "document", "Payment"),
+    ]
+
+
 def test_go_http_contract_keeps_the_json_decoded_payload_type(tmp_path: Path):
     (tmp_path / "orders.go").write_text(
         '''package orders
