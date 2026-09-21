@@ -139,6 +139,8 @@ operation names are treated as reads or writes.
 For Go, GORM operations are classified when invoked directly, or through a simple
 fluent chain, on a parameter locally typed as `*gorm.DB`; chains whose root cannot
 be proven without speculation remain generic flow calls.
+Go standard-library SQL operations require a local `*sql.DB` or `*sql.Tx`
+parameter: `Query*` methods read and `Exec*` methods write.
 For Java and Kotlin Spring, standard repository operations require a locally
 declared injected member whose type is a Spring repository; a receiver merely named
 `repository` is not sufficient.

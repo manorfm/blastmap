@@ -127,6 +127,8 @@ with `new PrismaClient`, again using exact operation names.
 Go GORM calls are classified for exact operations invoked directly, or through a
 simple fluent chain, on a parameter locally typed as `*gorm.DB`; unproven roots
 remain generic flow calls.
+Go standard-library SQL operations require a local `*sql.DB` or `*sql.Tx`
+parameter: `Query*` methods read and `Exec*` methods write.
 Java and Kotlin Spring standard repository operations require a locally declared
 injected member whose type is a Spring repository; a receiver name alone is not
 treated as persistence evidence.

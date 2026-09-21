@@ -114,6 +114,8 @@ _GORM_READ_METHODS = frozenset({
 _GORM_WRITE_METHODS = frozenset({
     "create", "delete", "exec", "save", "update", "updatecolumn", "updatecolumns", "updates",
 })
+_DATABASE_SQL_READ_METHODS = frozenset({"Query", "QueryContext", "QueryRow", "QueryRowContext"})
+_DATABASE_SQL_WRITE_METHODS = frozenset({"Exec", "ExecContext"})
 _SPRING_REPOSITORY_READ_METHODS = frozenset({
     "count", "existsById", "findAll", "findAllById", "findById", "getById", "getOne", "getReferenceById",
 })
@@ -188,6 +190,23 @@ def _gorm_fluent_root(receiver: str) -> str | None:
     """Return the root of a simple Go fluent chain without parsing arbitrary calls."""
     match = re.fullmatch(r"(\w+)(?:\.\w+\([^()]*\))*", receiver)
     return match.group(1) if match else None
+
+
+def _database_sql_parameters(declaration: str) -> frozenset[str]:
+    """Return direct parameters whose standard-library database type is explicit."""
+    return frozenset(re.findall(r"\b(\w+)\s+\*sql\.(?:DB|Tx)\b", declaration))
+
+
+def _database_sql_call_kind(target: str, parameters: frozenset[str]) -> str | None:
+    """Classify exact `database/sql` query and execution calls on local parameters."""
+    receiver, separator, method = target.rpartition(".")
+    if not separator or receiver not in parameters:
+        return None
+    if method in _DATABASE_SQL_READ_METHODS:
+        return "reads"
+    if method in _DATABASE_SQL_WRITE_METHODS:
+        return "writes"
+    return None
 
 
 def _spring_repository_receivers(injections: list[Injection], class_name: str) -> frozenset[str]:
@@ -440,11 +459,14 @@ class _GoAnalyzer(_FileAnalyzer):
     @staticmethod
     def _edges_for_go(function: _Function, path: Path, root: Path, source: bytes) -> list[FlowEdge]:
         db_parameters = _gorm_db_parameters(_text(function.declaration, source))
+        sql_parameters = _database_sql_parameters(_text(function.declaration, source))
         return [
             FlowEdge(
                 edge.source,
                 edge.target,
-                _gorm_call_kind(edge.target, db_parameters) or edge.kind,
+                _gorm_call_kind(edge.target, db_parameters)
+                or _database_sql_call_kind(edge.target, sql_parameters)
+                or edge.kind,
                 edge.evidence,
                 edge.confidence,
                 edge.origin,

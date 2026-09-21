@@ -59,6 +59,25 @@ func CreateOrder(ctx context.Context, db *gorm.DB, order Order) { db.WithContext
     }
 
 
+def test_go_analyzer_classifies_explicit_database_sql_operations(tmp_path: Path):
+    (tmp_path / "orders.go").write_text(
+        '''package orders
+func FindOrder(db *sql.DB, id string) { return db.QueryRowContext(ctx, "select id from orders where id = ?", id) }
+func CreateOrder(tx *sql.Tx, id string) { tx.ExecContext(ctx, "insert into orders(id) values(?)", id) }
+func Unproven(client Client, id string) { client.ExecContext(ctx, "insert into orders(id) values(?)", id) }
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("orders.FindOrder", "db.QueryRowContext", "reads"),
+        ("orders.CreateOrder", "tx.ExecContext", "writes"),
+        ("orders.Unproven", "client.ExecContext", "invokes"),
+    }
+
+
 def test_kotlin_spring_analyzer_finds_constructor_injection_and_route(tmp_path: Path):
     source = tmp_path / "OrdersController.kt"
     source.write_text(
