@@ -129,6 +129,8 @@ parameter locally typed as `*gorm.DB`; fluent chains remain generic flow calls.
 Java and Kotlin Spring standard repository operations require a locally declared
 injected member whose type is a Spring repository; a receiver name alone is not
 treated as persistence evidence.
+Derived Spring Data methods, such as `findByStatus` and `deleteByCustomerId`, also
+require a local interface that extends a supported Spring Data contract.
 
 `describe_persistence` also returns `static_facts` for locally proven JPA, GORM or
 Mongoose mappings, including entity/table or collection name, local owner and

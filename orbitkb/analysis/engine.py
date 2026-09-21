@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar
 
@@ -121,6 +121,10 @@ _SPRING_REPOSITORY_WRITE_METHODS = frozenset({
     "delete", "deleteAll", "deleteAllById", "deleteAllByIdInBatch", "deleteAllInBatch",
     "deleteById", "deleteInBatch", "flush", "save", "saveAll", "saveAndFlush",
 })
+_SPRING_DATA_REPOSITORY_BASE_TYPES = frozenset({
+    "CrudRepository", "JpaRepository", "ListCrudRepository", "ListPagingAndSortingRepository",
+    "MongoRepository", "PagingAndSortingRepository", "ReactiveCrudRepository", "ReactiveMongoRepository",
+})
 
 
 def _mongoose_model_variables(source: str) -> frozenset[str]:
@@ -191,10 +195,7 @@ def _spring_repository_receivers(injections: list[Injection], class_name: str) -
 
 def _is_spring_repository_type(contract: str) -> bool:
     type_name = contract.split("<", 1)[0].rsplit(".", 1)[-1]
-    return type_name.endswith("Repository") or type_name in {
-        "CrudRepository", "JpaRepository", "ListCrudRepository", "ListPagingAndSortingRepository",
-        "MongoRepository", "PagingAndSortingRepository", "ReactiveCrudRepository", "ReactiveMongoRepository",
-    }
+    return type_name.endswith("Repository") or type_name in _SPRING_DATA_REPOSITORY_BASE_TYPES
 
 
 def _spring_repository_call_kind(target: str, receivers: frozenset[str]) -> str | None:
@@ -224,6 +225,43 @@ def _spring_edges_for(
             edge.source, edge.target, kind or edge.kind, edge.evidence, edge.confidence, edge.origin,
         ))
     return classified
+
+
+def _spring_data_repository_types(files: list[Path]) -> frozenset[str]:
+    """Find local interfaces whose declaration proves a Spring Data contract."""
+    types = set()
+    for path in files:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for name, parents in re.findall(r"\binterface\s+(\w+)\s*(?:extends|:)\s*([^\{]+)\{", source):
+            if any(re.search(rf"\b{base}\b", parents) for base in _SPRING_DATA_REPOSITORY_BASE_TYPES):
+                types.add(name)
+    return frozenset(types)
+
+
+def _classify_spring_data_derived_operations(
+    edges: list[FlowEdge], injections: list[Injection], repository_types: frozenset[str],
+) -> list[FlowEdge]:
+    """Classify derived methods only from local interface and injection evidence."""
+    injected_types = {
+        injection.consumer: injection.contract.split("<", 1)[0].rsplit(".", 1)[-1]
+        for injection in injections
+    }
+    classified = []
+    for edge in edges:
+        owner, separator, _member = edge.source.rpartition(".")
+        receiver, target_separator, method = edge.target.rpartition(".")
+        repository_type = injected_types.get(f"{owner}.{receiver}") if separator and target_separator else None
+        kind = _spring_derived_operation_kind(method) if repository_type in repository_types else None
+        classified.append(replace(edge, kind=kind) if kind else edge)
+    return classified
+
+
+def _spring_derived_operation_kind(method: str) -> str | None:
+    if method.startswith(("countBy", "existsBy", "findBy", "getBy", "queryBy", "readBy", "streamBy")):
+        return "reads"
+    if method.startswith(("deleteBy", "removeBy")):
+        return "writes"
+    return None
 
 
 @dataclass(frozen=True)
@@ -1056,6 +1094,10 @@ class StaticAnalysisEngine:
         if stack in {"node-ts", "node-js"}:
             schema = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in files if path.suffix in {".graphql", ".gql"})
             result.contracts.update(_GraphqlContractExtractor().contracts(schema))
+        if stack == "jvm-spring":
+            result.edges = _classify_spring_data_derived_operations(
+                result.edges, result.injections, _spring_data_repository_types(files),
+            )
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)
         result.persistence_facts.extend(_persistence_facts(files, root))

@@ -379,6 +379,42 @@ def test_spring_analyzers_classify_only_locally_injected_repository_receivers(tm
     }
 
 
+def test_spring_data_derived_operations_require_a_local_repository_interface(tmp_path: Path):
+    (tmp_path / "OrderRepository.java").write_text(
+        '''interface OrderRepository extends JpaRepository<Order, String> {
+  Order findByStatus(String status);
+  long deleteByCustomerId(String customerId);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Orders.java").write_text(
+        '''class Orders {
+  private final OrderRepository repository;
+  Order find(String status) { return repository.findByStatus(status); }
+  long delete(String customerId) { return repository.deleteByCustomerId(customerId); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Unproven.java").write_text(
+        '''class Unproven {
+  private final UnknownRepository repository;
+  Order find(String status) { return repository.findByStatus(status); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("Orders.find", "repository.findByStatus", "reads"),
+        ("Orders.delete", "repository.deleteByCustomerId", "writes"),
+        ("Unproven.find", "repository.findByStatus", "invokes"),
+    }
+
+
 def test_graphql_schema_contract_is_linked_to_its_resolver_entrypoint(tmp_path: Path):
     (tmp_path / "resolvers.ts").write_text(
         '''export const resolvers = { Mutation: { createOrder: (_, input) => orderService.create(input) } };''',
