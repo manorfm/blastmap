@@ -108,6 +108,12 @@ _PRISMA_WRITE_METHODS = frozenset({
     "create", "createmany", "createmanyandreturn", "delete", "deletemany",
     "deletemanyandreturn", "update", "updatemany", "updatemanyandreturn", "upsert",
 })
+_GORM_READ_METHODS = frozenset({
+    "count", "find", "findinbatches", "first", "last", "pluck", "row", "rows", "scan", "take",
+})
+_GORM_WRITE_METHODS = frozenset({
+    "create", "delete", "exec", "save", "update", "updatecolumn", "updatecolumns", "updates",
+})
 
 
 def _mongoose_model_variables(source: str) -> frozenset[str]:
@@ -145,6 +151,23 @@ def _prisma_call_kind(target: str, client_variables: frozenset[str]) -> str | No
     if method.lower() in _PRISMA_READ_METHODS:
         return "reads"
     if method.lower() in _PRISMA_WRITE_METHODS:
+        return "writes"
+    return None
+
+
+def _gorm_db_parameters(declaration: str) -> frozenset[str]:
+    """Return direct parameters whose GORM database type is locally explicit."""
+    return frozenset(re.findall(r"\b(\w+)\s+\*gorm\.DB\b", declaration))
+
+
+def _gorm_call_kind(target: str, db_parameters: frozenset[str]) -> str | None:
+    """Classify exact operations invoked directly on an explicit GORM parameter."""
+    receiver, separator, method = target.rpartition(".")
+    if not separator or receiver not in db_parameters:
+        return None
+    if method.lower() in _GORM_READ_METHODS:
+        return "reads"
+    if method.lower() in _GORM_WRITE_METHODS:
         return "writes"
     return None
 
@@ -231,7 +254,7 @@ class _GoAnalyzer(_FileAnalyzer):
             functions.append(_Function(name, symbol, body, node))
 
         result = AnalysisResult(
-            edges=[edge for fn in functions for edge in self._edges_for(fn, path, root, source)],
+            edges=[edge for fn in functions for edge in self._edges_for_go(fn, path, root, source)],
             symbols=[_symbol(fn, path, root, imports=imports) for fn in functions],
             message_contracts=[
                 contract
@@ -259,7 +282,7 @@ class _GoAnalyzer(_FileAnalyzer):
                     handler = _Function(channel, symbol, body, args[-1])
                     result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
                     result.symbols.append(_symbol(handler, path, root, imports=imports))
-                    result.edges.extend(self._edges_for(handler, path, root, source))
+                    result.edges.extend(self._edges_for_go(handler, path, root, source))
                     result.boundaries.extend(self._boundaries_for(handler, path, root, source))
                     result.contracts[symbol] = _message_contract(channel, _text(args[-1], source), "go")
             if method not in self.ROUTE_METHODS or len(args) < 2:
@@ -273,6 +296,21 @@ class _GoAnalyzer(_FileAnalyzer):
                 result.entrypoints.append(EntryPoint("http", method, route, function.symbol, _evidence(path, root, node)))
                 result.contracts[function.symbol] = _go_http_contract(_text(function.declaration, source))
         return result
+
+    @staticmethod
+    def _edges_for_go(function: _Function, path: Path, root: Path, source: bytes) -> list[FlowEdge]:
+        db_parameters = _gorm_db_parameters(_text(function.declaration, source))
+        return [
+            FlowEdge(
+                edge.source,
+                edge.target,
+                _gorm_call_kind(edge.target, db_parameters) or edge.kind,
+                edge.evidence,
+                edge.confidence,
+                edge.origin,
+            )
+            for edge in _FileAnalyzer._edges_for(function, path, root, source)
+        ]
 
 
 class _KotlinSpringAnalyzer(_FileAnalyzer):

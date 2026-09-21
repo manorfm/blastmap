@@ -136,6 +136,9 @@ whether the operation reads or writes.
 Prisma operations are classified with the same conservative rule: the client must
 be locally constructed with `new PrismaClient`, and only exact model-delegate
 operation names are treated as reads or writes.
+For Go, GORM operations are classified only when invoked directly on a parameter
+locally typed as `*gorm.DB`; fluent chains are retained as generic flow calls until
+their receiver can be proven without speculation.
 
 `describe_persistence` exposes source-proven `static_facts` independently of the
 generated entity summaries. JPA `@Entity`/`@Table` and GORM-tagged structs establish

@@ -124,6 +124,8 @@ locally declared by `mongoose.model`; exact operation names determine `reads` or
 `writes`.
 Prisma calls are classified only for model delegates on a client locally constructed
 with `new PrismaClient`, again using exact operation names.
+Go GORM calls are classified only for exact operations invoked directly on a
+parameter locally typed as `*gorm.DB`; fluent chains remain generic flow calls.
 
 `describe_persistence` also returns `static_facts` for locally proven JPA, GORM or
 Mongoose mappings, including entity/table or collection name, local owner and

@@ -49,7 +49,11 @@ class BoundedFlowResolver:
         qualifiers: dict[str, str | None],
         implementation_types: dict[str, set[str]],
     ) -> FlowEdge:
-        if edge.kind == "injects" or edge.target in implementations:
+        # Persistence operations are already classified from their direct, locally
+        # proven receiver. Resolving them by a method-name fallback could replace
+        # `db.Create` with an unrelated local `Create` function and corrupt the
+        # compact operation projection exposed to agents.
+        if edge.kind in {"injects", "reads", "writes"} or edge.target in implementations:
             return edge
         source_symbol = symbols.get(edge.source)
         imported_target = BoundedFlowResolver._imported_target(source_symbol, edge.target)

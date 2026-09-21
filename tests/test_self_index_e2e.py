@@ -499,6 +499,38 @@ export const resolvers = {
     }]
 
 
+@pytest.mark.anyio
+async def test_cli_to_mcp_exposes_gorm_persistence_operations(tmp_path: Path, fake_backends):
+    root = tmp_path / "orders"
+    root.mkdir()
+    (root / "orders.go").write_text(
+        '''package orders
+func Create(db *gorm.DB, order Order) {
+  db.Create(&order)
+}
+func register() { router.POST("/orders", Create) }
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "orders.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-gorm", "--stack", "go",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_entrypoint", {
+            "service": "orders-gorm", "kind": "http", "method": "POST", "name": "/orders",
+        }))
+
+    assert result["persistence_operations"] == [{
+        "operation": "writes", "target": "db.Create",
+        "evidence": {"file": "orders.go", "start_line": 3, "end_line": 3},
+    }]
+
+
 def test_knowledge_is_cumulative_across_two_independently_indexed_roots(tmp_path: Path, fake_backends):
     """One database, two separate `orbitkb index` invocations — orbitkb's own
     source and the project's own sample fixture — proving the "index one repo at a

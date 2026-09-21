@@ -25,6 +25,23 @@ func main() { router.POST("/orders", orders.Create) }
     }
 
 
+def test_go_analyzer_classifies_explicit_gorm_database_operations(tmp_path: Path):
+    (tmp_path / "orders.go").write_text(
+        '''package orders
+func FindOrder(db *gorm.DB, id string) { db.First(&Order{}, id) }
+func CreateOrder(db *gorm.DB, order Order) { db.Create(&order) }
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("orders.FindOrder", "db.First", "reads"),
+        ("orders.CreateOrder", "db.Create", "writes"),
+    }
+
+
 def test_kotlin_spring_analyzer_finds_constructor_injection_and_route(tmp_path: Path):
     source = tmp_path / "OrdersController.kt"
     source.write_text(
