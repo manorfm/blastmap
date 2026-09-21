@@ -338,6 +338,20 @@ def test_main_dispatches_to_list_command(tmp_path: Path, capsys):
     assert exit_code == 0
 
 
+def test_remove_command_deletes_a_repository_and_its_services(tmp_path: Path, capsys):
+    db_path = tmp_path / "test.db"
+    conn = open_db(db_path)
+    repository_id = repositories_repo.ensure_repository(conn, "retired-shop", "/tmp/retired-shop")
+    services_repo.ensure_service(conn, "orders", "/tmp/retired-shop/orders", "python", repository_id=repository_id)
+
+    exit_code = cli.main(["remove", "--repository", "retired-shop", "--db", str(db_path)])
+
+    assert exit_code == 0
+    assert "removed repository retired-shop and 1 service(s)" in capsys.readouterr().out
+    assert repositories_repo.get_repository_by_name(conn, "retired-shop") is None
+    assert services_repo.list_services(conn) == []
+
+
 def test_verify_command_reports_precision_and_recall(tmp_path: Path, capsys):
     import subprocess
 

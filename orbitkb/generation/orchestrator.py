@@ -530,6 +530,8 @@ def index_service(
     progress.service_started(name, total_units)
 
     existing = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
+    if existing is None:
+        existing = services_repo.get_service_by_root_path(conn, str(root), repository_id)
     is_new = existing is None
     service_id = services_repo.ensure_service(conn, name, str(root), detector.id, repository_id=repository_id)
     flows_repo.replace_analysis(
@@ -653,10 +655,16 @@ def index_path(
     resolved_path = path.resolve()
     repository_id = repositories_repo.ensure_repository(conn, repository_name or resolved_path.name, str(resolved_path))
 
-    return [
+    results = [
         index_service(
             conn, c.name, c.path, c.detector, backend, force=force, progress=progress,
             repository_id=repository_id, embedding_backend=embedding_backend, depth_provider=depth_provider,
         )
         for c in candidates
     ]
+    removed_service_ids = services_repo.delete_services_not_in(conn, repository_id, {candidate.name for candidate in candidates})
+    if removed_service_ids:
+        service_calls_repo.reconcile_service_call_targets(conn)
+        search_repo.rebuild_search_index(conn)
+        recompute_architecture_view(conn)
+    return results

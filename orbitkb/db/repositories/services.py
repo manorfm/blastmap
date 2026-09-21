@@ -33,11 +33,26 @@ def get_service_by_id(conn: sqlite3.Connection, service_id: int) -> sqlite3.Row 
     ).fetchone()
 
 
+def get_service_by_root_path(
+    conn: sqlite3.Connection, root_path: str, repository_id: int | None,
+) -> sqlite3.Row | None:
+    if repository_id is None:
+        return conn.execute(
+            "SELECT * FROM services WHERE root_path = ? AND repository_id IS NULL", (root_path,)
+        ).fetchone()
+    return conn.execute(
+        "SELECT s.*, r.name AS repository_name FROM services s "
+        "LEFT JOIN repositories r ON r.id = s.repository_id "
+        "WHERE s.root_path = ? AND s.repository_id = ?",
+        (root_path, repository_id),
+    ).fetchone()
+
+
 def ensure_service(
     conn: sqlite3.Connection, name: str, root_path: str, stack: str, repository_id: int | None = None
 ) -> int:
     if repository_id is not None:
-        row = get_service_by_name(conn, name, repository_id)
+        row = get_service_by_name(conn, name, repository_id) or get_service_by_root_path(conn, root_path, repository_id)
     else:
         candidates = list_service_candidates_by_name(conn, name)
         if len(candidates) > 1:
@@ -45,9 +60,9 @@ def ensure_service(
         row = candidates[0] if candidates else None
     if row is not None:
         conn.execute(
-            "UPDATE services SET root_path = ?, stack = ?, updated_at = ?, "
+            "UPDATE services SET name = ?, root_path = ?, stack = ?, updated_at = ?, "
             "repository_id = COALESCE(?, repository_id) WHERE id = ?",
-            (root_path, stack, now(), repository_id, row["id"]),
+            (name, root_path, stack, now(), repository_id, row["id"]),
         )
         conn.commit()
         return row["id"]
@@ -101,6 +116,16 @@ def list_duplicate_service_names(conn: sqlite3.Connection) -> list[str]:
             "SELECT name FROM services GROUP BY name HAVING COUNT(*) > 1 ORDER BY name"
         ).fetchall()
     ]
+
+
+def delete_services_not_in(conn: sqlite3.Connection, repository_id: int, names: set[str]) -> list[int]:
+    """Delete services absent from a completed authoritative repository scan."""
+    rows = conn.execute("SELECT id, name FROM services WHERE repository_id = ?", (repository_id,)).fetchall()
+    removed_ids = [row["id"] for row in rows if row["name"] not in names]
+    if removed_ids:
+        conn.executemany("DELETE FROM services WHERE id = ?", [(service_id,) for service_id in removed_ids])
+        conn.commit()
+    return removed_ids
 
 
 def list_services_for_repository(conn: sqlite3.Connection, repository_id: int) -> list[sqlite3.Row]:

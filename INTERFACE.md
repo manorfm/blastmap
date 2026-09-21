@@ -23,6 +23,16 @@ retrieval, generated context and recommended follow-up calls to one repository.
 This prevents a cumulative KB from silently mixing two independently indexed
 services named, for example, `orders`.
 
+## Index lifecycle
+
+An `index` run is authoritative for the detected service boundaries under its
+repository root. It removes facts for services no longer detected, including their
+contracts, flow evidence and search entries. A same-name service moved within that
+repository retains its identity; a renamed service at the same root also retains it.
+Use a stable `--repository-name` when a checkout moves. Repository deletion is
+explicit through `orbitkb remove --repository <name>`; an unavailable path is not
+treated as deletion.
+
 ## Agent workflow
 
 1. Call `find_change_surface(task, repository?)` for an epic; provide the repository

@@ -292,6 +292,7 @@ separate databases.
 ```bash
 orbitkb index /path/to/repository --backend claude   # or --backend codex
 orbitkb index /another/repository --repository-name another-repo  # multiple repos in the same DB, cumulative
+orbitkb remove --repository retired-repo  # explicitly removes a retired repository and its knowledge
 orbitkb list
 orbitkb status [service]
 orbitkb export md --out docs/
@@ -316,6 +317,16 @@ entrypoint, persistence, message, security, relationship and flow tools) wheneve
 name is ambiguous. `find_change_surface` and `orbitkb analyze` require
 `repository`/`--repository` in that situation and then constrain retrieval to that
 repository; `search` results also include the owning repository.
+
+Re-indexing a repository is authoritative for its detected service boundaries:
+services removed from the checked-out root are deleted together with their APIs,
+flows, contracts, messages, persistence facts, embeddings and search entries. A
+service moved within the same repository keeps its identity by name; a renamed
+service keeps it by root path. If a checkout moves, use the same
+`--repository-name` to retain the repository identity and update its root path.
+OrbitKB never guesses that a repository disappeared merely because its path is
+temporarily unavailable; use `orbitkb remove --repository <name>` for explicit
+cleanup.
 
 ## MCP response format
 

@@ -12,11 +12,15 @@ from orbitkb.config import resolve_backend
 from orbitkb.db.connection import DEFAULT_DB_PATH, open_db
 from orbitkb.db.repositories import index_runs as index_runs_repo
 from orbitkb.db.repositories import indexed_files as indexed_files_repo
+from orbitkb.db.repositories import repositories as repositories_repo
+from orbitkb.db.repositories import search as search_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.db.repositories import verification as verification_repo
 from orbitkb.export.markdown import export_markdown
 from orbitkb.export.mermaid import export_mermaid
 from orbitkb.generation.backend_base import GenerationError
+from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.embeddings import try_create_default_backend
 from orbitkb.generation.orchestrator import DiscoveryError, index_path, index_service
 from orbitkb.generation.verification import verify_change_surface
@@ -155,6 +159,19 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_remove(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    service_count = repositories_repo.delete_repository(conn, args.repository)
+    if service_count is None:
+        print(f"error: unknown repository {args.repository!r}", file=sys.stderr)
+        return 1
+    service_calls_repo.reconcile_service_call_targets(conn)
+    search_repo.rebuild_search_index(conn)
+    recompute_architecture_view(conn)
+    print(f"removed repository {args.repository} and {service_count} service(s)")
+    return 0
+
+
 def _cmd_export(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     if args.format == "mermaid":
@@ -217,6 +234,7 @@ The orbitkb workflow is index -> ask -> verify:
 
 Examples:
   orbitkb index ~/code/my-monorepo --repository-name my-monorepo
+  orbitkb remove --repository retired-monorepo
   orbitkb serve --backend claude
   orbitkb verify 3 --repository my-monorepo --since a1b2c3d
 
@@ -298,6 +316,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("service", nargs="?", default=None, help="Show one service's indexing history instead of the whole DB's")
     p_status.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
     p_status.set_defaults(func=_cmd_status)
+
+    p_remove = sub.add_parser(
+        "remove", help="Remove one retired repository and all knowledge it owns",
+        epilog="example:\n  orbitkb remove --repository retired-monorepo\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_remove.add_argument("--repository", required=True, help="Exact repository name shown by `orbitkb list`")
+    p_remove.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
+    p_remove.set_defaults(func=_cmd_remove)
 
     p_export = sub.add_parser(
         "export", help="Export the database to Markdown or Mermaid diagrams",

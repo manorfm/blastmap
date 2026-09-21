@@ -3,6 +3,7 @@ schema validation -> SQLite writes -> incremental hash-based skip) against the
 project's own verify/sample_project fixture, faking only the LLM call itself so the
 suite stays deterministic and never shells out to a real `claude`/`codex` CLI.
 """
+import shutil
 from pathlib import Path
 
 import pytest
@@ -193,6 +194,71 @@ def test_force_reindex_regenerates_everything(tmp_path: Path):
 
     assert backend.calls > 0
     assert all(r.llm_calls > 0 for r in results)
+
+
+def test_reindexing_a_monorepo_prunes_a_service_removed_from_disk(tmp_path: Path):
+    root = tmp_path / "shop"
+    shutil.copytree(SAMPLE_ROOT, root)
+    conn = open_db(tmp_path / "test.db")
+    index_path(conn, root, FakeOrchestratorBackend(), repository_name="shop")
+    removed_id = services_repo.get_service_by_name(conn, "inventory-service", repository_id=1)["id"]
+
+    shutil.rmtree(root / "inventory-service")
+    index_path(conn, root, FakeOrchestratorBackend(), repository_name="shop")
+
+    repository = repositories_repo.get_repository_by_name(conn, "shop")
+    assert services_repo.get_service_by_name(conn, "inventory-service", repository_id=repository["id"]) is None
+    assert {row["name"] for row in services_repo.list_services(conn, repository["id"])} == {
+        "orders-service", "payments-service",
+    }
+    assert conn.execute("SELECT 1 FROM search_fts WHERE service_id = ?", (removed_id,)).fetchone() is None
+
+
+def test_reindexing_with_a_new_service_name_reuses_the_same_root_identity(tmp_path: Path):
+    root = tmp_path / "service"
+    root.mkdir()
+    (root / "main.py").write_text("def main(): pass\n", encoding="utf-8")
+    conn = open_db(tmp_path / "test.db")
+
+    index_path(
+        conn, root, FakeOrchestratorBackend(), service_override="orders", stack_override="python", repository_name="shop",
+    )
+    repository = repositories_repo.get_repository_by_name(conn, "shop")
+    original_id = services_repo.get_service_by_name(conn, "orders", repository_id=repository["id"])["id"]
+    index_path(
+        conn, root, FakeOrchestratorBackend(), service_override="checkout", stack_override="python", repository_name="shop",
+    )
+
+    assert services_repo.get_service_by_name(conn, "orders", repository_id=repository["id"]) is None
+    renamed = services_repo.get_service_by_name(conn, "checkout", repository_id=repository["id"])
+    assert renamed["id"] == original_id
+    assert renamed["root_path"] == str(root.resolve())
+
+
+def test_reindexing_a_moved_checkout_with_a_stable_repository_name_reuses_its_repository(tmp_path: Path):
+    old_root = tmp_path / "old-checkout"
+    old_root.mkdir()
+    (old_root / "main.py").write_text("def main(): pass\n", encoding="utf-8")
+    conn = open_db(tmp_path / "test.db")
+    index_path(
+        conn, old_root, FakeOrchestratorBackend(), service_override="orders", stack_override="python", repository_name="shop",
+    )
+    repository = repositories_repo.get_repository_by_name(conn, "shop")
+    original_repository_id = repository["id"]
+    service_id = services_repo.get_service_by_name(conn, "orders", repository_id=original_repository_id)["id"]
+
+    new_root = tmp_path / "new-checkout"
+    old_root.rename(new_root)
+    index_path(
+        conn, new_root, FakeOrchestratorBackend(), service_override="orders", stack_override="python", repository_name="shop",
+    )
+
+    moved_repository = repositories_repo.get_repository_by_name(conn, "shop")
+    moved_service = services_repo.get_service_by_name(conn, "orders", repository_id=moved_repository["id"])
+    assert moved_repository["id"] == original_repository_id
+    assert moved_repository["root_path"] == str(new_root.resolve())
+    assert moved_service["id"] == service_id
+    assert moved_service["root_path"] == str(new_root.resolve())
 
 
 def test_generation_failure_is_isolated_per_unit(tmp_path: Path):

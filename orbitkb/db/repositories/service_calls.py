@@ -94,6 +94,11 @@ def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | N
             "WHERE to_service_id IS NOT NULL AND from_service_id = ?",
             scope_params,
         )
+        conn.execute(
+            "UPDATE service_calls SET target_kind = 'unknown' "
+            "WHERE to_service_id IS NULL AND target_kind = 'internal' AND from_service_id = ?",
+            scope_params,
+        )
     else:
         conn.execute(
             """
@@ -114,20 +119,32 @@ def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | N
             """
         )
         conn.execute("UPDATE service_calls SET target_kind = 'internal' WHERE to_service_id IS NOT NULL")
+        conn.execute("UPDATE service_calls SET target_kind = 'unknown' WHERE to_service_id IS NULL AND target_kind = 'internal'")
 
-    known_names = {row["name"] for row in conn.execute("SELECT name FROM services")}
     if service_id is not None:
         unresolved_unknown = conn.execute(
-            "SELECT id, to_service_name FROM service_calls "
-            "WHERE to_service_id IS NULL AND target_kind = 'unknown' AND from_service_id = ?",
+            "SELECT sc.id, sc.to_service_name, s.repository_id FROM service_calls sc "
+            "JOIN services s ON s.id = sc.from_service_id "
+            "WHERE sc.to_service_id IS NULL AND sc.target_kind = 'unknown' AND sc.from_service_id = ?",
             scope_params,
         ).fetchall()
     else:
         unresolved_unknown = conn.execute(
-            "SELECT id, to_service_name FROM service_calls WHERE to_service_id IS NULL AND target_kind = 'unknown'"
+            "SELECT sc.id, sc.to_service_name, s.repository_id FROM service_calls sc "
+            "JOIN services s ON s.id = sc.from_service_id "
+            "WHERE sc.to_service_id IS NULL AND sc.target_kind = 'unknown'"
         ).fetchall()
+    names_by_repository: dict[int | None, set[str]] = {}
     for row in unresolved_unknown:
-        kind = classify_target_kind(row["to_service_name"], known_names)
+        repository_id = row["repository_id"]
+        if repository_id not in names_by_repository:
+            names_by_repository[repository_id] = {
+                service["name"]
+                for service in conn.execute(
+                    "SELECT name FROM services WHERE repository_id IS ?", (repository_id,)
+                )
+            }
+        kind = classify_target_kind(row["to_service_name"], names_by_repository[repository_id])
         if kind != "unknown":
             conn.execute("UPDATE service_calls SET target_kind = ? WHERE id = ?", (kind, row["id"]))
 

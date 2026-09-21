@@ -127,3 +127,10 @@ def test_internal_call_reconciliation_stays_within_the_callers_repository(tmp_pa
     )
 
     assert service_calls_repo.list_calls_for_service(conn, checkout_service_id)[0]["to_service_id"] == local_orders_id
+
+    services_repo.delete_services_not_in(conn, checkout_id, {"checkout"})
+    service_calls_repo.reconcile_service_call_targets(conn)
+
+    remaining_call = service_calls_repo.list_calls_for_service(conn, checkout_service_id)[0]
+    assert remaining_call["to_service_id"] is None
+    assert remaining_call["target_kind"] == "unknown"
