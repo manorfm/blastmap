@@ -136,9 +136,9 @@ whether the operation reads or writes.
 Prisma operations are classified with the same conservative rule: the client must
 be locally constructed with `new PrismaClient`, and only exact model-delegate
 operation names are treated as reads or writes.
-For Go, GORM operations are classified only when invoked directly on a parameter
-locally typed as `*gorm.DB`; fluent chains are retained as generic flow calls until
-their receiver can be proven without speculation.
+For Go, GORM operations are classified when invoked directly, or through a simple
+fluent chain, on a parameter locally typed as `*gorm.DB`; chains whose root cannot
+be proven without speculation remain generic flow calls.
 For Java and Kotlin Spring, standard repository operations require a locally
 declared injected member whose type is a Spring repository; a receiver merely named
 `repository` is not sufficient.

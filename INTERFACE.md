@@ -124,8 +124,9 @@ locally declared by `mongoose.model`; exact operation names determine `reads` or
 `writes`.
 Prisma calls are classified only for model delegates on a client locally constructed
 with `new PrismaClient`, again using exact operation names.
-Go GORM calls are classified only for exact operations invoked directly on a
-parameter locally typed as `*gorm.DB`; fluent chains remain generic flow calls.
+Go GORM calls are classified for exact operations invoked directly, or through a
+simple fluent chain, on a parameter locally typed as `*gorm.DB`; unproven roots
+remain generic flow calls.
 Java and Kotlin Spring standard repository operations require a locally declared
 injected member whose type is a Spring repository; a receiver name alone is not
 treated as persistence evidence.

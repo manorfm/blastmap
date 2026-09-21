@@ -172,15 +172,22 @@ def _gorm_db_parameters(declaration: str) -> frozenset[str]:
 
 
 def _gorm_call_kind(target: str, db_parameters: frozenset[str]) -> str | None:
-    """Classify exact operations invoked directly on an explicit GORM parameter."""
+    """Classify direct or simple fluent operations on an explicit GORM parameter."""
     receiver, separator, method = target.rpartition(".")
-    if not separator or receiver not in db_parameters:
+    root = receiver if receiver in db_parameters else _gorm_fluent_root(receiver)
+    if not separator or root not in db_parameters:
         return None
     if method.lower() in _GORM_READ_METHODS:
         return "reads"
     if method.lower() in _GORM_WRITE_METHODS:
         return "writes"
     return None
+
+
+def _gorm_fluent_root(receiver: str) -> str | None:
+    """Return the root of a simple Go fluent chain without parsing arbitrary calls."""
+    match = re.fullmatch(r"(\w+)(?:\.\w+\([^()]*\))*", receiver)
+    return match.group(1) if match else None
 
 
 def _spring_repository_receivers(injections: list[Injection], class_name: str) -> frozenset[str]:
