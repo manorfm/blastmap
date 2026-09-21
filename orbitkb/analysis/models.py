@@ -64,6 +64,7 @@ class MessageContract:
     routing_key: str | None
     payload_type: str | None
     evidence: Evidence
+    message_version: str | None = None
 
 
 @dataclass(frozen=True)

@@ -118,6 +118,8 @@ locally declared, and source evidence. Node, Spring AMQP, and Go AMQP `Publish` 
 `PublishWithContext` publishers are covered.
 For Node/TypeScript, a payload type is emitted only when the published identifier
 matches an explicitly typed parameter in its lexical function scope.
+`message_version` is emitted only from a literal `schema_version`, `schemaVersion`,
+`x-schema-version`, or `x-version` header attached to that publication.
 
 `describe_entrypoint` also returns source-proven `boundaries` for branch, async,
 retry, error and transaction constructs reachable in the bounded flow. These are

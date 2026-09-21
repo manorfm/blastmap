@@ -99,6 +99,9 @@ publications require a receiver locally declared as `*amqp.Channel` and literal
 exchange/routing-key arguments.
 For Node/TypeScript publications, `payload_type` is present only when the payload
 identifier resolves to an explicitly typed parameter in an enclosing lexical function.
+`static_contracts.message_version` is `null` unless the publication itself contains
+one literal version header named `schema_version`, `schemaVersion`,
+`x-schema-version`, or `x-version`.
 Matching consumer contracts may include literal `dead_letter_routing_key` and
 `retry_delay_ms` extracted from local queue declarations; missing or dynamic values
 are not represented.

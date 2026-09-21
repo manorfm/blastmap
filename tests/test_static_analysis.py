@@ -71,7 +71,7 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
     source = tmp_path / "resolvers.ts"
     source.write_text(
         '''export const resolvers = {
-  Mutation: { createOrder: (_: unknown, input: CreateOrderInput, { service }) => { service.create(input); channel.publish("orders", "created", input); } }
+  Mutation: { createOrder: (_: unknown, input: CreateOrderInput, { service }) => { service.create(input); channel.publish("orders", "created", input, { headers: { schema_version: "1" } }); } }
 };
 ''',
         encoding="utf-8",
@@ -83,8 +83,8 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
         ("graphql", "MUTATION", "createOrder")
     ]
     assert any(edge.kind == "publishes" and edge.target == "channel.publish" for edge in result.edges)
-    assert [(item.channel, item.routing_key, item.payload_type) for item in result.message_contracts] == [
-        ("orders", "created", "CreateOrderInput"),
+    assert [(item.channel, item.routing_key, item.payload_type, item.message_version) for item in result.message_contracts] == [
+        ("orders", "created", "CreateOrderInput", "1"),
     ]
 
 
@@ -92,7 +92,7 @@ def test_spring_analyzers_extract_literal_amqp_publications_with_declared_payloa
     (tmp_path / "OrderPublisher.java").write_text(
         '''class OrderPublisher {
   RabbitTemplate publisher;
-  void publish(OrderCreated event) { publisher.convertAndSend("orders", "order.created", event); }
+  void publish(OrderCreated event) { publisher.convertAndSend("orders", "order.created", event, message -> { message.getMessageProperties().setHeader("schema_version", "1"); return message; }); }
 }
 ''',
         encoding="utf-8",
@@ -107,9 +107,9 @@ def test_spring_analyzers_extract_literal_amqp_publications_with_declared_payloa
 
     result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
 
-    assert [(item.channel, item.routing_key, item.payload_type) for item in result.message_contracts] == [
-        ("orders", "order.created", "OrderCreated"),
-        ("payments", "payment.created", "PaymentCreated"),
+    assert [(item.channel, item.routing_key, item.payload_type, item.message_version) for item in result.message_contracts] == [
+        ("orders", "order.created", "OrderCreated", "1"),
+        ("payments", "payment.created", "PaymentCreated", None),
     ]
 
 
@@ -118,10 +118,10 @@ def test_go_analyzer_extracts_literal_amqp_publications_with_declared_payloads(t
     source.write_text(
         '''package orders
 func publish(channel *amqp.Channel, event OrderCreated) error {
-  return channel.Publish("orders", "order.created", false, false, amqp.Publishing{Body: event})
+  return channel.Publish("orders", "order.created", false, false, amqp.Publishing{Body: event, Headers: amqp.Table{"schema_version": "1"}})
 }
 func publishWithContext(ctx context.Context, channel *amqp.Channel, event OrderCreated) error {
-  return channel.PublishWithContext(ctx, "orders", "order.created", false, false, amqp.Publishing{Body: event})
+  return channel.PublishWithContext(ctx, "orders", "order.created", false, false, amqp.Publishing{Body: event, Headers: amqp.Table{"schema_version": "1"}})
 }
 ''',
         encoding="utf-8",
@@ -129,9 +129,9 @@ func publishWithContext(ctx context.Context, channel *amqp.Channel, event OrderC
 
     result = StaticAnalysisEngine().analyze(tmp_path, "go")
 
-    assert [(item.channel, item.routing_key, item.payload_type) for item in result.message_contracts] == [
-        ("orders", "order.created", "OrderCreated"),
-        ("orders", "order.created", "OrderCreated"),
+    assert [(item.channel, item.routing_key, item.payload_type, item.message_version) for item in result.message_contracts] == [
+        ("orders", "order.created", "OrderCreated", "1"),
+        ("orders", "order.created", "OrderCreated", "1"),
     ]
 
 

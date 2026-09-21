@@ -293,7 +293,7 @@ def describe_messages(conn: sqlite3.Connection, service: str, limit: int = DEFAU
         "static_contracts": [
             {
                 "direction": item["direction"], "exchange": item["channel"],
-                "routing_key": item["routing_key"], "payload_type": item["payload_type"],
+                "routing_key": item["routing_key"], "payload_type": item["payload_type"], "message_version": item["message_version"],
                 "evidence": {"file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"]},
             }
             for item in flows_repo.list_static_message_contracts(conn, row["id"])

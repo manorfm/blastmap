@@ -49,9 +49,9 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
     for contract in analysis.message_contracts:
         conn.execute(
             """INSERT INTO static_message_contracts
-               (service_id, direction, channel, routing_key, payload_type, file_path, start_line, end_line, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (service_id, contract.direction, contract.channel, contract.routing_key, contract.payload_type,
+               (service_id, direction, channel, routing_key, payload_type, message_version, file_path, start_line, end_line, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (service_id, contract.direction, contract.channel, contract.routing_key, contract.payload_type, contract.message_version,
              contract.evidence.file_path, contract.evidence.start_line, contract.evidence.end_line, indexed_at),
         )
     for boundary in analysis.boundaries:
@@ -99,7 +99,7 @@ def get_entrypoint_contract(conn: sqlite3.Connection, entrypoint_id: int) -> dic
 
 def list_static_message_contracts(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT direction, channel, routing_key, payload_type, file_path, start_line, end_line
+        """SELECT direction, channel, routing_key, payload_type, message_version, file_path, start_line, end_line
            FROM static_message_contracts WHERE service_id = ? ORDER BY channel, routing_key""",
         (service_id,),
     ).fetchall()

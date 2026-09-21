@@ -553,7 +553,8 @@ def _node_publish_contracts(tree: Node, source: bytes, path: Path, root: Path) -
         routing_key = _string(args[1], source) if len(args) > 1 else None
         if channel:
             payload_type = _node_payload_type(node, args[2], source) if len(args) > 2 else None
-            contracts.append(MessageContract("publishes", channel, routing_key, payload_type, _evidence(path, root, node)))
+            version = _message_header_version(_text(args[3], source)) if len(args) > 3 else None
+            contracts.append(MessageContract("publishes", channel, routing_key, payload_type, _evidence(path, root, node), version))
     return contracts
 
 
@@ -602,7 +603,8 @@ def _go_amqp_publish_contracts(function: _Function, path: Path, root: Path, sour
             continue
         payload = re.search(r"\bBody\s*:\s*(\w+)", _text(args[positions[2]], source))
         payload_type = parameter_types.get(payload.group(1)) if payload else None
-        contracts.append(MessageContract("publishes", exchange, routing_key, payload_type, _evidence(path, root, node)))
+        version = _message_header_version(_text(args[positions[2]], source))
+        contracts.append(MessageContract("publishes", exchange, routing_key, payload_type, _evidence(path, root, node), version))
     return contracts
 
 
@@ -614,6 +616,41 @@ def _go_declared_parameter_types(declaration: str) -> dict[str, str]:
         name: type_name
         for name, type_name in re.findall(r"\b(\w+)\s+(\*?[\w.\[\]]+)", parameters.group(1))
     }
+
+
+def _message_header_version(source: str) -> str | None:
+    header = r'["\']?(?:schema_version|schemaVersion|x-schema-version|x-version)["\']?'
+    patterns = (
+        rf"setHeader\s*\(\s*{header}\s*,\s*[\"']([^\"']+)",
+        rf"{header}\s*:\s*[\"']([^\"']+)",
+    )
+    for pattern in patterns:
+        if match := re.search(pattern, source):
+            return match.group(1)
+    return None
+
+
+def _call_text(source: str, start_offset: int) -> str:
+    opening = source.find("(", start_offset)
+    if opening < 0:
+        return source[start_offset:]
+    depth = 0
+    quote = ""
+    for offset in range(opening, len(source)):
+        char = source[offset]
+        if quote:
+            if char == quote and source[offset - 1] != "\\":
+                quote = ""
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return source[start_offset : offset + 1]
+    return source[start_offset:]
 
 
 def _spring_amqp_publishers(class_source: str) -> set[str]:
@@ -634,7 +671,7 @@ def _spring_publish_contracts(
     if not publishers:
         return []
     receivers = "|".join(re.escape(name) for name in sorted(publishers))
-    pattern = rf'\b(?:{receivers})\s*\.\s*convertAndSend\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*(\w+)\s*\)'
+    pattern = rf'\b(?:{receivers})\s*\.\s*convertAndSend\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*(\w+)'
     parameter_types = _declared_parameter_types(declaration, kotlin)
     contracts = []
     for match in re.finditer(pattern, declaration):
@@ -642,6 +679,7 @@ def _spring_publish_contracts(
         contracts.append(MessageContract(
             "publishes", exchange, routing_key, parameter_types.get(payload),
             _declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+            _message_header_version(_call_text(declaration, match.start())),
         ))
     return contracts
 

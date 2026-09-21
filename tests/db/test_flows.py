@@ -37,11 +37,12 @@ def test_static_message_contracts_are_replaced_with_the_flow_snapshot(tmp_path):
 
     flows.replace_analysis(
         conn, service_id, AnalysisResult(message_contracts=[
-            MessageContract("publishes", "orders", "created", None, evidence),
+            MessageContract("publishes", "orders", "created", None, evidence, "1"),
         ]),
     )
 
     assert [dict(row) for row in flows.list_static_message_contracts(conn, service_id)] == [{
         "direction": "publishes", "channel": "orders", "routing_key": "created", "payload_type": None,
+        "message_version": "1",
         "file_path": "resolvers.ts", "start_line": 10, "end_line": 10,
     }]
