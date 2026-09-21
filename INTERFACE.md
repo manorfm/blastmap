@@ -53,7 +53,8 @@ selected entrypoint, with a hard edge budget; unrelated service flow is omitted.
 `origin` is `static`, `codegraph` or `runtime`. The
 optional `smells` list contains explicit hypotheses, never a conclusive architecture
 classification; for example, a GraphQL mutation that directly writes state is flagged
-as possible BFF domain-policy leakage for human validation.
+as possible BFF domain-policy leakage for human validation. A flow that both writes
+state and publishes an event is also flagged for a transaction/outbox review.
 
 `contract` is present only when deterministic local extraction found one. For GraphQL
 it comes from `.graphql`/`.gql` schema definitions; absent data remains `null`, never

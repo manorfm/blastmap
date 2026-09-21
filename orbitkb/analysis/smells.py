@@ -11,12 +11,21 @@ def find_entrypoint_smells(entrypoint: Mapping, edges: Sequence[Mapping]) -> lis
     direct deterministic flow writes state or emits an event, which warrants a
     human check for reusable policy leaking into a consumer-facing facade.
     """
-    if entrypoint["kind"] != "graphql":
-        return []
     findings = []
-    for edge in edges:
-        if edge["kind"] not in {"writes", "publishes"}:
-            continue
+    writes = [edge["to_symbol"] for edge in edges if edge["kind"] == "writes"]
+    publishes = [edge["to_symbol"] for edge in edges if edge["kind"] == "publishes"]
+    if writes and publishes:
+        findings.append(
+            {
+                "kind": "possible_non_atomic_publish",
+                "severity": "warning",
+                "reason": "Flow writes state and publishes an event; validate a transaction boundary or transactional outbox.",
+                "evidence_targets": [writes[0], publishes[0]],
+            }
+        )
+    if entrypoint["kind"] != "graphql":
+        return findings
+    for target in [*writes, *publishes]:
         findings.append(
             {
                 "kind": "possible_bff_domain_leakage",
@@ -25,7 +34,7 @@ def find_entrypoint_smells(entrypoint: Mapping, edges: Sequence[Mapping]) -> lis
                     "GraphQL entrypoint directly writes domain state; validate whether this service is a BFF and "
                     "move reusable domain policy behind a domain service."
                 ),
-                "evidence_target": edge["to_symbol"],
+                "evidence_target": target,
             }
         )
     return findings
