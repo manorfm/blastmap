@@ -112,6 +112,8 @@ Literal queue declarations can additionally supply `dead_letter_routing_key` and
 `retry_delay_ms`; dynamic broker configuration is deliberately omitted.
 When a local RabbitMQ binding proves a queue, exchange and routing key, the consumer
 contract includes its ordered `bindings`; multiple literal bindings remain distinct.
+Go bindings require a literal `QueueBind` call on a receiver declared as
+`*amqp.Channel`.
 Publication contracts are persisted separately and returned by `describe_messages`
 as `static_contracts`, including literal exchange, routing key, payload type when
 locally declared, and source evidence. Node, Spring AMQP, and Go AMQP `Publish` /

@@ -945,6 +945,8 @@ def _rabbitmq_bindings(files: list[Path]) -> dict[str, list[dict]]:
             bindings.setdefault(queue, set()).add((exchange, routing_key))
         for queue, exchange, routing_key in _spring_rabbitmq_bindings(source):
             bindings.setdefault(queue, set()).add((exchange, routing_key))
+        for queue, exchange, routing_key in _go_rabbitmq_bindings(source):
+            bindings.setdefault(queue, set()).add((exchange, routing_key))
     return {
         queue: [{"exchange": exchange, "routing_key": routing_key} for exchange, routing_key in sorted(values)]
         for queue, values in bindings.items()
@@ -971,6 +973,16 @@ def _spring_rabbitmq_bindings(source: str) -> list[tuple[str, str, str]]:
         if queue and exchange:
             bindings.append((queue, exchange, routing_key))
     return bindings
+
+
+def _go_rabbitmq_bindings(source: str) -> list[tuple[str, str, str]]:
+    channels = set(re.findall(r"\b(\w+)\s+\*?amqp\.Channel\b", source))
+    pattern = r'(\w+)\.QueueBind\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"'
+    return [
+        (queue, exchange, routing_key)
+        for receiver, queue, routing_key, exchange in re.findall(pattern, source)
+        if receiver in channels
+    ]
 
 
 def _spring_rabbitmq_factories(source: str, type_pattern: str) -> dict[str, str]:

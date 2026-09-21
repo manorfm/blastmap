@@ -164,6 +164,25 @@ channel.consume("orders.created", async (message: OrderCreated) => {
     ]
 
 
+def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
+    source = tmp_path / "consumer.go"
+    source.write_text(
+        '''package orders
+func consume(channel *amqp.Channel) {
+  channel.QueueBind("orders.created", "order.created", "orders", false, nil)
+  channel.Consume("orders.created", "", false, false, false, false, func(message amqp.Delivery) {})
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert result.contracts["message.consume:orders.created"]["bindings"] == [
+        {"exchange": "orders", "routing_key": "order.created"},
+    ]
+
+
 def test_kotlin_analyzer_exposes_rabbit_listener_and_its_handler_flow(tmp_path: Path):
     source = tmp_path / "OrderListener.kt"
     source.write_text(
