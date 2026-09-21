@@ -245,6 +245,23 @@ union SearchResult = User | Order
     assert result.contracts["Query.search"]["returns"]["possible_types"] == ["Order", "User"]
 
 
+def test_graphql_schema_extensions_are_composed_across_local_files(tmp_path: Path):
+    (tmp_path / "resolvers.ts").write_text(
+        '''export const resolvers = { Query: { health: () => "ok", order: () => null } };''', encoding="utf-8",
+    )
+    (tmp_path / "base.graphql").write_text('''type Query { health: String! }''', encoding="utf-8")
+    (tmp_path / "orders.graphql").write_text(
+        "extend type Query { order(id: ID!): Order! }\ntype Order { id: ID! }\n", encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.contracts["Query.order"] == {
+        "arguments": [{"name": "id", "type": "ID", "required": True, "fields": []}],
+        "returns": {"type": "Order", "required": True},
+    }
+
+
 def test_java_spring_http_contract_keeps_declared_payload_validation_and_auth(tmp_path: Path):
     (tmp_path / "OrdersController.java").write_text(
         '''class OrdersController {

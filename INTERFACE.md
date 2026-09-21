@@ -70,6 +70,8 @@ a fabricated contract.
 For locally declared GraphQL interface or union returns, `contract.returns` may
 include sorted `possible_types`. Directives and federation semantics remain outside
 this deterministic subset.
+Operation type extensions in local `.graphql`/`.gql` files are composed before
+extracting a contract; remote schema composition is not assumed.
 
 For HTTP entrypoints, `contract` may include `request`, `returns`, `validations` and
 `authorization`. Spring values are extracted from its handler declaration and

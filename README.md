@@ -88,6 +88,8 @@ file just to answer a contract question.
 When that local schema defines an interface or union return type, the contract also
 lists its declared `possible_types`; directives and federation metadata are not
 interpreted as behavior.
+Base operation types and local `extend type Query`/`Mutation`/`Subscription` blocks
+are composed across `.graphql` and `.gql` files before the contract is extracted.
 
 For native HTTP handlers, the contract includes only source-proven facts: Spring
 `@RequestBody` name/type, declared return type and validation/authorization

@@ -390,7 +390,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
 class _GraphqlContractExtractor:
     """Extracts GraphQL schemas into compact, deterministic entrypoint contracts."""
 
-    _TYPE_BLOCK = re.compile(r"\btype\s+(Query|Mutation|Subscription)\s*\{(?P<body>.*?)\}", re.DOTALL)
+    _TYPE_BLOCK = re.compile(r"\b(?:extend\s+)?type\s+(Query|Mutation|Subscription)\s*\{(?P<body>.*?)\}", re.DOTALL)
     _INPUT_BLOCK = re.compile(r"\binput\s+(\w+)\s*\{(?P<body>.*?)\}", re.DOTALL)
     _FIELD = re.compile(r"\b(\w+)\s*(?:\(([^)]*)\))?\s*:\s*([\[\]\w!]+)")
     _INPUT_FIELD = re.compile(r"\b(\w+)\s*:\s*([\[\]\w!]+)")
@@ -400,16 +400,19 @@ class _GraphqlContractExtractor:
 
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
         source = path.read_text(encoding="utf-8", errors="ignore")
+        return AnalysisResult(contracts=self.contracts(source))
+
+    def contracts(self, source: str) -> dict[str, dict]:
         input_fields = {name: self._fields(body) for name, body in self._INPUT_BLOCK.findall(source)}
         return_options = self._return_options(source)
-        result = AnalysisResult()
+        contracts = {}
         for operation, body in self._TYPE_BLOCK.findall(source):
             for name, arguments, return_type in self._FIELD.findall(body):
-                result.contracts[f"{operation}.{name}"] = {
+                contracts[f"{operation}.{name}"] = {
                     "arguments": self._arguments(arguments, input_fields),
                     "returns": {**self._type_shape(return_type), **return_options.get(self._base_type(return_type), {})},
                 }
-        return result
+        return contracts
 
     def _arguments(self, text: str, input_fields: dict[str, list[dict]]) -> list[dict]:
         return [
@@ -665,6 +668,9 @@ class StaticAnalysisEngine:
         })
         for path in files:
             result.extend(analyzer.analyze(path, root))
+        if stack in {"node-ts", "node-js"}:
+            schema = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in files if path.suffix in {".graphql", ".gql"})
+            result.contracts.update(_GraphqlContractExtractor().contracts(schema))
         _enrich_contract_fields(result.contracts, files)
         result.persistence_facts.extend(_persistence_facts(files, root))
         result = BoundedFlowResolver().resolve(result)
