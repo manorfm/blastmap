@@ -106,6 +106,19 @@ CREATE TABLE IF NOT EXISTS messages (
     UNIQUE(service_id, direction, channel)
 );
 
+CREATE TABLE IF NOT EXISTS static_message_contracts (
+    id            INTEGER PRIMARY KEY,
+    service_id    INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    direction     TEXT NOT NULL CHECK (direction IN ('publishes', 'consumes')),
+    channel       TEXT NOT NULL,
+    routing_key   TEXT,
+    payload_type  TEXT,
+    file_path     TEXT NOT NULL,
+    start_line    INTEGER NOT NULL,
+    end_line      INTEGER NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
 -- One row per class/controller/module cluster of endpoints within a service, synthesized
 -- from the already-generated `apis` summaries of the endpoints it groups (never raw code
 -- read again) — the layer between a single endpoint and the whole service. `file_path` is

@@ -26,6 +26,7 @@ from orbitkb.analysis.models import (
     Evidence,
     FlowEdge,
     Injection,
+    MessageContract,
     Symbol,
 )
 from orbitkb.analysis.resolution import BoundedFlowResolver
@@ -309,6 +310,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         tree = self.parse(source)
         result = AnalysisResult()
         imports = _node_named_imports(source.decode("utf-8", errors="ignore"))
+        result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
         for node in _walk(tree):
             if node.type != "function_declaration":
                 continue
@@ -475,6 +477,23 @@ def _message_contract(channel: str, declaration: str, language: str) -> dict:
         "queue": channel,
         "payload": {"name": name, "type": type_name.rstrip("?").lstrip("*") if type_name else None, "required": True} if type_name else None,
     }
+
+
+def _node_publish_contracts(tree: Node, source: bytes, path: Path, root: Path) -> list[MessageContract]:
+    contracts = []
+    for node in _walk(tree):
+        if node.type != "call_expression":
+            continue
+        callee = node.child_by_field_name("function")
+        arguments = node.child_by_field_name("arguments")
+        if callee is None or arguments is None or not _text(callee, source).endswith(".publish"):
+            continue
+        args = arguments.named_children
+        channel = _string(args[0], source) if args else None
+        routing_key = _string(args[1], source) if len(args) > 1 else None
+        if channel:
+            contracts.append(MessageContract("publishes", channel, routing_key, None, _evidence(path, root, node)))
+    return contracts
 
 
 def _java_interfaces(class_text: str) -> tuple[str, ...]:

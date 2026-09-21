@@ -1,4 +1,10 @@
-from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
+from orbitkb.analysis.models import (
+    AnalysisResult,
+    EntryPoint,
+    Evidence,
+    FlowEdge,
+    MessageContract,
+)
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import flows, services
 
@@ -22,3 +28,20 @@ def test_flow_snapshot_is_replaced_per_service(tmp_path):
 
     flows.replace_analysis(conn, service_id, AnalysisResult())
     assert flows.list_entrypoints(conn, service_id) == []
+
+
+def test_static_message_contracts_are_replaced_with_the_flow_snapshot(tmp_path):
+    conn = open_db(tmp_path / "contracts.db")
+    service_id = services.ensure_service(conn, "orders", "/repos/orders", "node-ts")
+    evidence = Evidence("resolvers.ts", 10, 10)
+
+    flows.replace_analysis(
+        conn, service_id, AnalysisResult(message_contracts=[
+            MessageContract("publishes", "orders", "created", None, evidence),
+        ]),
+    )
+
+    assert [dict(row) for row in flows.list_static_message_contracts(conn, service_id)] == [{
+        "direction": "publishes", "channel": "orders", "routing_key": "created", "payload_type": None,
+        "file_path": "resolvers.ts", "start_line": 10, "end_line": 10,
+    }]

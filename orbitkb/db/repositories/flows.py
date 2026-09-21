@@ -12,6 +12,7 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
     """Atomically replace one service's static analysis after a source scan."""
     conn.execute("DELETE FROM flow_edges WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM entrypoints WHERE service_id = ?", (service_id,))
+    conn.execute("DELETE FROM static_message_contracts WHERE service_id = ?", (service_id,))
     indexed_at = now()
     entrypoint_ids: dict[str, int] = {}
     for entry in analysis.entrypoints:
@@ -43,6 +44,14 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
                 edge.evidence.start_line, edge.evidence.end_line, indexed_at,
             ),
         )
+    for contract in analysis.message_contracts:
+        conn.execute(
+            """INSERT INTO static_message_contracts
+               (service_id, direction, channel, routing_key, payload_type, file_path, start_line, end_line, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (service_id, contract.direction, contract.channel, contract.routing_key, contract.payload_type,
+             contract.evidence.file_path, contract.evidence.start_line, contract.evidence.end_line, indexed_at),
+        )
 
 
 def list_entrypoints(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
@@ -69,6 +78,14 @@ def get_entrypoint_contract(conn: sqlite3.Connection, entrypoint_id: int) -> dic
         "SELECT contract_json FROM entrypoint_contracts WHERE entrypoint_id = ?", (entrypoint_id,)
     ).fetchone()
     return json.loads(row["contract_json"]) if row else None
+
+
+def list_static_message_contracts(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT direction, channel, routing_key, payload_type, file_path, start_line, end_line
+           FROM static_message_contracts WHERE service_id = ? ORDER BY channel, routing_key""",
+        (service_id,),
+    ).fetchall()
 
 
 def list_reachable_edges(conn: sqlite3.Connection, service_id: int, symbol: str, max_edges: int = 100) -> list[sqlite3.Row]:

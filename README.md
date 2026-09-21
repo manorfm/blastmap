@@ -95,6 +95,8 @@ locally observed fields and validation tags are attached to that contract.
 
 RabbitMQ consumer entrypoints expose a compact contract with queue, direction and a
 declared payload parameter type when the listener/callback makes it available.
+Publication contracts are persisted separately and returned by `describe_messages`
+as `static_contracts`, including literal channel, routing key and source evidence.
 
 The initial native coverage is deliberately focused on Go HTTP handlers,
 Java/Kotlin Spring HTTP controllers and Rabbit listeners, and Node/TypeScript

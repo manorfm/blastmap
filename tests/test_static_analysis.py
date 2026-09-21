@@ -60,6 +60,7 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
         ("graphql", "MUTATION", "createOrder")
     ]
     assert any(edge.kind == "publishes" and edge.target == "channel.publish" for edge in result.edges)
+    assert [(item.channel, item.routing_key) for item in result.message_contracts] == [("orders", "created")]
 
 
 def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_path: Path):

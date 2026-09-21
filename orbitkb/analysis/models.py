@@ -57,6 +57,15 @@ class Injection:
     evidence: Evidence
 
 
+@dataclass(frozen=True)
+class MessageContract:
+    direction: str
+    channel: str
+    routing_key: str | None
+    payload_type: str | None
+    evidence: Evidence
+
+
 @dataclass
 class AnalysisResult:
     entrypoints: list[EntryPoint] = field(default_factory=list)
@@ -64,6 +73,7 @@ class AnalysisResult:
     contracts: dict[str, dict] = field(default_factory=dict)
     symbols: list[Symbol] = field(default_factory=list)
     injections: list[Injection] = field(default_factory=list)
+    message_contracts: list[MessageContract] = field(default_factory=list)
 
     def extend(self, other: AnalysisResult) -> None:
         self.entrypoints.extend(other.entrypoints)
@@ -71,3 +81,4 @@ class AnalysisResult:
         self.contracts.update(other.contracts)
         self.symbols.extend(other.symbols)
         self.injections.extend(other.injections)
+        self.message_contracts.extend(other.message_contracts)

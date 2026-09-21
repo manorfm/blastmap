@@ -78,7 +78,9 @@ status and validation tags.
 
 RabbitMQ consumer contracts use `transport`, `direction`, `queue` and optional
 `payload` fields. Producer calls remain bounded flow evidence until publication
-contracts have their own persisted representation.
+contracts have their own persisted representation. `describe_messages` now returns
+that representation in `static_contracts`, with channel, routing key, payload type
+when proven, and file/line evidence.
 
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an
