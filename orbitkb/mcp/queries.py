@@ -511,18 +511,19 @@ def find_architecture_smells(conn: sqlite3.Connection) -> dict:
     if run_id is None:
         return {"findings": [], "run_id": None, "note": "no architecture run yet — index at least one service first"}
     findings = architecture_repo.list_findings(conn, run_id)
+    def _format_finding(finding: sqlite3.Row) -> dict:
+        detail = json.loads(finding["detail_json"] or "{}")
+        return {
+            "kind": finding["kind"], "severity": finding["severity"],
+            "services": json.loads(finding["services_json"]), "detail": detail,
+            "reason": finding["reason"], "confidence": detail.get("confidence", 1.0),
+            "evidence": detail.get("evidence", []),
+            "unknowns": detail.get("unknowns", ["Only indexed services and static facts were evaluated."]),
+        }
+
     response = {
         "run_id": run_id,
-        "findings": [
-            {
-                "kind": f["kind"],
-                "severity": f["severity"],
-                "services": json.loads(f["services_json"]),
-                "detail": json.loads(f["detail_json"] or "{}"),
-                "reason": f["reason"],
-            }
-            for f in findings
-        ],
+        "findings": [_format_finding(finding) for finding in findings],
     }
     previous_run_id = architecture_repo.previous_run_id(conn, run_id)
     if previous_run_id is not None:

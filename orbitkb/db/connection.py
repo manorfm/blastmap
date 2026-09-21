@@ -4,7 +4,7 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 DEFAULT_DB_PATH = Path.home() / ".orbitkb" / "orbitkb.db"
 
 
@@ -22,6 +22,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     schema_sql = resources.files("orbitkb.db").joinpath("schema.sql").read_text()
     conn.executescript(schema_sql)
     _add_column_if_missing(conn, "static_message_contracts", "message_version", "TEXT")
+    _migrate_architecture_findings_if_needed(conn)
     row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
     if row is None:
         conn.execute(
@@ -36,3 +37,40 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, de
     columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}  # nosec B608 - table is a module-owned constant.
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")  # nosec B608 - identifiers are module-owned constants.
+
+
+def _migrate_architecture_findings_if_needed(conn: sqlite3.Connection) -> None:
+    """Expand the finding-kind constraint without losing historical runs.
+
+    SQLite cannot alter a CHECK constraint in place. The table is intentionally
+    rebuilt only for databases created before flow hypotheses were persisted.
+    """
+    table_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'architecture_findings'"
+    ).fetchone()["sql"]
+    if "possible_bff_domain_leakage" in table_sql:
+        return
+    conn.executescript(
+        """
+        CREATE TABLE architecture_findings_replacement (
+            id            INTEGER PRIMARY KEY,
+            run_id        INTEGER NOT NULL REFERENCES architecture_runs(id) ON DELETE CASCADE,
+            kind          TEXT NOT NULL CHECK (kind IN (
+                'cycle', 'fan_in', 'fan_out', 'shared_database',
+                'duplicate_external_integration', 'possible_bff_domain_leakage',
+                'possible_non_atomic_publish'
+            )),
+            severity      TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')) DEFAULT 'info',
+            services_json TEXT NOT NULL,
+            detail_json   TEXT,
+            reason        TEXT NOT NULL
+        );
+        INSERT INTO architecture_findings_replacement
+            SELECT id, run_id, kind, severity, services_json, detail_json, reason
+            FROM architecture_findings;
+        DROP TABLE architecture_findings;
+        ALTER TABLE architecture_findings_replacement RENAME TO architecture_findings;
+        CREATE INDEX idx_architecture_findings_run ON architecture_findings(run_id);
+        CREATE INDEX idx_architecture_findings_kind ON architecture_findings(kind);
+        """
+    )

@@ -532,12 +532,19 @@ a verdict:
 dependents/dependencies — a starting threshold of 4, not a trained value),
 `shared_database` (same-named entity, same engine, different services) and
 `duplicate_external_integration` (two or more services independently integrating
-with the same vendor). Deliberately out of scope still: legacy/strangler-fig
+with the same vendor). It also reports two deliberately bounded flow hypotheses:
+`possible_bff_domain_leakage` when a GraphQL mutation directly writes state or
+publishes, and `possible_non_atomic_publish` when one entrypoint both writes and
+publishes without a source-proven transaction boundary. Those two include
+`confidence`, source `evidence`, and explicit `unknowns`; they prompt validation,
+not a verdict. When a service name exists in more than one repository, findings use
+`repository/service` so cumulative knowledge cannot silently target the wrong code.
+Deliberately out of scope still: legacy/strangler-fig
 tagging and directional cycle severity (a cycle involving a legacy service is
 more serious than one between two peers) — see "Known limitations".
 
 `trend` compares the latest run against the one immediately before it —
-`new_findings`/`resolved_findings` by `(kind, services)` identity, and
+`new_findings`/`resolved_findings` by `(kind, services, entrypoint when present)` identity, and
 `count_deltas` for a `fan_in`/`fan_out` finding that persisted across both runs
 but whose count changed — computed for free from already-stored runs, no
 re-detection. It's omitted entirely (not an empty object) on the very first

@@ -300,8 +300,9 @@ CREATE TABLE IF NOT EXISTS index_runs (
     cost_usd      REAL
 );
 
--- Deterministic, whole-graph structural findings (cycles, fan-in/out imbalance, shared
--- database, duplicate external integration) recomputed after every index/update from
+-- Deterministic, whole-graph structural findings and bounded flow hypotheses (cycles,
+-- fan-in/out imbalance, shared database, duplicate external integration, BFF-policy
+-- and non-atomic-publish candidates) recomputed after every index/update from
 -- already-indexed facts alone — no LLM call. See generation/architecture.py. Versioned
 -- per run, the same way change_surface_runs is, so findings are comparable over time
 -- (e.g. is a monolith's fan-in shrinking as a strangler-fig migration progresses).
@@ -314,7 +315,11 @@ CREATE TABLE IF NOT EXISTS architecture_runs (
 CREATE TABLE IF NOT EXISTS architecture_findings (
     id            INTEGER PRIMARY KEY,
     run_id        INTEGER NOT NULL REFERENCES architecture_runs(id) ON DELETE CASCADE,
-    kind          TEXT NOT NULL CHECK (kind IN ('cycle', 'fan_in', 'fan_out', 'shared_database', 'duplicate_external_integration')),
+    kind          TEXT NOT NULL CHECK (kind IN (
+        'cycle', 'fan_in', 'fan_out', 'shared_database',
+        'duplicate_external_integration', 'possible_bff_domain_leakage',
+        'possible_non_atomic_publish'
+    )),
     severity      TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')) DEFAULT 'info',
     services_json TEXT NOT NULL,
     detail_json   TEXT,

@@ -29,7 +29,26 @@ def _internal_edges(conn: sqlite3.Connection) -> list[tuple[int, int]]:
 
 
 def _service_names(conn: sqlite3.Connection) -> dict[int, str]:
-    return {row["id"]: row["name"] for row in conn.execute("SELECT id, name FROM services")}
+    """Return an unambiguous display identity for every indexed service.
+
+    A short service name remains pleasant when unique. In a cumulative knowledge
+    base, however, a repeated name must carry its repository so a whole-system
+    finding cannot silently point an agent at the wrong checkout.
+    """
+    rows = conn.execute(
+        "SELECT s.id, s.name, r.name AS repository_name FROM services s "
+        "LEFT JOIN repositories r ON r.id = s.repository_id"
+    ).fetchall()
+    occurrences: dict[str, int] = defaultdict(int)
+    for row in rows:
+        occurrences[row["name"]] += 1
+    return {
+        row["id"]: (
+            row["name"] if occurrences[row["name"]] == 1
+            else f"{row['repository_name'] or 'standalone'}/{row['name']}"
+        )
+        for row in rows
+    }
 
 
 def _tarjan_scc(edges: list[tuple[int, int]]) -> list[list[int]]:
@@ -179,26 +198,120 @@ def find_duplicate_external_integrations(conn: sqlite3.Connection) -> list[dict]
     return findings
 
 
-_DETECTORS = (find_cycles, find_fan_imbalance, find_shared_database, find_duplicate_external_integrations)
+def _edge_evidence(row: sqlite3.Row) -> dict:
+    return {"file": row["file_path"], "start_line": row["start_line"], "end_line": row["end_line"]}
 
 
-def _findings_by_identity(conn: sqlite3.Connection, run_id: int) -> dict[tuple[str, tuple[str, ...]], dict]:
-    """A finding's identity across runs is (kind, sorted services) — the same finding
-    re-detected on a later run keeps that identity even if its row id changed, since
-    every run re-inserts findings from scratch (see recompute_architecture_view)."""
-    identified: dict[tuple[str, tuple[str, ...]], dict] = {}
+def find_flow_hypotheses(conn: sqlite3.Connection) -> list[dict]:
+    """Surface bounded flow risks as hypotheses, never as architecture verdicts.
+
+    The evidence comes only from direct static edges owned by an entrypoint. Whether
+    a GraphQL service is actually a BFF, or whether a transaction really encloses a
+    publication at runtime, remains deliberately explicit in `unknowns`.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """
+        SELECT e.id AS entrypoint_id, e.kind AS entrypoint_kind, e.method, e.name,
+               e.symbol, s.id AS service_id,
+               fe.kind AS edge_kind, fe.to_symbol, fe.file_path, fe.start_line, fe.end_line
+        FROM entrypoints e
+        JOIN services s ON s.id = e.service_id
+        JOIN flow_edges fe ON fe.entrypoint_id = e.id
+        ORDER BY s.name, e.id, fe.id
+        """
+    ).fetchall()
+    by_entrypoint: dict[int, dict] = {}
+    for row in rows:
+        entrypoint = by_entrypoint.setdefault(
+            row["entrypoint_id"],
+            {
+                "service_id": row["service_id"], "service_name": names[row["service_id"]],
+                "kind": row["entrypoint_kind"], "method": row["method"], "name": row["name"],
+                "symbol": row["symbol"], "writes": [], "publishes": [],
+            },
+        )
+        if row["edge_kind"] in {"writes", "publishes"}:
+            entrypoint[row["edge_kind"]].append({"target": row["to_symbol"], "evidence": _edge_evidence(row)})
+
+    findings: list[dict] = []
+    for entrypoint in by_entrypoint.values():
+        writes = entrypoint["writes"]
+        publishes = entrypoint["publishes"]
+        entrypoint_detail = {
+            "kind": entrypoint["kind"], "method": entrypoint["method"],
+            "name": entrypoint["name"], "symbol": entrypoint["symbol"],
+        }
+        if entrypoint["kind"] == "graphql" and entrypoint["method"] == "MUTATION" and (writes or publishes):
+            evidence = [item["evidence"] for item in [*writes, *publishes]]
+            findings.append(
+                {
+                    "kind": "possible_bff_domain_leakage", "severity": "warning",
+                    "services": [entrypoint["service_name"]],
+                    "reason": (
+                        "A GraphQL mutation directly writes state or publishes an event; validate whether this service "
+                        "is a BFF and whether reusable domain policy belongs behind a domain service."
+                    ),
+                    "detail": {
+                        "entrypoint": entrypoint_detail, "confidence": 0.6, "evidence": evidence,
+                        "unknowns": ["The static flow cannot establish whether this GraphQL service is a BFF."],
+                    },
+                }
+            )
+        if not (writes and publishes):
+            continue
+        has_transaction = conn.execute(
+            """SELECT 1 FROM flow_boundaries
+               WHERE service_id = ? AND source = ? AND kind = 'transaction' LIMIT 1""",
+            (entrypoint["service_id"], entrypoint["symbol"]),
+        ).fetchone()
+        if has_transaction is not None:
+            continue
+        findings.append(
+            {
+                "kind": "possible_non_atomic_publish", "severity": "warning",
+                "services": [entrypoint["service_name"]],
+                "reason": (
+                    "One entrypoint writes state and publishes an event without a source-proven transaction boundary; "
+                    "validate transactional outbox or equivalent delivery guarantees."
+                ),
+                "detail": {
+                    "entrypoint": entrypoint_detail, "confidence": 0.5,
+                    "evidence": [writes[0]["evidence"], publishes[0]["evidence"]],
+                    "unknowns": ["The static flow cannot prove the runtime transaction scope or broker delivery semantics."],
+                },
+            }
+        )
+    return findings
+
+
+_DETECTORS = (
+    find_cycles, find_fan_imbalance, find_shared_database, find_duplicate_external_integrations, find_flow_hypotheses,
+)
+
+
+def _findings_by_identity(conn: sqlite3.Connection, run_id: int) -> dict[tuple[str, tuple[str, ...], str], dict]:
+    """Give findings a stable identity across recomputed runs.
+
+    Structural findings are scoped by kind and services. Flow hypotheses additionally
+    need their entrypoint: one service can legitimately expose several independently
+    risky flows, and collapsing them would hide a newly detected one in `trend`.
+    """
+    identified: dict[tuple[str, tuple[str, ...], str], dict] = {}
     for f in architecture_repo.list_findings(conn, run_id):
         services = tuple(sorted(json.loads(f["services_json"])))
-        identified[(f["kind"], services)] = {
-            "kind": f["kind"], "services": list(services), "detail": json.loads(f["detail_json"] or "{}"),
+        detail = json.loads(f["detail_json"] or "{}")
+        entrypoint = json.dumps(detail.get("entrypoint"), sort_keys=True, separators=(",", ":"))
+        identified[(f["kind"], services, entrypoint)] = {
+            "kind": f["kind"], "services": list(services), "detail": detail,
         }
     return identified
 
 
 def diff_architecture_runs(conn: sqlite3.Connection, previous_run_id: int, current_run_id: int) -> dict:
     """Pure SQL/in-memory diff between two already-computed architecture runs — no
-    LLM, no re-detection: new_findings/resolved_findings by (kind, services)
-    identity, plus a numeric count_deltas entry for any fan_in/fan_out finding that
+    LLM, no re-detection: new_findings/resolved_findings by (kind, services,
+    entrypoint when present) identity, plus a numeric count_deltas entry for any fan_in/fan_out finding that
     persisted across both runs but whose count changed. Recomputed for free from
     data find_architecture_smells already has to read anyway.
     """

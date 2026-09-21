@@ -86,6 +86,13 @@ classification; for example, a GraphQL mutation that directly writes state is fl
 as possible BFF domain-policy leakage for human validation. A flow that both writes
 state and publishes an event is also flagged for a transaction/outbox review.
 
+`find_architecture_smells` exposes the same two signals at whole-system scope when
+their direct static evidence is indexed. For every finding, `confidence`, `evidence`
+and `unknowns` are top-level fields: ordinary structural findings default to `1.0`
+and state their static-analysis boundary; flow hypotheses carry lower confidence and
+their specific runtime uncertainty. When names collide across repositories, `services`
+uses `repository/service` rather than an ambiguous bare name.
+
 When local resolution has multiple plausible implementations, OrbitKB preserves the
 observed call rather than choosing one. A resolved static edge therefore carries only
 an implementation justified by local type/injection evidence or a Node/TypeScript

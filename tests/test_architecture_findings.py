@@ -2,10 +2,19 @@
 findings computed purely from already-seeded db.repositories.* facts, no LLM."""
 from pathlib import Path
 
+from orbitkb.analysis.models import (
+    AnalysisResult,
+    EntryPoint,
+    Evidence,
+    FlowBoundary,
+    FlowEdge,
+)
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import architecture as architecture_repo
+from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import persistence as persistence_repo
+from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import (
@@ -13,9 +22,11 @@ from orbitkb.generation.architecture import (
     find_cycles,
     find_duplicate_external_integrations,
     find_fan_imbalance,
+    find_flow_hypotheses,
     find_shared_database,
     recompute_architecture_view,
 )
+from orbitkb.mcp import queries
 
 EVIDENCE = [{"file": "main.py", "start_line": 1, "end_line": 5}]
 
@@ -136,6 +147,115 @@ def test_find_duplicate_external_integrations(tmp_path: Path):
     assert len(findings) == 1
     assert set(findings[0]["services"]) == {"a-service", "b-service"}
     assert findings[0]["detail"]["vendor"] == "Stripe API"
+
+
+def test_flow_hypotheses_report_graphql_policy_leakage_and_non_atomic_publish_with_evidence(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "checkout-bff", "/tmp/checkout", "node-ts")
+    evidence = Evidence("resolvers.ts", 10, 10)
+    flows_repo.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[EntryPoint("graphql", "MUTATION", "checkout", "Mutation.checkout", evidence)],
+            edges=[
+                FlowEdge("Mutation.checkout", "ordersRepository.save", "writes", evidence),
+                FlowEdge("Mutation.checkout", "events.publish", "publishes", Evidence("resolvers.ts", 11, 11)),
+            ],
+        ),
+    )
+
+    findings = find_flow_hypotheses(conn)
+
+    bff = next(finding for finding in findings if finding["kind"] == "possible_bff_domain_leakage")
+    non_atomic = next(finding for finding in findings if finding["kind"] == "possible_non_atomic_publish")
+    assert bff["services"] == ["checkout-bff"]
+    assert bff["detail"]["confidence"] == 0.6
+    assert bff["detail"]["evidence"] == [
+        {"file": "resolvers.ts", "start_line": 10, "end_line": 10},
+        {"file": "resolvers.ts", "start_line": 11, "end_line": 11},
+    ]
+    assert bff["detail"]["unknowns"]
+    assert non_atomic["detail"]["confidence"] == 0.5
+    assert len(non_atomic["detail"]["evidence"]) == 2
+
+    recompute_architecture_view(conn)
+    response = queries.find_architecture_smells(conn)
+    exposed = next(item for item in response["findings"] if item["kind"] == "possible_bff_domain_leakage")
+    assert exposed["confidence"] == 0.6
+    assert exposed["evidence"] == bff["detail"]["evidence"]
+    assert exposed["unknowns"] == bff["detail"]["unknowns"]
+
+
+def test_architecture_findings_qualify_duplicate_service_names_by_repository(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    sales_repo = repositories_repo.ensure_repository(conn, "sales", "/tmp/sales")
+    support_repo = repositories_repo.ensure_repository(conn, "support", "/tmp/support")
+    sales_orders = services_repo.ensure_service(conn, "orders", "/tmp/sales/orders", "node-ts", sales_repo)
+    support_orders = services_repo.ensure_service(conn, "orders", "/tmp/support/orders", "node-ts", support_repo)
+    evidence = Evidence("resolver.ts", 8, 8)
+    for service_id, symbol in ((sales_orders, "Mutation.createOrder"), (support_orders, "Mutation.createTicket")):
+        flows_repo.replace_analysis(
+            conn,
+            service_id,
+            AnalysisResult(
+                entrypoints=[EntryPoint("graphql", "MUTATION", symbol, symbol, evidence)],
+                edges=[FlowEdge(symbol, "repository.save", "writes", evidence)],
+            ),
+        )
+
+    findings = find_flow_hypotheses(conn)
+
+    assert {finding["services"][0] for finding in findings} == {"sales/orders", "support/orders"}
+
+
+def test_architecture_trend_keeps_flow_hypotheses_for_each_entrypoint(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "node-ts")
+    evidence = Evidence("resolver.ts", 8, 8)
+    first = EntryPoint("graphql", "MUTATION", "checkout", "Mutation.checkout", evidence)
+    flows_repo.replace_analysis(
+        conn, service_id,
+        AnalysisResult(entrypoints=[first], edges=[FlowEdge(first.symbol, "repository.save", "writes", evidence)]),
+    )
+    run_1 = recompute_architecture_view(conn)
+    second = EntryPoint("graphql", "MUTATION", "cancelCheckout", "Mutation.cancelCheckout", Evidence("resolver.ts", 20, 20))
+    flows_repo.replace_analysis(
+        conn, service_id,
+        AnalysisResult(
+            entrypoints=[first, second],
+            edges=[
+                FlowEdge(first.symbol, "repository.save", "writes", evidence),
+                FlowEdge(second.symbol, "repository.cancel", "writes", second.evidence),
+            ],
+        ),
+    )
+
+    diff = diff_architecture_runs(conn, run_1, recompute_architecture_view(conn))
+
+    assert [(finding["kind"], finding["detail"]["entrypoint"]["symbol"]) for finding in diff["new_findings"]] == [
+        ("possible_bff_domain_leakage", "Mutation.cancelCheckout")
+    ]
+
+
+def test_non_atomic_publish_hypothesis_is_suppressed_when_a_transaction_boundary_exists(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
+    evidence = Evidence("OrdersController.java", 10, 10)
+    flows_repo.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "Orders.create", evidence)],
+            edges=[
+                FlowEdge("Orders.create", "repository.save", "writes", evidence),
+                FlowEdge("Orders.create", "publisher.publish", "publishes", Evidence("OrdersController.java", 11, 11)),
+            ],
+            boundaries=[FlowBoundary("Orders.create", "transaction", evidence)],
+        ),
+    )
+
+    assert find_flow_hypotheses(conn) == []
 
 
 def test_recompute_architecture_view_persists_a_new_run_with_findings(tmp_path: Path):

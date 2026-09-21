@@ -211,8 +211,12 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         more services persisting a same-named entity on the same engine — likely
         sharing a database, coupling their schemas), and duplicate_external_integration
         (two or more services independently integrating with the same third-party
-        vendor). Each finding carries a plain-language reason and the services
-        involved, in risk language ('likely', 'worth checking') — never a confirmed
+        vendor). It also reports bounded flow hypotheses: possible_bff_domain_leakage
+        for a GraphQL mutation that directly writes or publishes, and
+        possible_non_atomic_publish when one entrypoint writes and publishes without
+        a source-proven transaction boundary. Each finding carries a plain-language
+        reason, services, confidence, source evidence and explicit unknowns, in risk
+        language ('likely', 'worth checking') — never a confirmed
         verdict; this describes structure, not a judgment call only a human/LLM
         synthesis over real evidence could make. When a prior run exists, the response
         also includes trend: new_findings (appeared since the last index/update),
