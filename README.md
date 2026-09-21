@@ -153,6 +153,8 @@ injected template: `query*` reads, while `update` and `batchUpdate` write.
 Spring `MongoTemplate` and `ReactiveMongoTemplate` operations also require a local
 injected template; exact find/count methods read, while save/insert/update/remove
 methods write.
+JPA `EntityManager` operations likewise require a local injected dependency: `find`
+and `getReference` read; `persist`, `merge`, `remove` and `flush` write.
 
 `describe_persistence` exposes source-proven `static_facts` independently of the
 generated entity summaries. JPA `@Entity`/`@Table` and GORM-tagged structs establish

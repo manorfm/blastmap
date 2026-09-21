@@ -133,6 +133,8 @@ _SPRING_MONGO_READ_METHODS = frozenset({"aggregate", "count", "distinct", "exist
 _SPRING_MONGO_WRITE_METHODS = frozenset({
     "findAndModify", "findAndReplace", "insert", "insertAll", "remove", "save", "updateFirst", "updateMulti", "upsert",
 })
+_ENTITY_MANAGER_READ_METHODS = frozenset({"find", "getReference"})
+_ENTITY_MANAGER_WRITE_METHODS = frozenset({"flush", "merge", "persist", "remove"})
 
 
 def _mongoose_model_variables(source: str) -> frozenset[str]:
@@ -288,11 +290,35 @@ def _spring_mongo_template_call_kind(target: str, receivers: frozenset[str]) -> 
     return None
 
 
+def _entity_manager_receivers(injections: list[Injection], class_name: str) -> frozenset[str]:
+    """Return locally injected members whose declared type is JPA EntityManager."""
+    prefix = f"{class_name}."
+    return frozenset(
+        injection.consumer.removeprefix(prefix)
+        for injection in injections
+        if injection.consumer.startswith(prefix)
+        and injection.contract.split("<", 1)[0].rsplit(".", 1)[-1] == "EntityManager"
+    )
+
+
+def _entity_manager_call_kind(target: str, receivers: frozenset[str]) -> str | None:
+    """Classify exact JPA EntityManager operations on a local dependency."""
+    receiver, separator, method = target.rpartition(".")
+    if not separator or receiver not in receivers:
+        return None
+    if method in _ENTITY_MANAGER_READ_METHODS:
+        return "reads"
+    if method in _ENTITY_MANAGER_WRITE_METHODS:
+        return "writes"
+    return None
+
+
 @dataclass(frozen=True)
 class _SpringPersistenceReceivers:
     repositories: frozenset[str]
     jdbc_templates: frozenset[str]
     mongo_templates: frozenset[str]
+    entity_managers: frozenset[str]
 
 
 def _spring_persistence_receivers(
@@ -303,6 +329,7 @@ def _spring_persistence_receivers(
         _spring_repository_receivers(injections, class_name),
         _spring_jdbc_template_receivers(injections, class_name),
         _spring_mongo_template_receivers(injections, class_name),
+        _entity_manager_receivers(injections, class_name),
     )
 
 
@@ -320,6 +347,7 @@ def _spring_edges_for(
             _spring_repository_call_kind(edge.target, receivers.repositories)
             or _spring_jdbc_template_call_kind(edge.target, receivers.jdbc_templates)
             or _spring_mongo_template_call_kind(edge.target, receivers.mongo_templates)
+            or _entity_manager_call_kind(edge.target, receivers.entity_managers)
         )
         # Generic name matching is disabled for JVM persistence: `repository.save`
         # is an operation only with a local repository dependency.

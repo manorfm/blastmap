@@ -557,6 +557,41 @@ def test_spring_analyzers_classify_only_explicit_mongo_template_dependencies(tmp
     }
 
 
+def test_spring_analyzers_classify_only_explicit_entity_manager_dependencies(tmp_path: Path):
+    (tmp_path / "Orders.java").write_text(
+        '''class Orders {
+  private final EntityManager entityManager;
+  Order find(String id) { return entityManager.find(Order.class, id); }
+  void save(Order order) { entityManager.persist(order); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Payments.kt").write_text(
+        '''class Payments(private val entityManager: EntityManager) {
+  fun remove(payment: Payment) = entityManager.remove(payment)
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Unproven.java").write_text(
+        '''class Unproven {
+  Order find(Client entityManager, String id) { return entityManager.find(Order.class, id); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("Orders.find", "entityManager.find", "reads"),
+        ("Orders.save", "entityManager.persist", "writes"),
+        ("Payments.remove", "entityManager.remove", "writes"),
+        ("Unproven.find", "entityManager.find", "invokes"),
+    }
+
+
 def test_graphql_schema_contract_is_linked_to_its_resolver_entrypoint(tmp_path: Path):
     (tmp_path / "resolvers.ts").write_text(
         '''export const resolvers = { Mutation: { createOrder: (_, input) => orderService.create(input) } };''',
