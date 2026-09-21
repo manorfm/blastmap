@@ -98,6 +98,10 @@ declared payload parameter type when the listener/callback makes it available.
 Publication contracts are persisted separately and returned by `describe_messages`
 as `static_contracts`, including literal channel, routing key and source evidence.
 
+`describe_entrypoint` also returns source-proven `boundaries` for branch, async,
+retry, error and transaction constructs reachable in the bounded flow. These are
+observed control-flow markers, not claims that every branch is executed.
+
 The initial native coverage is deliberately focused on Go HTTP handlers,
 Java/Kotlin Spring HTTP controllers and Rabbit listeners, and Node/TypeScript
 GraphQL resolvers and Rabbit consumers. It resolves an observed call across files

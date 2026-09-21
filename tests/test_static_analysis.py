@@ -233,6 +233,26 @@ def test_java_spring_http_contract_keeps_declared_payload_validation_and_auth(tm
     }
 
 
+def test_native_flow_boundaries_are_extracted_from_declared_control_flow(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''class OrdersController {
+  @PostMapping("/orders") @Transactional
+  Order create(Order order) {
+    if (order == null) { throw new IllegalArgumentException(); }
+    retry(); return service.create(order);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {boundary.kind for boundary in result.boundaries if boundary.source == "OrdersController.create"} == {
+        "branch", "retry", "error", "transaction",
+    }
+
+
 def test_go_http_contract_keeps_the_json_decoded_payload_type(tmp_path: Path):
     (tmp_path / "orders.go").write_text(
         '''package orders

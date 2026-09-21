@@ -216,6 +216,7 @@ def describe_entrypoint(
     bounded_edges = flows_repo.list_reachable_edges(conn, row["id"], entrypoint["symbol"], effective_max_edges + 1)
     truncated = len(bounded_edges) > effective_max_edges
     edges = bounded_edges[:effective_max_edges]
+    flow_symbols = {entrypoint["symbol"]} | {edge["from_symbol"] for edge in edges} | {edge["to_symbol"] for edge in edges}
     return {
         "entrypoint": {
             "kind": entrypoint["kind"], "method": entrypoint["method"], "name": entrypoint["name"],
@@ -233,6 +234,12 @@ def describe_entrypoint(
             for edge in edges
         ],
         "flow_pagination": {"max_edges": effective_max_edges, "truncated": truncated},
+        "boundaries": [
+            {"source": item["source"], "kind": item["kind"], "evidence": {
+                "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],
+            }}
+            for item in flows_repo.list_flow_boundaries(conn, row["id"], flow_symbols)
+        ],
         "contract": flows_repo.get_entrypoint_contract(conn, entrypoint["id"]),
         "smells": find_entrypoint_smells(entrypoint, edges),
     }

@@ -82,6 +82,10 @@ contracts have their own persisted representation. `describe_messages` now retur
 that representation in `static_contracts`, with channel, routing key, payload type
 when proven, and file/line evidence.
 
+`describe_entrypoint` returns `boundaries` alongside `flow`: branch, async, retry,
+error or transaction markers whose source symbol is reachable under the selected
+edge budget. They report syntactic evidence only, never runtime reachability.
+
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an
 agent can deliberately request more depth instead of receiving it by default.

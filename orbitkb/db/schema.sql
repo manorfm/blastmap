@@ -173,6 +173,17 @@ CREATE INDEX IF NOT EXISTS idx_entrypoints_service ON entrypoints(service_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_service ON flow_edges(service_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_entrypoint ON flow_edges(entrypoint_id);
 
+CREATE TABLE IF NOT EXISTS flow_boundaries (
+    id          INTEGER PRIMARY KEY,
+    service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    source      TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('branch', 'async', 'retry', 'error', 'transaction')),
+    file_path   TEXT NOT NULL,
+    start_line  INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS entrypoint_contracts (
     entrypoint_id  INTEGER PRIMARY KEY REFERENCES entrypoints(id) ON DELETE CASCADE,
     contract_json  TEXT NOT NULL

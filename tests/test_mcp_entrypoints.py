@@ -1,4 +1,4 @@
-from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
+from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowBoundary, FlowEdge
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import flows, services
 from orbitkb.mcp import queries
@@ -43,6 +43,7 @@ def test_describe_entrypoint_returns_the_reachable_bounded_flow(tmp_path):
                 FlowEdge("OrdersController.create", "CreateOrderUseCase.execute", "invokes", evidence),
                 FlowEdge("CreateOrderUseCase.execute", "orderRepository.save", "writes", evidence),
             ],
+            boundaries=[FlowBoundary("CreateOrderUseCase.execute", "transaction", evidence)],
         ),
     )
 
@@ -52,6 +53,7 @@ def test_describe_entrypoint_returns_the_reachable_bounded_flow(tmp_path):
         ("OrdersController.create", "CreateOrderUseCase.execute"),
         ("CreateOrderUseCase.execute", "orderRepository.save"),
     ]
+    assert detail["boundaries"][0]["kind"] == "transaction"
 
 
 def test_describe_entrypoint_includes_a_deterministic_graphql_contract(tmp_path):

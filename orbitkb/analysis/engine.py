@@ -24,6 +24,7 @@ from orbitkb.analysis.models import (
     AnalysisResult,
     EntryPoint,
     Evidence,
+    FlowBoundary,
     FlowEdge,
     Injection,
     MessageContract,
@@ -129,6 +130,19 @@ class _FileAnalyzer:
             edges.append(FlowEdge(function.symbol, target, _call_kind(target), _evidence(path, root, node)))
         return edges
 
+    @staticmethod
+    def _boundaries_for(function: _Function, path: Path, root: Path, source: bytes) -> list[FlowBoundary]:
+        text = _text(function.declaration, source)
+        patterns = {
+            "branch": r"\bif\b|\bwhen\b",
+            "async": r"\bawait\b|\basync\b|\bgo\s+",
+            "retry": r"\bretry\b|\bbackoff\b",
+            "error": r"\bthrow\b|\bcatch\b|\bexcept\b|\breturn\s+err\b",
+            "transaction": r"@Transactional|\btransaction\b",
+        }
+        evidence = _evidence(path, root, function.declaration)
+        return [FlowBoundary(function.symbol, kind, evidence) for kind, pattern in patterns.items() if re.search(pattern, text)]
+
 
 class _GoAnalyzer(_FileAnalyzer):
     ROUTE_METHODS: ClassVar[frozenset[str]] = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
@@ -181,6 +195,7 @@ class _GoAnalyzer(_FileAnalyzer):
                     result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
                     result.symbols.append(_symbol(handler, path, root, imports=imports))
                     result.edges.extend(self._edges_for(handler, path, root, source))
+                    result.boundaries.extend(self._boundaries_for(handler, path, root, source))
                     result.contracts[symbol] = _message_contract(channel, _text(args[-1], source), "go")
             if method not in self.ROUTE_METHODS or len(args) < 2:
                 continue
@@ -231,6 +246,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 function = _Function(_text(name_node, source), symbol, body, function_node)
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
                 result.edges.extend(self._edges_for(function, path, root, source))
+                result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 modifiers = next((node for node in function_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
@@ -278,6 +294,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 function = _Function(name, symbol, body, method_node)
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
                 result.edges.extend(self._edges_for(function, path, root, source))
+                result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 modifiers = next((node for node in method_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
@@ -322,6 +339,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             function = _Function(name, f"{path.stem}.{name}", body, node)
             result.symbols.append(_symbol(function, path, root, imports=imports))
             result.edges.extend(self._edges_for(function, path, root, source))
+            result.boundaries.extend(self._boundaries_for(function, path, root, source))
         for parent in _walk(tree):
             if parent.type != "pair" or _text(parent.child_by_field_name("key"), source) not in {"Query", "Mutation", "Subscription"}:
                 continue
@@ -340,6 +358,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 function = _Function(name, symbol, handler, resolver)
                 result.symbols.append(_symbol(function, path, root, imports=imports))
                 result.edges.extend(self._edges_for(function, path, root, source))
+                result.boundaries.extend(self._boundaries_for(function, path, root, source))
         for node in _walk(tree):
             if node.type != "call_expression":
                 continue
@@ -357,6 +376,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             function = _Function(channel, symbol, handler, node)
             result.symbols.append(_symbol(function, path, root, imports=imports))
             result.edges.extend(self._edges_for(function, path, root, source))
+            result.boundaries.extend(self._boundaries_for(function, path, root, source))
             result.contracts[symbol] = _message_contract(channel, _text(handler, source), "node")
         return result
 
