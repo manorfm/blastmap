@@ -203,7 +203,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
     @mcp.tool()
     def find_architecture_smells() -> dict:
         """Deterministic, whole-graph structural findings computed purely from already-
-        indexed facts (service_calls, persistence_entities, direct static flow_edges)
+        indexed facts (service_calls, persistence_entities, direct static flow_edges
+        and persistence ownership declarations)
         — no LLM call, recomputed
         after every index/update. Reports: cycle (a circular dependency among internal
         services — A depends on B depends on ... depends on A), fan_in/fan_out (a
@@ -217,7 +218,9 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         possible_non_atomic_publish when one entrypoint writes and publishes without
         a source-proven transaction boundary, plus possible_read_entrypoint_side_effect
         when a static write or publication is directly reachable from an HTTP safe
-        method or GraphQL query. Each finding carries a plain-language reason,
+        method or GraphQL query. possible_aggregate_ownership_overlap reports distinct
+        services declaring ownership of the same static table/document; its detail
+        preserves each declared owner without assuming a shared database. Each finding carries a plain-language reason,
         services, confidence, source evidence, explicit unknowns and conservative
         remediation, in risk
         language ('likely', 'worth checking') — never a confirmed

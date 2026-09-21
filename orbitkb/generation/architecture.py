@@ -177,6 +177,64 @@ def find_shared_database(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_aggregate_ownership_overlap(conn: sqlite3.Connection) -> list[dict]:
+    """Surface competing static ownership declarations across services.
+
+    The detector intentionally relies on deterministic entity/model declarations,
+    not generated descriptions or table-name guesses. Matching declarations prove
+    an overlap worth reviewing; they do not prove a shared physical database or
+    rule out a deliberate read model.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """
+        SELECT f.name, f.kind, f.owner, f.file_path, f.start_line, f.end_line,
+               f.service_id
+        FROM static_persistence_facts f
+        ORDER BY LOWER(f.name), f.kind, f.service_id, f.owner, f.file_path, f.start_line
+        """
+    ).fetchall()
+    grouped: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
+    for row in rows:
+        grouped[(row["name"].casefold(), row["kind"])].append(row)
+
+    findings: list[dict] = []
+    for (_normalized_name, persistence_kind), facts in grouped.items():
+        service_ids = {fact["service_id"] for fact in facts}
+        if len(service_ids) < 2:
+            continue
+        aggregate = facts[0]["name"]
+        ordered_facts = sorted(
+            facts,
+            key=lambda fact: (names[fact["service_id"]], fact["owner"], fact["file_path"], fact["start_line"]),
+        )
+        owners = sorted({(names[fact["service_id"]], fact["owner"]) for fact in facts})
+        service_names = sorted(names[service_id] for service_id in service_ids)
+        findings.append(
+            {
+                "kind": "possible_aggregate_ownership_overlap", "severity": "warning",
+                "services": service_names,
+                "reason": (
+                    f"{', '.join(service_names)} each declare ownership of {persistence_kind} "
+                    f"'{aggregate}'; validate one source of truth or an explicit read-model boundary."
+                ),
+                "detail": {
+                    "aggregate": aggregate, "persistence_kind": persistence_kind,
+                    "owners": [{"service": service, "owner": owner} for service, owner in owners],
+                    "confidence": 0.65,
+                    "evidence": [_edge_evidence(fact) for fact in ordered_facts],
+                    "unknowns": [
+                        "Static declarations cannot establish whether these services share a physical database or intentionally maintain read models.",
+                    ],
+                    "remediation": [
+                        "Assign one write owner for the aggregate, or document the replication/read-model contract between services.",
+                    ],
+                },
+            }
+        )
+    return findings
+
+
 def find_duplicate_external_integrations(conn: sqlite3.Connection) -> list[dict]:
     names = _service_names(conn)
     rows = conn.execute(
@@ -342,7 +400,8 @@ def find_read_entrypoint_side_effects(conn: sqlite3.Connection) -> list[dict]:
 
 
 _DETECTORS = (
-    find_cycles, find_fan_imbalance, find_shared_database, find_duplicate_external_integrations,
+    find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
+    find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects,
 )
 

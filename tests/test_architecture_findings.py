@@ -8,6 +8,7 @@ from orbitkb.analysis.models import (
     Evidence,
     FlowBoundary,
     FlowEdge,
+    PersistenceFact,
 )
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
@@ -23,6 +24,7 @@ from orbitkb.generation.architecture import (
     find_duplicate_external_integrations,
     find_fan_imbalance,
     find_flow_hypotheses,
+    find_aggregate_ownership_overlap,
     find_read_entrypoint_side_effects,
     find_shared_database,
     recompute_architecture_view,
@@ -299,6 +301,47 @@ def test_read_entrypoint_side_effects_flag_get_and_graphql_query_with_remediatio
     response = queries.find_architecture_smells(conn)
     exposed = next(item for item in response["findings"] if item["kind"] == "possible_read_entrypoint_side_effect")
     assert exposed["remediation"] == findings[0]["detail"]["remediation"]
+
+
+def test_aggregate_ownership_overlap_preserves_each_declared_owner_and_evidence(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    orders = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
+    fulfillment = services_repo.ensure_service(conn, "fulfillment", "/tmp/fulfillment", "go")
+    orders_evidence = Evidence("Order.java", 8, 15)
+    fulfillment_evidence = Evidence("shipment.go", 5, 11)
+    flows_repo.replace_analysis(
+        conn,
+        orders,
+        AnalysisResult(persistence_facts=[PersistenceFact("orders", "sql_table", "Order", orders_evidence)]),
+    )
+    flows_repo.replace_analysis(
+        conn,
+        fulfillment,
+        AnalysisResult(persistence_facts=[PersistenceFact("orders", "sql_table", "ShipmentOrder", fulfillment_evidence)]),
+    )
+
+    findings = find_aggregate_ownership_overlap(conn)
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["kind"] == "possible_aggregate_ownership_overlap"
+    assert finding["services"] == ["fulfillment", "orders"]
+    assert finding["detail"]["aggregate"] == "orders"
+    assert finding["detail"]["owners"] == [
+        {"service": "fulfillment", "owner": "ShipmentOrder"},
+        {"service": "orders", "owner": "Order"},
+    ]
+    assert finding["detail"]["evidence"] == [
+        {"file": "shipment.go", "start_line": 5, "end_line": 11},
+        {"file": "Order.java", "start_line": 8, "end_line": 15},
+    ]
+    assert finding["detail"]["confidence"] == 0.65
+    assert finding["detail"]["unknowns"]
+
+    recompute_architecture_view(conn)
+    response = queries.find_architecture_smells(conn)
+    exposed = next(item for item in response["findings"] if item["kind"] == finding["kind"])
+    assert exposed["remediation"] == finding["detail"]["remediation"]
 
 
 def test_recompute_architecture_view_persists_a_new_run_with_findings(tmp_path: Path):

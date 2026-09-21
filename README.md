@@ -500,7 +500,7 @@ If there's no path within `max_hops` (default 6), it returns `{"path": [],
 
 **`find_architecture_smells()`** — whole-system structural findings, recomputed
 on every `index`/`update` purely from what's already indexed (`service_calls`,
-`persistence_entities`, direct static `flow_edges`) — **no LLM call**, pure SQL plus a Tarjan's-algorithm pass
+`persistence_entities`, direct static `flow_edges` and ownership facts) — **no LLM call**, pure SQL plus a Tarjan's-algorithm pass
 (strongly connected components) to detect cycles. Always in risk language, never
 a verdict:
 ```json
@@ -532,7 +532,11 @@ Four structural detector families run today: `cycle` (circular dependency among 
 dependents/dependencies — a starting threshold of 4, not a trained value),
 `shared_database` (same-named entity, same engine, different services) and
 `duplicate_external_integration` (two or more services independently integrating
-with the same vendor). It also reports three deliberately bounded flow hypotheses:
+with the same vendor). It also reports an ownership-boundary hypothesis,
+`possible_aggregate_ownership_overlap`, when distinct services declare the same
+static table/document aggregate; its detail preserves every declared owner and source
+location, while explicitly allowing for a legitimate replicated read model. It also
+reports three deliberately bounded flow hypotheses:
 `possible_bff_domain_leakage` when a GraphQL mutation directly writes state or
 publishes, and `possible_non_atomic_publish` when one entrypoint both writes and
 publishes without a source-proven transaction boundary, plus
@@ -898,9 +902,9 @@ generated 100% from SQLite, with no LLM cost.
   it can never itself go stale.
 - **Deterministic architecture smells** (`generation/architecture.py`,
   `find_architecture_smells`): cycle (Tarjan/SCC), disproportionate
-  fan-in/fan-out, shared database, duplicate external integration and evidence-led
-  flow hypotheses (BFF policy leakage, non-atomic publication, side effects in read
-  entrypoints) — recomputed on every `index`/`update`, no LLM, versioned in
+  fan-in/fan-out, shared database, duplicate external integration, aggregate ownership
+  overlap and evidence-led flow hypotheses (BFF policy leakage, non-atomic publication,
+  side effects in read entrypoints) — recomputed on every `index`/`update`, no LLM, versioned in
   `architecture_runs`/`architecture_findings` the same way `change_surface_runs`
   already is.
 - **Export to Markdown** (human-readable) and **Mermaid** (topology + ER), both

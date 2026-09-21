@@ -89,10 +89,13 @@ state and publishes an event is also flagged for a transaction/outbox review.
 `find_architecture_smells` exposes those signals at whole-system scope when their
 direct static evidence is indexed. It also flags a write/publication behind an HTTP
 safe method (`GET`, `HEAD`, `OPTIONS`) or GraphQL `QUERY` as a possible read-entrypoint
-side effect. For every finding, `confidence`, `evidence`, `unknowns` and `remediation`
-are top-level fields: ordinary structural findings default to `1.0` and have empty
-remediation; flow hypotheses carry their specific uncertainty and a conservative
-review action. When names collide across repositories, `services` uses
+side effect, and static ownership declarations for the same table/document in distinct
+services as a possible aggregate-ownership overlap. The latter carries `owners` in
+`detail` plus the declaration locations; it does not assume a shared database or
+reject a valid replicated read model. For every finding, `confidence`, `evidence`,
+`unknowns` and `remediation` are top-level fields: ordinary structural findings default
+to `1.0` and have empty remediation; hypotheses carry their specific uncertainty and a
+conservative review action. When names collide across repositories, `services` uses
 `repository/service` rather than an ambiguous bare name.
 
 When local resolution has multiple plausible implementations, OrbitKB preserves the
