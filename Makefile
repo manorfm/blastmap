@@ -18,6 +18,8 @@ export PATH := $(abspath .venv/bin):$(PATH)
 endif
 
 DB_DEFAULT := $(HOME)/.orbitkb/orbitkb.db
+ANALYSIS_TESTS := tests/test_static_analysis.py tests/test_self_index_e2e.py tests/test_depth_provider.py
+NON_ANALYSIS_TEST_ARGS := tests/ --ignore=tests/test_static_analysis.py --ignore=tests/test_self_index_e2e.py --ignore=tests/test_depth_provider.py
 
 help:
 	@echo "orbitkb — available targets:"
@@ -51,10 +53,14 @@ hooks:
 	@echo "Git hooks installed (core.hooksPath=scripts/githooks)."
 
 test:
-	$(PYTHON) -m pytest tests/
+	$(PYTHON) -m pytest $(NON_ANALYSIS_TEST_ARGS)
+	$(PYTHON) -m pytest $(ANALYSIS_TESTS)
 
 coverage:
-	$(PYTHON) -m coverage run -m pytest tests/
+	$(PYTHON) -m coverage erase
+	$(PYTHON) -m coverage run -p -m pytest $(NON_ANALYSIS_TEST_ARGS)
+	$(PYTHON) -m coverage run -p -m pytest $(ANALYSIS_TESTS)
+	$(PYTHON) -m coverage combine
 	$(PYTHON) -m coverage report -m
 
 lint:

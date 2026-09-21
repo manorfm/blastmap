@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from orbitkb.analysis.depth import DepthMode, NoopDepthProvider, _parse_edges, resolve_depth_provider
+from orbitkb.analysis.depth import (
+    DepthMode,
+    NoopDepthProvider,
+    _parse_edges,
+    resolve_depth_provider,
+)
 from orbitkb.analysis.engine import StaticAnalysisEngine
 from orbitkb.analysis.models import AnalysisResult, Evidence, FlowEdge
 
@@ -34,11 +39,11 @@ def test_engine_keeps_static_analysis_when_a_provider_adds_depth(tmp_path: Path)
 
     class Provider:
         def enrich(self, root: Path, analysis: AnalysisResult) -> list[FlowEdge]:
-            return [FlowEdge("create", "orders.UseCase.Execute", "invokes", Evidence("usecase.go", 4, 4), origin="codegraph")]
+            return [FlowEdge("main.create", "orders.UseCase.Execute", "invokes", Evidence("usecase.go", 4, 4), origin="codegraph")]
 
     result = StaticAnalysisEngine(depth_provider=Provider()).analyze(tmp_path, "go")
 
-    assert result.entrypoints[0].symbol == "create"
+    assert result.entrypoints[0].symbol == "main.create"
     assert result.edges[-1].origin == "codegraph"
 
 

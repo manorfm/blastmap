@@ -276,3 +276,24 @@ export const resolvers = { Mutation: { createOrder: (_, input) => createExternal
     result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
 
     assert any(edge.source == "Mutation.createOrder" and edge.target == "orders-service.createOrder" for edge in result.edges)
+
+
+def test_go_import_alias_resolves_a_declared_package_function(tmp_path: Path):
+    (tmp_path / "handler.go").write_text(
+        '''package api
+import ordercommands "example.com/shop/orders"
+func Create() { ordercommands.Create() }
+func register() { router.POST("/orders", Create) }
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "orders.go").write_text(
+        '''package orders
+func Create() {}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert any(edge.source == "api.Create" and edge.target == "orders.Create" for edge in result.edges)

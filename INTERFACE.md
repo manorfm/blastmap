@@ -59,7 +59,8 @@ state and publishes an event is also flagged for a transaction/outbox review.
 When local resolution has multiple plausible implementations, OrbitKB preserves the
 observed call rather than choosing one. A resolved static edge therefore carries only
 an implementation justified by local type/injection evidence or a Node/TypeScript
-named import declared by the calling module (including an imported alias).
+named import declared by the calling module (including an imported alias), or a Go
+package import that resolves the observed receiver and function name.
 
 `contract` is present only when deterministic local extraction found one. For GraphQL
 it comes from `.graphql`/`.gql` schema definitions; absent data remains `null`, never

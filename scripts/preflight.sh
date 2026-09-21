@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fan-out/fan-in release gate: runs the full test suite first, then fans out the
-# independent lint/sast/sca/dast checks. MCP integration tests create subprocess
-# servers; isolating the suite prevents concurrent live servers from destabilizing
-# native parser teardown on macOS. A single failure aborts with a non-zero exit and no
-# git side effects have happened yet -- `make release`'s `_release: verify`
+# independent lint/sast/sca/dast checks. `make test` process-isolates the native
+# Tree-sitter analysis tests from the MCP/async suite, which makes interpreter
+# teardown deterministic on macOS. A single failure aborts with a non-zero exit and
+# no git side effects have happened yet -- `make release`'s `_release: verify`
 # dependency means nothing gets bumped, committed, tagged or pushed.
 #
 # This is a *local* pre-flight, not the authoritative gate: publish.yml reruns

@@ -49,7 +49,7 @@ class BoundedFlowResolver:
         if edge.kind != "invokes" or edge.target in implementations:
             return edge
         source_symbol = symbols.get(edge.source)
-        imported_target = dict(source_symbol.imports).get(edge.target) if source_symbol else None
+        imported_target = BoundedFlowResolver._imported_target(source_symbol, edge.target)
         if imported_target in implementations:
             return replace(edge, target=imported_target, confidence="high")
         receiver, separator, method = edge.target.rpartition(".")
@@ -71,3 +71,14 @@ class BoundedFlowResolver:
         if len(candidates) == 1:
             return replace(edge, target=candidates[0], confidence="medium")
         return edge
+
+    @staticmethod
+    def _imported_target(symbol: Symbol | None, target: str) -> str | None:
+        if symbol is None:
+            return None
+        imports = dict(symbol.imports)
+        if target in imports:
+            return imports[target]
+        receiver, separator, member = target.partition(".")
+        module = imports.get(receiver)
+        return f"{module}.{member}" if module and separator else None

@@ -94,8 +94,10 @@ target. A local symbol index includes callable declarations even when they are l
 methods, and Java interface implementations are used only when exactly one candidate
 matches. Node/TypeScript named imports, including `import { source as alias }`, bind
 an observed call to the declared local module before any method-name fallback. The
-model also dogfoods explicit Python CLI `main` functions. Resolution is bounded by
-the selected entrypoint; it never builds or returns a whole code graph.
+equivalent Go package import rule also supports aliases such as
+`import ordercommands ".../orders"`. The model also dogfoods explicit Python CLI
+`main` functions. Resolution is bounded by the selected entrypoint; it never builds
+or returns a whole code graph.
 
 ### Optional depth provider
 
@@ -982,7 +984,7 @@ remediation guidance, never a value or source excerpt.
 ```bash
 make dev              # pip install -e ".[dev]" + install git hooks
 make hooks            # install git hooks on their own (core.hooksPath=scripts/githooks)
-make test             # pytest tests/
+make test             # deterministic suite; native analysis tests run in a separate process
 make coverage         # pytest with coverage report
 make lint             # ruff (unused imports/vars) + vulture (dead code)
 make sast             # bandit static security scan
@@ -993,12 +995,15 @@ make verify           # test, then lint + sast + sca + dast in parallel
 make build            # sdist + wheel into dist/
 ```
 (every target is a thin wrapper — see the `Makefile` for the exact command it
-runs, e.g. `pytest tests/ --cov=orbitkb --cov-report=term-missing` for
-`coverage`.)
+runs; `coverage` combines reports from the isolated native-analysis and remaining
+test processes.)
 
 CI (`.github/workflows/ci.yml`) runs exactly the deterministic test suite on
 Python 3.11/3.12 on every push/PR. The MCP E2E test builds a temporary database
 from `verify/sample_project`, so it never relies on a developer's local database.
+Locally, `make test` runs native Tree-sitter analysis tests in their own process so
+macOS interpreter teardown cannot interfere with the MCP/async test session; both
+commands must pass for the target to succeed.
 
 `get_relationships`/`trace_flow`/`find_architecture_smells`/`find_change_surface`/
 `verify_change_surface` are exercised via a real MCP session (stdio), which

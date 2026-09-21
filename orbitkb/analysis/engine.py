@@ -131,6 +131,9 @@ class _GoAnalyzer(_FileAnalyzer):
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
         source = path.read_bytes()
         tree = self.parse(source)
+        source_text = source.decode("utf-8", errors="ignore")
+        package = _go_package_name(source_text, path)
+        imports = _go_imports(source_text)
         functions: list[_Function] = []
         for node in _walk(tree):
             if node.type not in {"function_declaration", "method_declaration"}:
@@ -146,11 +149,12 @@ class _GoAnalyzer(_FileAnalyzer):
                 receiver = _text(receiver_node, source) if receiver_node else ""
                 receiver_match = re.search(r"\*?([A-Z][A-Za-z0-9_]*)", receiver)
                 receiver = receiver_match.group(1) if receiver_match else ""
-            functions.append(_Function(name, f"{receiver}.{name}".strip("."), body, node))
+            symbol = f"{receiver}.{name}" if receiver else f"{package}.{name}"
+            functions.append(_Function(name, symbol, body, node))
 
         result = AnalysisResult(
             edges=[edge for fn in functions for edge in self._edges_for(fn, path, root, source)],
-            symbols=[_symbol(fn, path, root) for fn in functions],
+            symbols=[_symbol(fn, path, root, imports=imports) for fn in functions],
         )
         by_last_name = {fn.name: fn for fn in functions}
         for node in _walk(tree):
@@ -410,6 +414,28 @@ def _kotlin_supertypes(class_text: str) -> tuple[str, ...]:
 def _java_interfaces(class_text: str) -> tuple[str, ...]:
     match = re.search(r"\bimplements\s+([^\{]+)", class_text)
     return tuple(item.strip() for item in match.group(1).split(",")) if match else ()
+
+
+def _go_package_name(source: str, path: Path) -> str:
+    match = re.search(r"(?m)^\s*package\s+(\w+)", source)
+    return match.group(1) if match else path.parent.name
+
+
+def _go_imports(source: str) -> tuple[tuple[str, str], ...]:
+    blocks = re.findall(r"(?ms)^\s*import\s*\((.*?)^\s*\)", source)
+    single_imports = re.findall(r'(?m)^\s*import\s+(?:(\w+)\s+)?"([^"]+)"', source)
+    declarations = [
+        item
+        for block in blocks
+        for item in re.findall(r'(?m)^\s*(?:(\w+)\s+)?"([^"]+)"', block)
+    ]
+    imports = []
+    for alias, module in [*single_imports, *declarations]:
+        package = module.rstrip("/").rsplit("/", 1)[-1]
+        local_name = alias or package
+        if local_name not in {"_", "."}:
+            imports.append((local_name, package))
+    return tuple(imports)
 
 
 def _node_named_imports(source: str) -> tuple[tuple[str, str], ...]:
