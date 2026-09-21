@@ -261,6 +261,12 @@ def describe_persistence(conn: sqlite3.Connection, service: str, limit: int = DE
             }
             for e in entities
         ],
+        "static_facts": [
+            {"name": item["name"], "kind": item["kind"], "owner": item["owner"], "evidence": {
+                "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],
+            }}
+            for item in flows_repo.list_static_persistence_facts(conn, row["id"])
+        ],
         **page,
     }
 

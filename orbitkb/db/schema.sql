@@ -88,6 +88,18 @@ CREATE TABLE IF NOT EXISTS persistence_entities (
     UNIQUE(service_id, name)
 );
 
+CREATE TABLE IF NOT EXISTS static_persistence_facts (
+    id          INTEGER PRIMARY KEY,
+    service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('sql_table', 'document')),
+    owner       TEXT NOT NULL,
+    file_path   TEXT NOT NULL,
+    start_line  INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
 -- `provider` is the concrete message broker/vendor (kafka, rabbitmq, sqs, sns,
 -- service_bus, activemq, nats), inferred by the LLM from real code the same way
 -- service_calls.target_kind is — 'unknown' means the code only showed a

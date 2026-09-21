@@ -102,6 +102,10 @@ as `static_contracts`, including literal channel, routing key and source evidenc
 retry, error and transaction constructs reachable in the bounded flow. These are
 observed control-flow markers, not claims that every branch is executed.
 
+`describe_persistence` exposes source-proven `static_facts` independently of the
+generated entity summaries. JPA `@Entity`/`@Table` and GORM-tagged structs establish
+the local owner; absent mapping evidence creates no ownership claim.
+
 The initial native coverage is deliberately focused on Go HTTP handlers,
 Java/Kotlin Spring HTTP controllers and Rabbit listeners, and Node/TypeScript
 GraphQL resolvers and Rabbit consumers. It resolves an observed call across files

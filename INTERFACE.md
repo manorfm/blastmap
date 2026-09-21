@@ -86,6 +86,10 @@ when proven, and file/line evidence.
 error or transaction markers whose source symbol is reachable under the selected
 edge budget. They report syntactic evidence only, never runtime reachability.
 
+`describe_persistence` also returns `static_facts` for locally proven JPA or GORM
+mappings, including entity/table name, local owner and file/line evidence. These do
+not replace the generated persistence entities.
+
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an
 agent can deliberately request more depth instead of receiving it by default.

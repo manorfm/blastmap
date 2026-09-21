@@ -73,6 +73,14 @@ class FlowBoundary:
     evidence: Evidence
 
 
+@dataclass(frozen=True)
+class PersistenceFact:
+    name: str
+    kind: str
+    owner: str
+    evidence: Evidence
+
+
 @dataclass
 class AnalysisResult:
     entrypoints: list[EntryPoint] = field(default_factory=list)
@@ -82,6 +90,7 @@ class AnalysisResult:
     injections: list[Injection] = field(default_factory=list)
     message_contracts: list[MessageContract] = field(default_factory=list)
     boundaries: list[FlowBoundary] = field(default_factory=list)
+    persistence_facts: list[PersistenceFact] = field(default_factory=list)
 
     def extend(self, other: AnalysisResult) -> None:
         self.entrypoints.extend(other.entrypoints)
@@ -91,3 +100,4 @@ class AnalysisResult:
         self.injections.extend(other.injections)
         self.message_contracts.extend(other.message_contracts)
         self.boundaries.extend(other.boundaries)
+        self.persistence_facts.extend(other.persistence_facts)

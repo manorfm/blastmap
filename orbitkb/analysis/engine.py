@@ -28,6 +28,7 @@ from orbitkb.analysis.models import (
     FlowEdge,
     Injection,
     MessageContract,
+    PersistenceFact,
     Symbol,
 )
 from orbitkb.analysis.resolution import BoundedFlowResolver
@@ -624,6 +625,7 @@ class StaticAnalysisEngine:
         for path in files:
             result.extend(analyzer.analyze(path, root))
         _enrich_contract_fields(result.contracts, files)
+        result.persistence_facts.extend(_persistence_facts(files, root))
         result = BoundedFlowResolver().resolve(result)
         result.edges.extend(self._depth_provider.enrich(root, result))
         return result
@@ -645,6 +647,24 @@ def _dto_shapes(files: list[Path]) -> dict[str, list[dict]]:
         shapes.update(_java_dto_shapes(source))
         shapes.update(_go_dto_shapes(source))
     return shapes
+
+
+def _persistence_facts(files: list[Path], root: Path) -> list[PersistenceFact]:
+    facts = []
+    for path in files:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for match in re.finditer(r"@Entity\s+(?:@Table\s*\(\s*name\s*=\s*\"([^\"]+)\"\s*\)\s*)?(?:class|data\s+class)\s+(\w+)", source):
+            name, owner = match.group(1) or match.group(2), match.group(2)
+            facts.append(PersistenceFact(name, "sql_table", owner, _line_evidence(path, root, source, match.start())))
+        for match in re.finditer(r"type\s+(\w+)\s+struct\s*\{(.*?)\}", source, re.DOTALL):
+            if 'gorm:"' in match.group(2):
+                facts.append(PersistenceFact(match.group(1), "sql_table", match.group(1), _line_evidence(path, root, source, match.start())))
+    return facts
+
+
+def _line_evidence(path: Path, root: Path, source: str, offset: int) -> Evidence:
+    line = source.count("\n", 0, offset) + 1
+    return Evidence(path.relative_to(root).as_posix(), line, line)
 
 
 def _java_dto_shapes(source: str) -> dict[str, list[dict]]:

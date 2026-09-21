@@ -253,6 +253,16 @@ def test_native_flow_boundaries_are_extracted_from_declared_control_flow(tmp_pat
     }
 
 
+def test_static_persistence_facts_require_local_entity_evidence(tmp_path: Path):
+    (tmp_path / "Order.java").write_text(
+        '''@Entity @Table(name = "orders") class Order { String id; }''', encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(fact.name, fact.kind, fact.owner) for fact in result.persistence_facts} == {("orders", "sql_table", "Order")}
+
+
 def test_go_http_contract_keeps_the_json_decoded_payload_type(tmp_path: Path):
     (tmp_path / "orders.go").write_text(
         '''package orders

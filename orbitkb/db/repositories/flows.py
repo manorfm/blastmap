@@ -14,6 +14,7 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
     conn.execute("DELETE FROM flow_boundaries WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM entrypoints WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_message_contracts WHERE service_id = ?", (service_id,))
+    conn.execute("DELETE FROM static_persistence_facts WHERE service_id = ?", (service_id,))
     indexed_at = now()
     entrypoint_ids: dict[str, int] = {}
     for entry in analysis.entrypoints:
@@ -60,6 +61,14 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
             (service_id, boundary.source, boundary.kind, boundary.evidence.file_path,
              boundary.evidence.start_line, boundary.evidence.end_line, indexed_at),
         )
+    for fact in analysis.persistence_facts:
+        conn.execute(
+            """INSERT INTO static_persistence_facts
+               (service_id, name, kind, owner, file_path, start_line, end_line, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (service_id, fact.name, fact.kind, fact.owner, fact.evidence.file_path,
+             fact.evidence.start_line, fact.evidence.end_line, indexed_at),
+        )
 
 
 def list_entrypoints(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
@@ -103,6 +112,13 @@ def list_flow_boundaries(conn: sqlite3.Connection, service_id: int, symbols: set
     return conn.execute(
         f"SELECT source, kind, file_path, start_line, end_line FROM flow_boundaries WHERE service_id = ? AND source IN ({placeholders}) ORDER BY id",  # nosec B608 - placeholders are generated from set cardinality; values are bound.
         (service_id, *sorted(symbols)),
+    ).fetchall()
+
+
+def list_static_persistence_facts(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT name, kind, owner, file_path, start_line, end_line FROM static_persistence_facts WHERE service_id = ? ORDER BY name",
+        (service_id,),
     ).fetchall()
 
 
