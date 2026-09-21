@@ -95,9 +95,10 @@ methods, and Java interface implementations are used only when exactly one candi
 matches. Node/TypeScript named imports, including `import { source as alias }`, bind
 an observed call to the declared local module before any method-name fallback. The
 equivalent Go package import rule also supports aliases such as
-`import ordercommands ".../orders"`. The model also dogfoods explicit Python CLI
-`main` functions. Resolution is bounded by the selected entrypoint; it never builds
-or returns a whole code graph.
+`import ordercommands ".../orders"`. Spring interface injection may use an explicit
+`@Qualifier` or a single `@Primary` implementation; otherwise the call remains
+unresolved. The model also dogfoods explicit Python CLI `main` functions. Resolution
+is bounded by the selected entrypoint; it never builds or returns a whole code graph.
 
 ### Optional depth provider
 

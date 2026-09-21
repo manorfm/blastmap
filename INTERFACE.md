@@ -60,7 +60,9 @@ When local resolution has multiple plausible implementations, OrbitKB preserves 
 observed call rather than choosing one. A resolved static edge therefore carries only
 an implementation justified by local type/injection evidence or a Node/TypeScript
 named import declared by the calling module (including an imported alias), or a Go
-package import that resolves the observed receiver and function name.
+package import that resolves the observed receiver and function name. Spring
+interface injection can additionally resolve from one explicit `@Qualifier` or one
+`@Primary` implementation; competing candidates remain as the observed call.
 
 `contract` is present only when deterministic local extraction found one. For GraphQL
 it comes from `.graphql`/`.gql` schema definitions; absent data remains `null`, never

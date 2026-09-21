@@ -25,6 +25,7 @@ from orbitkb.analysis.models import (
     EntryPoint,
     Evidence,
     FlowEdge,
+    Injection,
     Symbol,
 )
 from orbitkb.analysis.resolution import BoundedFlowResolver
@@ -58,10 +59,13 @@ def _symbol(
     root: Path,
     implements: tuple[str, ...] = (),
     imports: tuple[tuple[str, str], ...] = (),
+    qualifiers: tuple[str, ...] = (),
+    primary: bool = False,
 ) -> Symbol:
     owner, _separator, member = function.symbol.rpartition(".")
     return Symbol(
         function.symbol, owner, member or function.name, _evidence(path, root, function.declaration), implements, imports,
+        qualifiers, primary,
     )
 
 
@@ -194,12 +198,18 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
             class_name_node = class_node.child_by_field_name("name")
             class_name = _text(class_name_node, source) if class_name_node else path.stem
             implements = _kotlin_supertypes(_text(class_node, source))
+            annotations = _class_annotations(class_node, source)
+            qualifiers = _qualifiers(annotations)
+            primary = "@Primary" in annotations
             for parameter in (node for node in _walk(class_node) if node.type == "class_parameter"):
                 types = [node for node in _walk(parameter) if node.type == "user_type"]
                 if types:
                     name_match = re.search(r"(?:val|var)\s+(\w+)", _text(parameter, source))
                     injection_symbol = f"{class_name}.{name_match.group(1)}" if name_match else class_name
-                    result.edges.append(FlowEdge(injection_symbol, _text(types[-1], source), "injects", _evidence(path, root, parameter)))
+                    contract = _text(types[-1], source)
+                    evidence = _evidence(path, root, parameter)
+                    result.edges.append(FlowEdge(injection_symbol, contract, "injects", evidence))
+                    result.injections.append(Injection(injection_symbol, contract, _first_qualifier(_text(parameter, source)), evidence))
             for function_node in (node for node in _walk(class_node) if node.type == "function_declaration"):
                 name_node = function_node.child_by_field_name("name")
                 if name_node is None:
@@ -207,7 +217,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 symbol = f"{class_name}.{_text(name_node, source)}"
                 body = function_node.child_by_field_name("body") or function_node
                 function = _Function(_text(name_node, source), symbol, body, function_node)
-                result.symbols.append(_symbol(function, path, root, implements))
+                result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
                 result.edges.extend(self._edges_for(function, path, root, source))
                 modifiers = next((node for node in function_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
@@ -231,14 +241,19 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
             class_name_node = class_node.child_by_field_name("name")
             class_name = _text(class_name_node, source) if class_name_node else path.stem
             implements = _java_interfaces(_text(class_node, source))
+            annotations = _class_annotations(class_node, source)
+            qualifiers = _qualifiers(annotations)
+            primary = "@Primary" in annotations
             for field in (node for node in _walk(class_node) if node.type == "field_declaration"):
                 types = [node for node in _walk(field) if node.type == "type_identifier"]
                 names = [node for node in _walk(field) if node.type == "variable_declarator"]
                 if types and names:
                     variable = names[-1].child_by_field_name("name") or names[-1].named_children[0]
-                    result.edges.append(FlowEdge(
-                        f"{class_name}.{_text(variable, source)}", _text(types[-1], source), "injects", _evidence(path, root, field),
-                    ))
+                    consumer = f"{class_name}.{_text(variable, source)}"
+                    contract = _text(types[-1], source)
+                    evidence = _evidence(path, root, field)
+                    result.edges.append(FlowEdge(consumer, contract, "injects", evidence))
+                    result.injections.append(Injection(consumer, contract, _first_qualifier(_text(field, source)), evidence))
             for method_node in (node for node in _walk(class_node) if node.type == "method_declaration"):
                 name_node = method_node.child_by_field_name("name")
                 body = method_node.child_by_field_name("body")
@@ -247,7 +262,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 name = _text(name_node, source)
                 symbol = f"{class_name}.{name}"
                 function = _Function(name, symbol, body, method_node)
-                result.symbols.append(_symbol(function, path, root, implements))
+                result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
                 result.edges.extend(self._edges_for(function, path, root, source))
                 modifiers = next((node for node in method_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
@@ -414,6 +429,20 @@ def _kotlin_supertypes(class_text: str) -> tuple[str, ...]:
 def _java_interfaces(class_text: str) -> tuple[str, ...]:
     match = re.search(r"\bimplements\s+([^\{]+)", class_text)
     return tuple(item.strip() for item in match.group(1).split(",")) if match else ()
+
+
+def _class_annotations(class_node: Node, source: bytes) -> str:
+    modifiers = next((node for node in class_node.named_children if node.type == "modifiers"), None)
+    return _text(modifiers, source) if modifiers else ""
+
+
+def _qualifiers(source: str) -> tuple[str, ...]:
+    return tuple(re.findall(r'@(?:Qualifier|Service|Component|Repository)\s*\(\s*"([^"]+)"', source))
+
+
+def _first_qualifier(source: str) -> str | None:
+    qualifiers = _qualifiers(source)
+    return qualifiers[0] if qualifiers else None
 
 
 def _go_package_name(source: str, path: Path) -> str:

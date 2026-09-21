@@ -24,8 +24,10 @@ class BoundedFlowResolver:
             for edge in result.edges
             if edge.kind == "injects" and "." in edge.source
         }
+        qualifiers = {injection.consumer: injection.qualifier for injection in result.injections}
+        injections.update({injection.consumer: injection.contract for injection in result.injections})
         result.edges = [
-            self._resolve_edge(edge, symbols, implementations, injections, implementation_types)
+            self._resolve_edge(edge, symbols, implementations, injections, qualifiers, implementation_types)
             for edge in result.edges
         ]
         return result
@@ -44,9 +46,10 @@ class BoundedFlowResolver:
         symbols: dict[str, Symbol],
         implementations: set[str],
         injections: dict[str, str],
+        qualifiers: dict[str, str | None],
         implementation_types: dict[str, set[str]],
     ) -> FlowEdge:
-        if edge.kind != "invokes" or edge.target in implementations:
+        if edge.kind == "injects" or edge.target in implementations:
             return edge
         source_symbol = symbols.get(edge.source)
         imported_target = BoundedFlowResolver._imported_target(source_symbol, edge.target)
@@ -67,6 +70,18 @@ class BoundedFlowResolver:
         if len(implementation_candidates) == 1:
             return replace(edge, target=implementation_candidates.pop(), confidence="high")
 
+        qualified_candidates = BoundedFlowResolver._qualified_candidates(
+            implementation_candidates, symbols, qualifiers.get(f"{owner}.{receiver}"),
+        )
+        if len(qualified_candidates) == 1:
+            return replace(edge, target=qualified_candidates.pop(), confidence="high")
+
+        primary_candidates = {
+            candidate for candidate in implementation_candidates if symbols[candidate].primary
+        }
+        if len(primary_candidates) == 1:
+            return replace(edge, target=primary_candidates.pop(), confidence="high")
+
         candidates = sorted(symbol for symbol in implementations if symbol.endswith(f".{method}"))
         if len(candidates) == 1:
             return replace(edge, target=candidates[0], confidence="medium")
@@ -82,3 +97,11 @@ class BoundedFlowResolver:
         receiver, separator, member = target.partition(".")
         module = imports.get(receiver)
         return f"{module}.{member}" if module and separator else None
+
+    @staticmethod
+    def _qualified_candidates(
+        candidates: set[str], symbols: dict[str, Symbol], qualifier: str | None,
+    ) -> set[str]:
+        if qualifier is None:
+            return set()
+        return {candidate for candidate in candidates if qualifier in symbols[candidate].qualifiers}

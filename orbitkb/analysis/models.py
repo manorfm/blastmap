@@ -43,6 +43,18 @@ class Symbol:
     evidence: Evidence
     implements: tuple[str, ...] = ()
     imports: tuple[tuple[str, str], ...] = ()
+    qualifiers: tuple[str, ...] = ()
+    primary: bool = False
+
+
+@dataclass(frozen=True)
+class Injection:
+    """A declared dependency selection used only for bounded resolution."""
+
+    consumer: str
+    contract: str
+    qualifier: str | None
+    evidence: Evidence
 
 
 @dataclass
@@ -51,9 +63,11 @@ class AnalysisResult:
     edges: list[FlowEdge] = field(default_factory=list)
     contracts: dict[str, dict] = field(default_factory=dict)
     symbols: list[Symbol] = field(default_factory=list)
+    injections: list[Injection] = field(default_factory=list)
 
     def extend(self, other: AnalysisResult) -> None:
         self.entrypoints.extend(other.entrypoints)
         self.edges.extend(other.edges)
         self.contracts.update(other.contracts)
         self.symbols.extend(other.symbols)
+        self.injections.extend(other.injections)

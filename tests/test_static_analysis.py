@@ -297,3 +297,63 @@ func Create() {}
     result = StaticAnalysisEngine().analyze(tmp_path, "go")
 
     assert any(edge.source == "api.Create" and edge.target == "orders.Create" for edge in result.edges)
+
+
+def test_java_qualifier_resolves_the_selected_interface_implementation(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''class OrdersController {
+  @Qualifier("partnerAuthorizer") private OrderAuthorizer authorizer;
+  @PostMapping("/orders")
+  Order create(Order order) { return authorizer.authorize(order); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Authorizers.java").write_text(
+        '''interface OrderAuthorizer { Order authorize(Order order); }
+@Qualifier("localAuthorizer") class LocalAuthorizer implements OrderAuthorizer {
+  public Order authorize(Order order) { return order; }
+}
+@Qualifier("partnerAuthorizer") class PartnerAuthorizer implements OrderAuthorizer {
+  public Order authorize(Order order) { return order; }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert any(
+        edge.source == "OrdersController.create" and edge.target == "PartnerAuthorizer.authorize"
+        for edge in result.edges
+    )
+
+
+def test_java_primary_resolves_an_unqualified_interface_implementation(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''class OrdersController {
+  private OrderAuthorizer authorizer;
+  @PostMapping("/orders")
+  Order create(Order order) { return authorizer.authorize(order); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Authorizers.java").write_text(
+        '''interface OrderAuthorizer { Order authorize(Order order); }
+class LocalAuthorizer implements OrderAuthorizer {
+  public Order authorize(Order order) { return order; }
+}
+@Primary class DefaultAuthorizer implements OrderAuthorizer {
+  public Order authorize(Order order) { return order; }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert any(
+        edge.source == "OrdersController.create" and edge.target == "DefaultAuthorizer.authorize"
+        for edge in result.edges
+    )
