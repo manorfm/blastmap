@@ -497,6 +497,18 @@ def test_static_persistence_facts_require_local_entity_evidence(tmp_path: Path):
     assert {(fact.name, fact.kind, fact.owner) for fact in result.persistence_facts} == {("orders", "sql_table", "Order")}
 
 
+def test_node_analyzer_extracts_literal_mongoose_collection_ownership(tmp_path: Path):
+    (tmp_path / "order-model.ts").write_text(
+        '''const Order = mongoose.model("Order", orderSchema, "orders");''', encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(fact.name, fact.kind, fact.owner) for fact in result.persistence_facts] == [
+        ("orders", "document", "Order"),
+    ]
+
+
 def test_go_http_contract_keeps_the_json_decoded_payload_type(tmp_path: Path):
     (tmp_path / "orders.go").write_text(
         '''package orders

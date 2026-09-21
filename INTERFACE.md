@@ -117,9 +117,10 @@ For Go, this requires a literal `QueueBind` call on a receiver locally declared 
 error or transaction markers whose source symbol is reachable under the selected
 edge budget. They report syntactic evidence only, never runtime reachability.
 
-`describe_persistence` also returns `static_facts` for locally proven JPA or GORM
-mappings, including entity/table name, local owner and file/line evidence. These do
-not replace the generated persistence entities.
+`describe_persistence` also returns `static_facts` for locally proven JPA, GORM or
+Mongoose mappings, including entity/table or collection name, local owner and
+file/line evidence. Mongoose requires `mongoose.model` with a literal third
+collection argument. These do not replace the generated persistence entities.
 
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an

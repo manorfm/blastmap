@@ -1018,6 +1018,9 @@ def _persistence_facts(files: list[Path], root: Path) -> list[PersistenceFact]:
         for match in re.finditer(r"type\s+(\w+)\s+struct\s*\{(.*?)\}", source, re.DOTALL):
             if 'gorm:"' in match.group(2):
                 facts.append(PersistenceFact(match.group(1), "sql_table", match.group(1), _line_evidence(path, root, source, match.start())))
+        for match in re.finditer(r'\bmongoose\.model\s*(?:<[^>]+>)?\s*\(\s*["\']([^"\']+)["\']\s*,\s*[^,]+,\s*["\']([^"\']+)["\']', source):
+            owner, collection = match.groups()
+            facts.append(PersistenceFact(collection, "document", owner, _line_evidence(path, root, source, match.start())))
     return facts
 
 

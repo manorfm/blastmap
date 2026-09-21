@@ -299,6 +299,30 @@ async def test_cli_to_mcp_preserves_a_static_jpa_persistence_fact(tmp_path: Path
 
 
 @pytest.mark.anyio
+async def test_cli_to_mcp_preserves_a_static_mongoose_persistence_fact(tmp_path: Path, fake_backends):
+    root = tmp_path / "orders"
+    root.mkdir()
+    (root / "order-model.ts").write_text(
+        '''const Order = mongoose.model("Order", orderSchema, "orders");''', encoding="utf-8",
+    )
+    db_path = tmp_path / "orders.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-mongo", "--stack", "node-ts",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_persistence", {"service": "orders-mongo"}))
+
+    assert result["static_facts"] == [{
+        "name": "orders", "kind": "document", "owner": "Order",
+        "evidence": {"file": "order-model.ts", "start_line": 1, "end_line": 1},
+    }]
+
+
+@pytest.mark.anyio
 async def test_cli_to_mcp_preserves_literal_rest_response_statuses(tmp_path: Path, fake_backends):
     root = tmp_path / "orders"
     root.mkdir()
