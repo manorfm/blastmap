@@ -15,7 +15,7 @@ from orbitkb.mcp import queries
 
 def build_server(db_path: Path | None = None, backend: LLMBackend | None = None) -> MCPServer:
     mcp = MCPServer("orbitkb")
-    # Only find_change_surface uses a backend; the other 13 tools are pure SQLite
+    # Only find_change_surface uses a backend; the other 16 tools are pure SQLite
     # reads and never touch it. Resolved once here rather than per-call since
     # constructing a backend is cheap (no subprocess runs until .generate() is called).
     resolved_backend = backend or resolve_backend(None)
@@ -98,6 +98,14 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         This is the preferred narrow context primitive before reading source files."""
         with closing(_conn()) as conn:
             return queries.describe_entrypoint(conn, service, kind, method, name)
+
+    @mcp.tool()
+    def list_security_findings(service: str) -> dict:
+        """List deterministic security findings for one service. Values of secrets and
+        source excerpts are never returned. Use this before planning a change that
+        touches configuration, credentials or an external integration."""
+        with closing(_conn()) as conn:
+            return queries.list_security_findings(conn, service)
 
     @mcp.tool()
     def describe_persistence(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:

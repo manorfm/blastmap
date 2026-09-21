@@ -16,6 +16,7 @@ from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import search as search_repo
+from orbitkb.db.repositories import security_findings as security_findings_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation import change_surface
@@ -176,6 +177,19 @@ def list_entrypoints(conn: sqlite3.Connection, service: str, limit: int = DEFAUL
             for entry in entrypoints
         ],
         **page,
+    }
+
+
+def list_security_findings(conn: sqlite3.Connection, service: str) -> dict:
+    """Return security findings without exposing source excerpts or secret values."""
+    row = services_repo.get_service_by_name(conn, service)
+    if row is None:
+        return {"error": f"unknown service: {service}"}
+    return {
+        "findings": [
+            {"kind": item["kind"], "severity": item["severity"], "file": item["file_path"], "line": item["line"], "reason": item["reason"]}
+            for item in security_findings_repo.list_findings(conn, row["id"])
+        ]
     }
 
 

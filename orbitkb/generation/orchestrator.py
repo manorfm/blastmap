@@ -18,6 +18,7 @@ from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import search as search_repo
+from orbitkb.db.repositories import security_findings as security_findings_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.discovery.base import CodeExcerpt, EndpointHint, ServiceHints, StackDetector
@@ -29,6 +30,8 @@ from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.backend_base import LLMBackend, LLMUsage
 from orbitkb.generation.embeddings import EmbeddingBackend
 from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, load_schema
+from orbitkb.security.findings import find_security_findings
+from orbitkb.security.redaction import redact_sensitive_values
 
 MAX_EXCERPT_CHARS = 20_000
 
@@ -87,7 +90,7 @@ def _join_excerpts(excerpts: list[CodeExcerpt], max_chars: int = MAX_EXCERPT_CHA
     parts: list[str] = []
     total = 0
     for e in excerpts:
-        block = f"--- {e.file_path} (lines {e.start_line}-{e.end_line}) ---\n{e.text}\n"
+        block = f"--- {e.file_path} (lines {e.start_line}-{e.end_line}) ---\n{redact_sensitive_values(e.text)}\n"
         if total + len(block) > max_chars:
             parts.append("... (truncated, excerpt budget reached)")
             break
@@ -532,6 +535,7 @@ def index_service(
     flows_repo.replace_analysis(
         conn, service_id, StaticAnalysisEngine(depth_provider or NoopDepthProvider()).analyze(root, detector.id)
     )
+    security_findings_repo.replace_findings(conn, service_id, find_security_findings(root))
 
     old_hashes = indexed_files_repo.get_indexed_file_hashes(conn, service_id)
     relevant = hints.relevant_files()

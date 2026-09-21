@@ -160,6 +160,22 @@ CREATE INDEX IF NOT EXISTS idx_entrypoints_service ON entrypoints(service_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_service ON flow_edges(service_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_entrypoint ON flow_edges(entrypoint_id);
 
+-- Findings contain only a category, location and remediation guidance. Secret values
+-- are deliberately never persisted in the knowledge base.
+CREATE TABLE IF NOT EXISTS security_findings (
+    id          INTEGER PRIMARY KEY,
+    service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('tracked_dotenv', 'hardcoded_secret')),
+    severity    TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'error')),
+    file_path   TEXT NOT NULL,
+    line        INTEGER NOT NULL,
+    reason      TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    UNIQUE(service_id, kind, file_path, line)
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_findings_service ON security_findings(service_id);
+
 CREATE TABLE IF NOT EXISTS indexed_files (
     id              INTEGER PRIMARY KEY,
     service_id      INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

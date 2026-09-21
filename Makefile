@@ -31,7 +31,7 @@ help:
 	@echo "  sca             pip-audit dependency vulnerability scan"
 	@echo "  security        sast + sca together"
 	@echo "  dast            live MCP server adversarial-input test"
-	@echo "  verify          test + lint + sast + sca + dast, fanned out in parallel"
+	@echo "  verify          test, then lint + sast + sca + dast in parallel"
 	@echo "  build           Build sdist + wheel into dist/"
 	@echo "  clean           Remove build artifacts"
 	@echo "  release         Auto-computed bump (from commit history), verify, commit, tag, push"
@@ -72,8 +72,8 @@ security: sast sca
 dast:
 	$(PYTHON) -m pytest tests/test_dast_adversarial_inputs.py -v
 
-# Fan-out/fan-in release gate: test/lint/sast/sca/dast run concurrently in
-# scripts/preflight.sh; a single failure aborts release with no git side
+# Fan-out/fan-in release gate: test runs first, then lint/sast/sca/dast run in
+# parallel in scripts/preflight.sh; a single failure aborts release with no git side
 # effects. See the script for why this isn't the *authoritative* gate.
 verify:
 	@scripts/preflight.sh

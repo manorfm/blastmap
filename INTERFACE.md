@@ -15,6 +15,9 @@ question.
    reachable deterministic flow evidence.
 5. Use `describe_api`, `describe_persistence`, `describe_messages` or
    `get_relationships` only when the selected flow requires them.
+6. Call `list_security_findings(service)` before changing credentials,
+   configuration or an external integration; it returns locations and remediation,
+   never source excerpts or secret values.
 
 ## Entrypoint response
 

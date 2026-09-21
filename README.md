@@ -801,12 +801,13 @@ generated 100% from SQLite, with no LLM cost.
 - **Ground truth via git** (`generation/verification.py`, `orbitkb verify`):
   compares a past prediction against a repository's real `git diff`, computes
   precision/recall and can record feedback automatically.
-- **MCP server** with 16 tools (one writes feedback; `verify_change_surface`
+- **MCP server** with 17 tools (one writes feedback; `verify_change_surface`
   records an audit entry but doesn't record feedback on its own): the 7 original
   ones (`list_services`, `describe_service`, `list_apis`, `describe_api`,
-  `describe_persistence`, `describe_messages`, `search`) plus seven for
+  `describe_persistence`, `describe_messages`, `search`) plus ten for
   navigation/inference/verification: `list_repositories` (cumulative
   per-repository view), `list_entrypoints`, `describe_entrypoint`,
+  `list_security_findings`,
   `get_relationships`, `trace_flow`,
   `find_architecture_smells`, `find_change_surface`,
   `record_change_surface_feedback` and `verify_change_surface`. Every tool
@@ -889,6 +890,10 @@ that is not listed above."), but this has never been adversarially tested.
 Configuration evidence follows a stricter rule: `.env` is never read, and values
 whose configuration key names passwords, secrets, tokens, credentials or API keys
 are redacted before a supported configuration file can enter an LLM prompt.
+The same redaction applies to every source excerpt supplied to generation. During
+indexing, OrbitKB records only safe security findings for a Git-tracked `.env` or a
+secret-like literal in source; `list_security_findings` returns file, line and
+remediation guidance, never a value or source excerpt.
 
 ## Known limitations
 
@@ -973,7 +978,7 @@ make sast             # bandit static security scan
 make sca              # pip-audit dependency vulnerability scan
 make security         # sast + sca
 make dast             # live MCP server adversarial-input test
-make verify           # test + lint + sast + sca + dast, fanned out in parallel
+make verify           # test, then lint + sast + sca + dast in parallel
 make build            # sdist + wheel into dist/
 ```
 (every target is a thin wrapper — see the `Makefile` for the exact command it
@@ -981,9 +986,8 @@ runs, e.g. `pytest tests/ --cov=orbitkb --cov-report=term-missing` for
 `coverage`.)
 
 CI (`.github/workflows/ci.yml`) runs exactly the deterministic test suite on
-Python 3.11/3.12 on every push/PR — `verify/sample_project.db` doesn't exist in
-CI, so `test_mcp_tools.py` always skips there (expected behavior, not a
-failure).
+Python 3.11/3.12 on every push/PR. The MCP E2E test builds a temporary database
+from `verify/sample_project`, so it never relies on a developer's local database.
 
 `get_relationships`/`trace_flow`/`find_architecture_smells`/`find_change_surface`/
 `verify_change_surface` are exercised via a real MCP session (stdio), which
@@ -1008,10 +1012,10 @@ end to end — discovery → real LLM generation → SQLite → MCP —, use the
 project's own fixture as a manual e2e test:
 ```bash
 orbitkb index verify/sample_project --backend claude --db verify/sample_project.db
-pytest tests/test_mcp_tools.py   # skipped before this; runs for real against that DB
+orbitkb serve --db verify/sample_project.db
 ```
-This is also what populates `verify/sample_project.db` (gitignored, not
-versioned — each dev/CI generates its own).
+`verify/sample_project.db` is gitignored; it is only a convenient local artifact
+for manually querying the real generated knowledge.
 
 Self-indexing `orbitkb` itself with a **real** backend now works via the CLI
 directly, using the same `--stack` escape hatch the automated suite exercises
@@ -1126,7 +1130,7 @@ make release-patch    # or release-minor / release-major, to force one instead
 Both forms run the same pipeline:
 
 1. **Fan-out/fan-in locally** (`make verify` → `scripts/preflight.sh`):
-   `test`, `lint`, `sast`, `sca`, `dast` run concurrently; any failure aborts
+   `test` runs first; `lint`, `sast`, `sca`, `dast` then run concurrently. Any failure aborts
    the release right here — nothing is bumped, committed, tagged or pushed.
 2. Refuses to continue unless you're on `main`, the working tree is clean, and
    local `main` isn't behind `origin/main`.

@@ -86,6 +86,7 @@ async def test_adversarial_service_names_never_crash_or_corrupt_the_database(tmp
                     ("describe_persistence", "service"),
                     ("describe_messages", "service"),
                     ("list_entrypoints", "service"),
+                    ("list_security_findings", "service"),
                     ("get_relationships", "service"),
                 ):
                     result = await session.call_tool(tool, {arg_name: payload})
