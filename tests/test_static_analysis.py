@@ -111,6 +111,28 @@ def test_spring_analyzers_extract_literal_amqp_publications_with_declared_payloa
     ]
 
 
+def test_go_analyzer_extracts_literal_amqp_publications_with_declared_payloads(tmp_path: Path):
+    source = tmp_path / "publisher.go"
+    source.write_text(
+        '''package orders
+func publish(channel *amqp.Channel, event OrderCreated) error {
+  return channel.Publish("orders", "order.created", false, false, amqp.Publishing{Body: event})
+}
+func publishWithContext(ctx context.Context, channel *amqp.Channel, event OrderCreated) error {
+  return channel.PublishWithContext(ctx, "orders", "order.created", false, false, amqp.Publishing{Body: event})
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert [(item.channel, item.routing_key, item.payload_type) for item in result.message_contracts] == [
+        ("orders", "order.created", "OrderCreated"),
+        ("orders", "order.created", "OrderCreated"),
+    ]
+
+
 def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_path: Path):
     source = tmp_path / "consumer.ts"
     source.write_text(

@@ -114,7 +114,8 @@ When a local RabbitMQ binding proves a queue, exchange and routing key, the cons
 contract includes its ordered `bindings`; multiple literal bindings remain distinct.
 Publication contracts are persisted separately and returned by `describe_messages`
 as `static_contracts`, including literal exchange, routing key, payload type when
-locally declared, and source evidence. Node and Spring AMQP publishers are covered.
+locally declared, and source evidence. Node, Spring AMQP, and Go AMQP `Publish` /
+`PublishWithContext` publishers are covered.
 
 `describe_entrypoint` also returns source-proven `boundaries` for branch, async,
 retry, error and transaction constructs reachable in the bounded flow. These are

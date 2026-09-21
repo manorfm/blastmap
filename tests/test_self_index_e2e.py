@@ -183,6 +183,35 @@ async def test_cli_to_mcp_preserves_a_literal_spring_amqp_publication(tmp_path: 
 
 
 @pytest.mark.anyio
+async def test_cli_to_mcp_preserves_a_literal_go_amqp_publication(tmp_path: Path, fake_backends):
+    root = tmp_path / "publisher"
+    root.mkdir()
+    (root / "publisher.go").write_text(
+        '''package orders
+func publish(channel *amqp.Channel, event OrderCreated) error {
+  return channel.Publish("orders", "order.created", false, false, amqp.Publishing{Body: event})
+}
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "publisher.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-publisher", "--stack", "go",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_messages", {"service": "orders-publisher"}))
+
+    assert result["static_contracts"] == [{
+        "direction": "publishes", "exchange": "orders", "routing_key": "order.created", "payload_type": "OrderCreated",
+        "evidence": {"file": "publisher.go", "start_line": 3, "end_line": 3},
+    }]
+
+
+@pytest.mark.anyio
 async def test_cli_to_mcp_preserves_literal_rabbitmq_bindings(tmp_path: Path, fake_backends):
     root = tmp_path / "consumer"
     root.mkdir()

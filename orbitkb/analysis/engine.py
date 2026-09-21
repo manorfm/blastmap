@@ -175,6 +175,11 @@ class _GoAnalyzer(_FileAnalyzer):
         result = AnalysisResult(
             edges=[edge for fn in functions for edge in self._edges_for(fn, path, root, source)],
             symbols=[_symbol(fn, path, root, imports=imports) for fn in functions],
+            message_contracts=[
+                contract
+                for function in functions
+                for contract in _go_amqp_publish_contracts(function, path, root, source)
+            ],
         )
         by_last_name = {fn.name: fn for fn in functions}
         groups = _go_route_groups(tree, source)
@@ -549,6 +554,46 @@ def _node_publish_contracts(tree: Node, source: bytes, path: Path, root: Path) -
         if channel:
             contracts.append(MessageContract("publishes", channel, routing_key, None, _evidence(path, root, node)))
     return contracts
+
+
+def _go_amqp_publish_contracts(function: _Function, path: Path, root: Path, source: bytes) -> list[MessageContract]:
+    declaration = _text(function.declaration, source)
+    publishers = set(re.findall(r"\b(\w+)\s+\*?amqp\.Channel\b", declaration))
+    if not publishers:
+        return []
+    parameter_types = _go_declared_parameter_types(declaration)
+    contracts = []
+    for node in _walk(function.body):
+        if node.type != "call_expression":
+            continue
+        callee = node.child_by_field_name("function")
+        arguments = node.child_by_field_name("arguments")
+        if callee is None or arguments is None:
+            continue
+        callee_text = _text(callee, source)
+        receiver, _separator, method = callee_text.rpartition(".")
+        args = arguments.named_children
+        positions = {"Publish": (0, 1, 4), "PublishWithContext": (1, 2, 5)}.get(method)
+        if receiver not in publishers or positions is None or len(args) <= positions[2]:
+            continue
+        exchange = _string(args[positions[0]], source)
+        routing_key = _string(args[positions[1]], source)
+        if exchange is None or routing_key is None:
+            continue
+        payload = re.search(r"\bBody\s*:\s*(\w+)", _text(args[positions[2]], source))
+        payload_type = parameter_types.get(payload.group(1)) if payload else None
+        contracts.append(MessageContract("publishes", exchange, routing_key, payload_type, _evidence(path, root, node)))
+    return contracts
+
+
+def _go_declared_parameter_types(declaration: str) -> dict[str, str]:
+    parameters = re.search(r"func\s+(?:\([^)]*\)\s+)?\w+\s*\(([^)]*)\)", declaration, re.DOTALL)
+    if parameters is None:
+        return {}
+    return {
+        name: type_name
+        for name, type_name in re.findall(r"\b(\w+)\s+(\*?[\w.\[\]]+)", parameters.group(1))
+    }
 
 
 def _spring_amqp_publishers(class_source: str) -> set[str]:
