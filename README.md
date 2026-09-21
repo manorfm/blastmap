@@ -128,6 +128,8 @@ matches an explicitly typed parameter in its lexical function scope.
 `describe_entrypoint` also returns source-proven `boundaries` for branch, async,
 retry, error and transaction constructs reachable in the bounded flow. These are
 observed control-flow markers, not claims that every branch is executed.
+Its `persistence_operations` is a compact projection of reachable `reads` and
+`writes` flow edges, retaining the same source evidence without adding traversal.
 
 `describe_persistence` exposes source-proven `static_facts` independently of the
 generated entity summaries. JPA `@Entity`/`@Table` and GORM-tagged structs establish

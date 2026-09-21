@@ -234,6 +234,15 @@ def describe_entrypoint(
             for edge in edges
         ],
         "flow_pagination": {"max_edges": effective_max_edges, "truncated": truncated},
+        "persistence_operations": [
+            {
+                "operation": edge["kind"], "target": edge["to_symbol"], "evidence": {
+                    "file": edge["file_path"], "start_line": edge["start_line"], "end_line": edge["end_line"],
+                },
+            }
+            for edge in edges
+            if edge["kind"] in {"reads", "writes"}
+        ],
         "boundaries": [
             {"source": item["source"], "kind": item["kind"], "evidence": {
                 "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],

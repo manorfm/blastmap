@@ -116,6 +116,9 @@ For Go, this requires a literal `QueueBind` call on a receiver locally declared 
 `describe_entrypoint` returns `boundaries` alongside `flow`: branch, async, retry,
 error or transaction markers whose source symbol is reachable under the selected
 edge budget. They report syntactic evidence only, never runtime reachability.
+It also returns `persistence_operations`, a compact list of bounded-flow `reads` and
+`writes` with target and source evidence. It is a projection of `flow`, not a
+separate analysis or reachability claim.
 
 `describe_persistence` also returns `static_facts` for locally proven JPA, GORM or
 Mongoose mappings, including entity/table or collection name, local owner and
