@@ -19,14 +19,15 @@ CREATE TABLE IF NOT EXISTS repositories (
 
 CREATE TABLE IF NOT EXISTS services (
     id            INTEGER PRIMARY KEY,
-    name          TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
     root_path     TEXT NOT NULL,
     repository_id INTEGER REFERENCES repositories(id) ON DELETE SET NULL,
     stack         TEXT,
     short_desc    TEXT,
     long_desc     TEXT,
     updated_at    TEXT NOT NULL,
-    last_commit   TEXT
+    last_commit   TEXT,
+    UNIQUE(repository_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS apis (

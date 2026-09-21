@@ -308,7 +308,10 @@ with a ready-to-copy example. `orbitkb --help` explains the whole flow: **index
 Knowledge is cumulative by nature: you can index one repository at a time
 (`orbitkb index <repo1>`, then `orbitkb index <repo2> --repository-name
 <repo2>`, ...) as they become available, or point at a monorepo root all at once
-— the same SQLite database accumulates both cases without name collisions, and
+— the same SQLite database accumulates both cases. A service identity is its
+repository plus its name, so same-named services remain separate. `list_services`
+returns the repository for every result and accepts an optional repository filter;
+pass that repository to `describe_service` whenever a name is ambiguous.
 `find_change_surface`/`search` always see everything indexed so far, not just the
 last repository indexed.
 
@@ -324,13 +327,13 @@ for the description tools; the "checkout/payments/Pix" test fixture for
 ```json
 {
   "services": [
-    {"name": "orders-service", "short_desc": "A hexagonal FastAPI service that orchestrates checkout: charges a customer's payment, reserves product stock, and manages the order lifecycle via Postgres.", "stack": "python", "api_count": 4},
-    {"name": "payments-service", "short_desc": "A Node.js/Express service that charges and refunds customers via an external card gateway, persists transactions in MongoDB, and publishes payment-related events to Kafka.", "stack": "node-ts", "api_count": 3}
+    {"name": "orders-service", "repository": "sample-project", "short_desc": "A hexagonal FastAPI service that orchestrates checkout: charges a customer's payment, reserves product stock, and manages the order lifecycle via Postgres.", "stack": "python", "api_count": 4},
+    {"name": "payments-service", "repository": "sample-project", "short_desc": "A Node.js/Express service that charges and refunds customers via an external card gateway, persists transactions in MongoDB, and publishes payment-related events to Kafka.", "stack": "node-ts", "api_count": 3}
   ]
 }
 ```
 
-**`describe_service("orders-service")`** — full description + dependencies with
+**`describe_service("orders-service", repository="sample-project")`** — full description + dependencies with
 the business reason (`reason`, `data_needed`, `purpose_kind`) + the components
 that make up the service + APIs/persistence/messaging as reference only (name,
 no field-level detail) + `freshness`:

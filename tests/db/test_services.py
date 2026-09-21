@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
@@ -74,3 +76,23 @@ def test_list_services_for_repository(tmp_path: Path):
     names = {r["name"] for r in services_repo.list_services_for_repository(conn, repo_id)}
 
     assert names == {"checkout-service", "payments-service"}
+
+
+def test_same_service_name_is_isolated_by_repository(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    checkout_id = repositories_repo.ensure_repository(conn, "checkout-repo", "/tmp/checkout-repo")
+    fulfillment_id = repositories_repo.ensure_repository(conn, "fulfillment-repo", "/tmp/fulfillment-repo")
+
+    checkout_service_id = services_repo.ensure_service(
+        conn, "orders", "/tmp/checkout-repo/orders", "go", repository_id=checkout_id,
+    )
+    fulfillment_service_id = services_repo.ensure_service(
+        conn, "orders", "/tmp/fulfillment-repo/orders", "jvm-spring", repository_id=fulfillment_id,
+    )
+
+    assert checkout_service_id != fulfillment_service_id
+    assert services_repo.get_service_by_name(conn, "orders") is None
+    assert services_repo.get_service_by_name(conn, "orders", repository_id=checkout_id)["id"] == checkout_service_id
+    assert services_repo.get_service_by_name(conn, "orders", repository_id=fulfillment_id)["id"] == fulfillment_service_id
+    with pytest.raises(ValueError, match="ambiguous service: orders; specify repository"):
+        services_repo.ensure_service(conn, "orders", "/tmp/orders", "python")

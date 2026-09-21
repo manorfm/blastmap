@@ -98,7 +98,11 @@ def _cmd_list(args: argparse.Namespace) -> int:
         print("(nenhum serviço indexado ainda)")
         return 0
     for r in rows:
-        print(f"{r['name']:<30} stack={r['stack'] or '?':<14} apis={r['api_count']:<3} {r['short_desc'] or ''}")
+        repository = r["repository_name"] or "(standalone)"
+        print(
+            f"{r['name']:<30} repository={repository:<20} stack={r['stack'] or '?':<14} "
+            f"apis={r['api_count']:<3} {r['short_desc'] or ''}"
+        )
     return 0
 
 

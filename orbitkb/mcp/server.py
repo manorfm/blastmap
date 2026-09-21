@@ -37,16 +37,22 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.list_repositories(conn)
 
     @mcp.tool()
-    def list_services() -> dict:
+    def list_services(repository: str | None = None) -> dict:
         """Call this first, to see what's indexed: every microservice with a
-        one-line description, stack and API count. Next: describe_service on
+        one-line description, repository, stack and API count. Pass repository to
+        narrow a cumulative KB. Next: describe_service on
         whichever one is relevant, or find_change_surface if you have a specific
         engineering task rather than wanting a system overview."""
         with closing(_conn()) as conn:
-            return queries.list_services(conn)
+            return queries.list_services(conn, repository)
 
     @mcp.tool()
-    def describe_service(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    def describe_service(
+        service: str,
+        limit: int = queries.DEFAULT_LIST_LIMIT,
+        offset: int = 0,
+        repository: str | None = None,
+    ) -> dict:
         """Full picture of one microservice: description, why it calls other services/queues
         (with the business reason, data needed, and target_kind/resource_type when the
         target is external), its components (classes/controllers/modules, each with a
@@ -59,10 +65,11 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         endpoints can't blow your context budget by default — the `pagination` field
         reports each list's real total and whether it was truncated; raise `offset` by
         `limit` to fetch the next page of whichever list you need more of. Call this
-        once you know which service is relevant. Next: describe_api for a specific
+        once you know which service is relevant. When duplicate service names exist,
+        pass repository from list_services. Next: describe_api for a specific
         endpoint's contract, or get_relationships to see who else depends on it."""
         with closing(_conn()) as conn:
-            return queries.describe_service(conn, service, limit, offset)
+            return queries.describe_service(conn, service, limit, offset, repository)
 
     @mcp.tool()
     def list_apis(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:

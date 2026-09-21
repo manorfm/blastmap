@@ -6,7 +6,7 @@ from orbitkb.db.connection import open_db
 def test_schema_initializes(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
-    assert row["value"] == "3"
+    assert row["value"] == "4"
 
 
 def test_schema_adds_message_version_to_an_existing_static_contract_table(tmp_path: Path):
@@ -21,4 +21,4 @@ def test_schema_adds_message_version_to_an_existing_static_contract_table(tmp_pa
 
     columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(static_message_contracts)")}
     assert "message_version" in columns
-    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "3"
+    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "4"

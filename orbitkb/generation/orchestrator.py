@@ -529,7 +529,7 @@ def index_service(
     )
     progress.service_started(name, total_units)
 
-    existing = services_repo.get_service_by_name(conn, name)
+    existing = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
     is_new = existing is None
     service_id = services_repo.ensure_service(conn, name, str(root), detector.id, repository_id=repository_id)
     flows_repo.replace_analysis(

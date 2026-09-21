@@ -5,10 +5,20 @@ progressive disclosure: list a bounded set, select one item, then ask for detail
 The server never returns a complete repository merely because an agent asks a broad
 question.
 
+## Cumulative service identity
+
+A service is identified by `(repository, name)`, not by its name alone. Every
+`list_services` item includes `repository`, and the tool accepts an optional
+`repository` filter. `describe_service(service, repository?)` returns an ambiguity
+error with the candidate repository names when the unqualified service name is not
+unique; agents must then pass one of those names. This prevents a cumulative KB from
+silently mixing two independently indexed services named, for example, `orders`.
+
 ## Agent workflow
 
 1. Call `find_change_surface(task)` for an epic.
-2. Call `describe_service` only for the likely services.
+2. Call `list_services(repository?)`; use its repository field to qualify
+   `describe_service` whenever the same service name exists in more than one repository.
 3. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
    entrypoint.
 4. Call `describe_entrypoint(service, kind, method, name)` for the bounded,

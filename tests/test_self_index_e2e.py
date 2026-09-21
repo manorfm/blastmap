@@ -807,3 +807,55 @@ def test_knowledge_is_cumulative_across_two_independently_indexed_roots(tmp_path
     # won't keyword-match a specific engineering task the way a real LLM summary would.
     assert "recommended_next_queries" in result
     assert "freshness" in result
+
+
+@pytest.mark.anyio
+async def test_cli_to_mcp_disambiguates_same_named_services_across_repositories(tmp_path: Path, fake_backends):
+    checkout = tmp_path / "checkout"
+    fulfillment = tmp_path / "fulfillment"
+    checkout.mkdir()
+    fulfillment.mkdir()
+    (checkout / "orders.go").write_text(
+        '''package orders
+func Create() {}
+func register() { router.POST("/checkout/orders", Create) }
+''',
+        encoding="utf-8",
+    )
+    (fulfillment / "orders.go").write_text(
+        '''package orders
+func Create() {}
+func register() { router.POST("/fulfillment/orders", Create) }
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "same-name-services.db"
+
+    checkout_exit = cli._cmd_index(_parse([
+        "index", str(checkout), "--db", str(db_path), "--service", "orders", "--repository-name", "checkout-repo",
+        "--stack", "go",
+    ]))
+    fulfillment_exit = cli._cmd_index(_parse([
+        "index", str(fulfillment), "--db", str(db_path), "--service", "orders", "--repository-name", "fulfillment-repo",
+        "--stack", "go",
+    ]))
+
+    assert checkout_exit == 0
+    assert fulfillment_exit == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        listed = content_json(await session.call_tool("list_services", {"repository": "checkout-repo"}))
+        ambiguous = content_json(await session.call_tool("describe_service", {"service": "orders"}))
+        selected = content_json(await session.call_tool("describe_service", {
+            "service": "orders", "repository": "fulfillment-repo",
+        }))
+
+    assert [(service["name"], service["repository"]) for service in listed["services"]] == [
+        ("orders", "checkout-repo"),
+    ]
+    assert ambiguous == {
+        "error": "ambiguous service: orders; specify repository",
+        "repositories": ["checkout-repo", "fulfillment-repo"],
+    }
+    assert selected["repository"] == "fulfillment-repo"
+    assert selected["name"] == "orders"

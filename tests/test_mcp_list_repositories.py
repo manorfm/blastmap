@@ -41,3 +41,25 @@ async def test_list_repositories_over_stdio(tmp_path: Path):
             await session.initialize()
             result = content_json(await session.call_tool("list_repositories", {}))
             assert result["repositories"][0]["name"] == "mono-repo"
+
+
+def test_mcp_requires_repository_to_disambiguate_same_named_services(tmp_path: Path):
+    conn = open_db(tmp_path / "fixture3.db")
+    checkout_id = repositories_repo.ensure_repository(conn, "checkout-repo", "/tmp/checkout-repo")
+    fulfillment_id = repositories_repo.ensure_repository(conn, "fulfillment-repo", "/tmp/fulfillment-repo")
+    services_repo.ensure_service(conn, "orders", "/tmp/checkout-repo/orders", "go", repository_id=checkout_id)
+    services_repo.ensure_service(conn, "orders", "/tmp/fulfillment-repo/orders", "jvm-spring", repository_id=fulfillment_id)
+
+    listing = queries.list_services(conn)
+    ambiguous = queries.describe_service(conn, "orders")
+    selected = queries.describe_service(conn, "orders", repository="fulfillment-repo")
+
+    assert {(item["name"], item["repository"]) for item in listing["services"]} == {
+        ("orders", "checkout-repo"), ("orders", "fulfillment-repo"),
+    }
+    assert ambiguous == {
+        "error": "ambiguous service: orders; specify repository",
+        "repositories": ["checkout-repo", "fulfillment-repo"],
+    }
+    assert selected["repository"] == "fulfillment-repo"
+    assert selected["stack"] == "jvm-spring"

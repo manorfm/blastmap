@@ -65,6 +65,27 @@ def _fmt_call(c: sqlite3.Row) -> dict:
     }
 
 
+def _resolve_service(
+    conn: sqlite3.Connection, service: str, repository: str | None,
+) -> tuple[sqlite3.Row | None, dict | None]:
+    """Resolve a service without silently selecting a same-named repository peer."""
+    if repository is not None:
+        repo = repositories_repo.get_repository_by_name(conn, repository)
+        if repo is None:
+            return None, {"error": f"unknown repository: {repository}"}
+        row = services_repo.get_service_by_name(conn, service, repository_id=repo["id"])
+        return (row, None) if row is not None else (None, {"error": f"unknown service: {service} on {repository}"})
+    candidates = services_repo.list_service_candidates_by_name(conn, service)
+    if not candidates:
+        return None, {"error": f"unknown service: {service}"}
+    if len(candidates) > 1:
+        return None, {
+            "error": f"ambiguous service: {service}; specify repository",
+            "repositories": [candidate["repository_name"] for candidate in candidates],
+        }
+    return candidates[0], None
+
+
 def list_repositories(conn: sqlite3.Connection) -> dict:
     rows = repositories_repo.list_repositories(conn)
     return {
@@ -75,23 +96,38 @@ def list_repositories(conn: sqlite3.Connection) -> dict:
     }
 
 
-def list_services(conn: sqlite3.Connection) -> dict:
-    rows = services_repo.list_services(conn)
+def list_services(conn: sqlite3.Connection, repository: str | None = None) -> dict:
+    repo_id = None
+    if repository is not None:
+        repo = repositories_repo.get_repository_by_name(conn, repository)
+        if repo is None:
+            return {"error": f"unknown repository: {repository}"}
+        repo_id = repo["id"]
+    rows = services_repo.list_services(conn, repo_id)
     return {
         "services": [
-            {"name": r["name"], "short_desc": r["short_desc"], "stack": r["stack"], "api_count": r["api_count"]}
+            {
+                "name": r["name"], "repository": r["repository_name"],
+                "short_desc": r["short_desc"], "stack": r["stack"], "api_count": r["api_count"],
+            }
             for r in rows
         ]
     }
 
 
-def describe_service(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+def describe_service(
+    conn: sqlite3.Connection,
+    service: str,
+    limit: int = DEFAULT_LIST_LIMIT,
+    offset: int = 0,
+    repository: str | None = None,
+) -> dict:
     error = _validate_pagination(limit, offset)
     if error:
         return {"error": error}
-    row = services_repo.get_service_by_name(conn, service)
-    if row is None:
-        return {"error": f"unknown service: {service}"}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
     calls, calls_page = _paginate(service_calls_repo.list_calls_for_service(conn, row["id"]), limit, offset)
     apis, apis_page = _paginate(apis_repo.list_apis(conn, row["id"]), limit, offset)
     components, components_page = _paginate(components_repo.list_components(conn, row["id"]), limit, offset)
@@ -99,6 +135,7 @@ def describe_service(conn: sqlite3.Connection, service: str, limit: int = DEFAUL
     messages, messages_page = _paginate(messages_repo.list_messages(conn, row["id"]), limit, offset)
     return {
         "name": row["name"],
+        "repository": row["repository_name"],
         "short_desc": row["short_desc"],
         "long_desc": row["long_desc"],
         "stack": row["stack"],
