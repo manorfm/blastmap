@@ -925,16 +925,23 @@ def _rabbitmq_queue_options(files: list[Path]) -> dict[str, dict]:
         for match in re.finditer(r'(?:assertQueue|durable)\s*\(\s*"([^"]+)"', source):
             queue = match.group(1)
             declaration = source[match.start() : match.start() + 600]
-            dead_letter = re.search(r'(?:deadLetterRoutingKey\s*\(\s*|deadLetterRoutingKey|x-dead-letter-routing-key)\s*["\':=]+\s*"([^"]+)"', declaration)
-            retry = re.search(r'(?:messageTtl\s*\(\s*|messageTtl|x-message-ttl)\s*["\':=]+\s*(\d+)', declaration)
-            values = {}
-            if dead_letter:
-                values["dead_letter_routing_key"] = dead_letter.group(1)
-            if retry:
-                values["retry_delay_ms"] = int(retry.group(1))
+            values = _rabbitmq_option_values(declaration)
             if values:
                 options[queue] = values
+        for queue, values in _go_rabbitmq_queue_options(source).items():
+            options.setdefault(queue, {}).update(values)
     return options
+
+
+def _rabbitmq_option_values(source: str) -> dict:
+    dead_letter = re.search(r'(?:deadLetterRoutingKey\s*\(\s*|deadLetterRoutingKey|x-dead-letter-routing-key)\s*["\':=]+\s*"([^"]+)"', source)
+    retry = re.search(r'(?:messageTtl\s*\(\s*|messageTtl|x-message-ttl)\s*["\':=]+\s*(\d+)', source)
+    values = {}
+    if dead_letter:
+        values["dead_letter_routing_key"] = dead_letter.group(1)
+    if retry:
+        values["retry_delay_ms"] = int(retry.group(1))
+    return values
 
 
 def _rabbitmq_bindings(files: list[Path]) -> dict[str, list[dict]]:
@@ -983,6 +990,16 @@ def _go_rabbitmq_bindings(source: str) -> list[tuple[str, str, str]]:
         for receiver, queue, routing_key, exchange in re.findall(pattern, source)
         if receiver in channels
     ]
+
+
+def _go_rabbitmq_queue_options(source: str) -> dict[str, dict]:
+    channels = set(re.findall(r"\b(\w+)\s+\*?amqp\.Channel\b", source))
+    pattern = r'(\w+)\.QueueDeclare\s*\(\s*"([^"]+)"\s*,.*?amqp\.Table\s*\{(.*?)\}\s*\)'
+    return {
+        queue: values
+        for receiver, queue, table in re.findall(pattern, source, re.DOTALL)
+        if receiver in channels and (values := _rabbitmq_option_values(table))
+    }
 
 
 def _spring_rabbitmq_factories(source: str, type_pattern: str) -> dict[str, str]:

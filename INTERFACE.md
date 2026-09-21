@@ -105,6 +105,8 @@ one literal version header named `schema_version`, `schemaVersion`,
 Matching consumer contracts may include literal `dead_letter_routing_key` and
 `retry_delay_ms` extracted from local queue declarations; missing or dynamic values
 are not represented.
+For Go, these values require a literal `amqp.Table` supplied to `QueueDeclare` on a
+receiver locally declared as `*amqp.Channel`.
 Consumer `contract.bindings` is an optional ordered list of `{exchange,
 routing_key}` relations. A relation is emitted only when local RabbitMQ declarations
 prove the queue, exchange and routing key as literals; multiple bindings are kept.

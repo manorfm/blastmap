@@ -169,6 +169,7 @@ def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path
     source.write_text(
         '''package orders
 func consume(channel *amqp.Channel) {
+  channel.QueueDeclare("orders.created", true, false, false, false, amqp.Table{"x-dead-letter-routing-key": "orders.dlq", "x-message-ttl": 5000})
   channel.QueueBind("orders.created", "order.created", "orders", false, nil)
   channel.Consume("orders.created", "", false, false, false, false, func(message amqp.Delivery) {})
 }
@@ -181,6 +182,8 @@ func consume(channel *amqp.Channel) {
     assert result.contracts["message.consume:orders.created"]["bindings"] == [
         {"exchange": "orders", "routing_key": "order.created"},
     ]
+    assert result.contracts["message.consume:orders.created"]["dead_letter_routing_key"] == "orders.dlq"
+    assert result.contracts["message.consume:orders.created"]["retry_delay_ms"] == 5000
 
 
 def test_kotlin_analyzer_exposes_rabbit_listener_and_its_handler_flow(tmp_path: Path):

@@ -247,6 +247,7 @@ async def test_cli_to_mcp_preserves_literal_go_rabbitmq_bindings(tmp_path: Path,
     (root / "consumer.go").write_text(
         '''package orders
 func consume(channel *amqp.Channel) {
+  channel.QueueDeclare("orders.created", true, false, false, false, amqp.Table{"x-dead-letter-routing-key": "orders.dlq", "x-message-ttl": 5000})
   channel.QueueBind("orders.created", "order.created", "orders", false, nil)
   channel.Consume("orders.created", "", false, false, false, false, func(message amqp.Delivery) {})
 }
@@ -269,6 +270,8 @@ func consume(channel *amqp.Channel) {
     assert result["contract"]["bindings"] == [
         {"exchange": "orders", "routing_key": "order.created"},
     ]
+    assert result["contract"]["dead_letter_routing_key"] == "orders.dlq"
+    assert result["contract"]["retry_delay_ms"] == 5000
 
 
 @pytest.mark.anyio
