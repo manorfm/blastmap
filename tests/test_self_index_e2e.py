@@ -412,6 +412,7 @@ async def test_cli_to_mcp_exposes_bounded_persistence_operations(tmp_path: Path,
     root.mkdir()
     (root / "OrdersController.java").write_text(
         '''class OrdersController {
+  private final OrderRepository repository;
   @PostMapping("/orders")
   Order create(Order order) { return repository.save(order); }
 }
@@ -433,7 +434,7 @@ async def test_cli_to_mcp_exposes_bounded_persistence_operations(tmp_path: Path,
 
     assert result["persistence_operations"] == [{
         "operation": "writes", "target": "repository.save",
-        "evidence": {"file": "OrdersController.java", "start_line": 3, "end_line": 3},
+        "evidence": {"file": "OrdersController.java", "start_line": 4, "end_line": 4},
     }]
 
 

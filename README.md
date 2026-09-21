@@ -139,6 +139,9 @@ operation names are treated as reads or writes.
 For Go, GORM operations are classified only when invoked directly on a parameter
 locally typed as `*gorm.DB`; fluent chains are retained as generic flow calls until
 their receiver can be proven without speculation.
+For Java and Kotlin Spring, standard repository operations require a locally
+declared injected member whose type is a Spring repository; a receiver merely named
+`repository` is not sufficient.
 
 `describe_persistence` exposes source-proven `static_facts` independently of the
 generated entity summaries. JPA `@Entity`/`@Table` and GORM-tagged structs establish

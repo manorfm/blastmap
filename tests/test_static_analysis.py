@@ -297,7 +297,7 @@ def test_kotlin_analyzer_resolves_a_bounded_flow_across_injected_classes(tmp_pat
         encoding="utf-8",
     )
     (tmp_path / "CreateOrderUseCase.kt").write_text(
-        '''class CreateOrderUseCase {
+        '''class CreateOrderUseCase(private val orderRepository: OrderRepository) {
   fun execute(request: OrderRequest) { orderRepository.save(request) }
 }
 ''',
@@ -326,6 +326,7 @@ class OrdersController {
     )
     (tmp_path / "CreateOrderUseCase.java").write_text(
         '''class CreateOrderUseCase {
+  private final OrderRepository repository;
   Order execute(Order order) { return repository.save(order); }
 }
 ''',
@@ -339,6 +340,43 @@ class OrdersController {
     ]
     assert any(edge.target == "CreateOrderUseCase.execute" for edge in result.edges)
     assert any(edge.kind == "writes" and edge.target == "repository.save" for edge in result.edges)
+
+
+def test_spring_analyzers_classify_only_locally_injected_repository_receivers(tmp_path: Path):
+    (tmp_path / "Orders.java").write_text(
+        '''class Orders {
+  private final OrderRepository repository;
+  Order find(String id) { return repository.findById(id); }
+  Order save(Order order) { return repository.save(order); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Payments.kt").write_text(
+        '''class Payments(private val repository: PaymentRepository) {
+  fun find(id: String) = repository.findById(id)
+  fun save(payment: Payment) = repository.save(payment)
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Unproven.java").write_text(
+        '''class Unproven {
+  Order save(Order order) { return repository.save(order); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("Orders.find", "repository.findById", "reads"),
+        ("Orders.save", "repository.save", "writes"),
+        ("Payments.find", "repository.findById", "reads"),
+        ("Payments.save", "repository.save", "writes"),
+        ("Unproven.save", "repository.save", "invokes"),
+    }
 
 
 def test_graphql_schema_contract_is_linked_to_its_resolver_entrypoint(tmp_path: Path):
