@@ -72,6 +72,9 @@ For HTTP entrypoints, `contract` may include `request`, `returns`, `validations`
 `authorization`. Spring values are extracted from its handler declaration and
 annotations; Go request data requires a locally declared value passed to JSON
 `Decode`. Unavailable fields are `null` or empty lists.
+When a local Java DTO or Go `struct` declaration is available, request/response
+objects may additionally expose `fields` with their source-declared type, required
+status and validation tags.
 
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an

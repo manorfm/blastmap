@@ -90,6 +90,8 @@ For native HTTP handlers, the contract includes only source-proven facts: Spring
 `@RequestBody` name/type, declared return type and validation/authorization
 annotations; Go JSON-decoded local payload types. Missing response or DTO detail is
 returned as `null` rather than guessed.
+When a referenced Java DTO or Go `struct` is declared in the indexed source, its
+locally observed fields and validation tags are attached to that contract.
 
 The initial native coverage is deliberately focused on Go HTTP handlers,
 Java/Kotlin Spring HTTP controllers and Rabbit listeners, and Node/TypeScript

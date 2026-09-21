@@ -549,6 +549,52 @@ class StaticAnalysisEngine:
         })
         for path in files:
             result.extend(analyzer.analyze(path, root))
+        _enrich_contract_fields(result.contracts, files)
         result = BoundedFlowResolver().resolve(result)
         result.edges.extend(self._depth_provider.enrich(root, result))
         return result
+
+
+def _enrich_contract_fields(contracts: dict[str, dict], files: list[Path]) -> None:
+    shapes = _dto_shapes(files)
+    for contract in contracts.values():
+        for key in ("request", "returns"):
+            value = contract.get(key)
+            if value and (fields := shapes.get(value["type"])):
+                value["fields"] = fields
+
+
+def _dto_shapes(files: list[Path]) -> dict[str, list[dict]]:
+    shapes: dict[str, list[dict]] = {}
+    for path in files:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        shapes.update(_java_dto_shapes(source))
+        shapes.update(_go_dto_shapes(source))
+    return shapes
+
+
+def _java_dto_shapes(source: str) -> dict[str, list[dict]]:
+    shapes = {}
+    for name, body in re.findall(r"\bclass\s+(\w+)[^{]*\{(.*?)\}", source, re.DOTALL):
+        fields = []
+        for field_annotations, type_name, field_name in re.findall(
+            r"((?:\s*@\w+(?:\([^)]*\))?\s*)*)([A-Z]\w*(?:<[^>]+>)?)\s+(\w+)\s*;", body,
+        ):
+            validations = re.findall(r"@(NotNull|NotBlank|NotEmpty|Positive|Negative|Size|Pattern)\b", field_annotations)
+            fields.append({"name": field_name, "type": type_name, "required": bool(validations), "validations": validations})
+        if fields:
+            shapes[name] = fields
+    return shapes
+
+
+def _go_dto_shapes(source: str) -> dict[str, list[dict]]:
+    shapes = {}
+    for name, body in re.findall(r"\btype\s+(\w+)\s+struct\s*\{(.*?)\}", source, re.DOTALL):
+        fields = []
+        for field_name, type_name, tags in re.findall(r"(?m)^\s*(\w+)\s+([\w*\[\]]+)(?:\s+`([^`]*)`)?", body):
+            json_name = re.search(r'json:"([^,"]+)', tags)
+            validations = ["required"] if re.search(r'validate:"[^"]*\brequired\b', tags) else []
+            fields.append({"name": json_name.group(1) if json_name else field_name, "type": type_name.lstrip("*"), "required": bool(validations), "validations": validations})
+        if fields:
+            shapes[name] = fields
+    return shapes

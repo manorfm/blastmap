@@ -203,11 +203,22 @@ def test_java_spring_http_contract_keeps_declared_payload_validation_and_auth(tm
 ''',
         encoding="utf-8",
     )
+    (tmp_path / "CreateOrderRequest.java").write_text(
+        '''class CreateOrderRequest {
+  @NotBlank String sku;
+  Integer quantity;
+}
+''',
+        encoding="utf-8",
+    )
 
     result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
 
     assert result.contracts["OrdersController.create"] == {
-        "request": {"name": "request", "type": "CreateOrderRequest", "required": True},
+        "request": {"name": "request", "type": "CreateOrderRequest", "required": True, "fields": [
+            {"name": "sku", "type": "String", "required": True, "validations": ["NotBlank"]},
+            {"name": "quantity", "type": "Integer", "required": False, "validations": []},
+        ]},
         "returns": {"type": "Order", "required": True},
         "validations": ["Valid"],
         "authorization": ["PreAuthorize"],
