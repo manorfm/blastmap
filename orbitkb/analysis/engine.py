@@ -264,6 +264,47 @@ def _spring_derived_operation_kind(method: str) -> str | None:
     return None
 
 
+def _spring_data_query_methods(files: list[Path]) -> dict[tuple[str, str], str]:
+    """Map local Spring Data `@Query` declarations to their proven operation kind."""
+    methods = {}
+    for path in files:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for repository, parents, body in re.findall(
+            r"\binterface\s+(\w+)\s*(?:extends|:)\s*([^\{]+)\{(.*?)\}", source, re.DOTALL,
+        ):
+            if not any(re.search(rf"\b{base}\b", parents) for base in _SPRING_DATA_REPOSITORY_BASE_TYPES):
+                continue
+            for match in re.finditer(
+                r"@Query\s*\((?:[^()]|\([^()]*\))*\)\s*"
+                r"(?P<annotations>(?:@\w+(?:\s*\([^)]*\))?\s*)*)"
+                r"(?:public\s+)?(?:[\w.<>,?\[\]]+\s+)?(?P<method>\w+)\s*\(",
+                body,
+                re.DOTALL,
+            ):
+                methods[(repository, match.group("method"))] = (
+                    "writes" if "@Modifying" in match.group("annotations") else "reads"
+                )
+    return methods
+
+
+def _classify_spring_data_query_operations(
+    edges: list[FlowEdge], injections: list[Injection], query_methods: dict[tuple[str, str], str],
+) -> list[FlowEdge]:
+    """Apply only exact local `@Query` method declarations to observed calls."""
+    injected_types = {
+        injection.consumer: injection.contract.split("<", 1)[0].rsplit(".", 1)[-1]
+        for injection in injections
+    }
+    classified = []
+    for edge in edges:
+        owner, separator, _member = edge.source.rpartition(".")
+        receiver, target_separator, method = edge.target.rpartition(".")
+        repository_type = injected_types.get(f"{owner}.{receiver}") if separator and target_separator else None
+        kind = query_methods.get((repository_type, method))
+        classified.append(replace(edge, kind=kind) if kind else edge)
+    return classified
+
+
 @dataclass(frozen=True)
 class _Function:
     name: str
@@ -1097,6 +1138,9 @@ class StaticAnalysisEngine:
         if stack == "jvm-spring":
             result.edges = _classify_spring_data_derived_operations(
                 result.edges, result.injections, _spring_data_repository_types(files),
+            )
+            result.edges = _classify_spring_data_query_operations(
+                result.edges, result.injections, _spring_data_query_methods(files),
             )
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)

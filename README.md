@@ -144,6 +144,8 @@ declared injected member whose type is a Spring repository; a receiver merely na
 `repository` is not sufficient.
 Derived Spring Data methods such as `findByStatus` and `deleteByCustomerId` require
 the stronger proof of a local interface extending a supported Spring Data contract.
+Local Spring Data `@Query` methods are reads by default; only a companion
+`@Modifying` annotation makes their operation a write.
 
 `describe_persistence` exposes source-proven `static_facts` independently of the
 generated entity summaries. JPA `@Entity`/`@Table` and GORM-tagged structs establish

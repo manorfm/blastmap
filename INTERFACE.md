@@ -131,6 +131,8 @@ injected member whose type is a Spring repository; a receiver name alone is not
 treated as persistence evidence.
 Derived Spring Data methods, such as `findByStatus` and `deleteByCustomerId`, also
 require a local interface that extends a supported Spring Data contract.
+Local Spring Data `@Query` methods are reads by default; only a companion
+`@Modifying` annotation establishes a write.
 
 `describe_persistence` also returns `static_facts` for locally proven JPA, GORM or
 Mongoose mappings, including entity/table or collection name, local owner and

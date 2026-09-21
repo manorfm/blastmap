@@ -415,6 +415,44 @@ def test_spring_data_derived_operations_require_a_local_repository_interface(tmp
     }
 
 
+def test_spring_data_query_operations_require_local_repository_and_modifying_evidence(tmp_path: Path):
+    (tmp_path / "OrderRepository.java").write_text(
+        '''interface OrderRepository extends JpaRepository<Order, String> {
+  @Query("select o from Order o where o.status = :status")
+  Order findActive(String status);
+  @Query("update Order o set o.archived = true") @Modifying
+  int archiveExpired();
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Orders.java").write_text(
+        '''class Orders {
+  private final OrderRepository repository;
+  Order find(String status) { return repository.findActive(status); }
+  int archive() { return repository.archiveExpired(); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Unproven.java").write_text(
+        '''class Unproven {
+  private final UnknownRepository repository;
+  Order find(String status) { return repository.findActive(status); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("Orders.find", "repository.findActive", "reads"),
+        ("Orders.archive", "repository.archiveExpired", "writes"),
+        ("Unproven.find", "repository.findActive", "invokes"),
+    }
+
+
 def test_graphql_schema_contract_is_linked_to_its_resolver_entrypoint(tmp_path: Path):
     (tmp_path / "resolvers.ts").write_text(
         '''export const resolvers = { Mutation: { createOrder: (_, input) => orderService.create(input) } };''',

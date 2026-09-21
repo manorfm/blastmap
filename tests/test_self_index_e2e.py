@@ -478,6 +478,46 @@ async def test_cli_to_mcp_exposes_derived_spring_data_persistence_operations(tmp
 
 
 @pytest.mark.anyio
+async def test_cli_to_mcp_exposes_modifying_spring_data_query_operations(tmp_path: Path, fake_backends):
+    root = tmp_path / "orders"
+    root.mkdir()
+    (root / "OrderRepository.java").write_text(
+        '''interface OrderRepository extends JpaRepository<Order, String> {
+  @Query("update Order o set o.archived = true") @Modifying
+  int archiveExpired();
+}
+''',
+        encoding="utf-8",
+    )
+    (root / "OrdersController.java").write_text(
+        '''class OrdersController {
+  private final OrderRepository repository;
+  @PostMapping("/orders/archive")
+  int archive() { return repository.archiveExpired(); }
+}
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "orders.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-http", "--stack", "jvm-spring",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_entrypoint", {
+            "service": "orders-http", "kind": "http", "method": "POST", "name": "/orders/archive",
+        }))
+
+    assert result["persistence_operations"] == [{
+        "operation": "writes", "target": "repository.archiveExpired",
+        "evidence": {"file": "OrdersController.java", "start_line": 4, "end_line": 4},
+    }]
+
+
+@pytest.mark.anyio
 async def test_cli_to_mcp_exposes_mongoose_persistence_operations(tmp_path: Path, fake_backends):
     root = tmp_path / "orders"
     root.mkdir()
