@@ -128,6 +128,11 @@ _SPRING_DATA_REPOSITORY_BASE_TYPES = frozenset({
     "MongoRepository", "PagingAndSortingRepository", "ReactiveCrudRepository", "ReactiveMongoRepository",
 })
 _SPRING_JDBC_TEMPLATE_TYPES = frozenset({"JdbcTemplate", "NamedParameterJdbcTemplate"})
+_SPRING_MONGO_TEMPLATE_TYPES = frozenset({"MongoTemplate", "ReactiveMongoTemplate"})
+_SPRING_MONGO_READ_METHODS = frozenset({"aggregate", "count", "distinct", "exists", "find", "findById", "findOne"})
+_SPRING_MONGO_WRITE_METHODS = frozenset({
+    "findAndModify", "findAndReplace", "insert", "insertAll", "remove", "save", "updateFirst", "updateMulti", "upsert",
+})
 
 
 def _mongoose_model_variables(source: str) -> frozenset[str]:
@@ -260,20 +265,61 @@ def _spring_jdbc_template_call_kind(target: str, receivers: frozenset[str]) -> s
     return None
 
 
+def _spring_mongo_template_receivers(injections: list[Injection], class_name: str) -> frozenset[str]:
+    """Return locally injected members whose declared type is a Spring Mongo template."""
+    prefix = f"{class_name}."
+    return frozenset(
+        injection.consumer.removeprefix(prefix)
+        for injection in injections
+        if injection.consumer.startswith(prefix)
+        and injection.contract.split("<", 1)[0].rsplit(".", 1)[-1] in _SPRING_MONGO_TEMPLATE_TYPES
+    )
+
+
+def _spring_mongo_template_call_kind(target: str, receivers: frozenset[str]) -> str | None:
+    """Classify exact Mongo operations on a locally injected Spring template."""
+    receiver, separator, method = target.rpartition(".")
+    if not separator or receiver not in receivers:
+        return None
+    if method in _SPRING_MONGO_READ_METHODS:
+        return "reads"
+    if method in _SPRING_MONGO_WRITE_METHODS:
+        return "writes"
+    return None
+
+
+@dataclass(frozen=True)
+class _SpringPersistenceReceivers:
+    repositories: frozenset[str]
+    jdbc_templates: frozenset[str]
+    mongo_templates: frozenset[str]
+
+
+def _spring_persistence_receivers(
+    injections: list[Injection], class_name: str,
+) -> _SpringPersistenceReceivers:
+    """Collect locally declared Spring persistence dependencies for one class."""
+    return _SpringPersistenceReceivers(
+        _spring_repository_receivers(injections, class_name),
+        _spring_jdbc_template_receivers(injections, class_name),
+        _spring_mongo_template_receivers(injections, class_name),
+    )
+
+
 def _spring_edges_for(
     function: _Function,
     path: Path,
     root: Path,
     source: bytes,
-    repository_receivers: frozenset[str],
-    jdbc_template_receivers: frozenset[str],
+    receivers: _SpringPersistenceReceivers,
 ) -> list[FlowEdge]:
     edges = _FileAnalyzer._edges_for(function, path, root, source)
     classified = []
     for edge in edges:
         kind = (
-            _spring_repository_call_kind(edge.target, repository_receivers)
-            or _spring_jdbc_template_call_kind(edge.target, jdbc_template_receivers)
+            _spring_repository_call_kind(edge.target, receivers.repositories)
+            or _spring_jdbc_template_call_kind(edge.target, receivers.jdbc_templates)
+            or _spring_mongo_template_call_kind(edge.target, receivers.mongo_templates)
         )
         # Generic name matching is disabled for JVM persistence: `repository.save`
         # is an operation only with a local repository dependency.
@@ -538,8 +584,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                     evidence = _evidence(path, root, parameter)
                     result.edges.append(FlowEdge(injection_symbol, contract, "injects", evidence))
                     result.injections.append(Injection(injection_symbol, contract, _first_qualifier(_text(parameter, source)), evidence))
-            repository_receivers = _spring_repository_receivers(result.injections, class_name)
-            jdbc_template_receivers = _spring_jdbc_template_receivers(result.injections, class_name)
+            persistence_receivers = _spring_persistence_receivers(result.injections, class_name)
             for function_node in (node for node in _walk(class_node) if node.type == "function_declaration"):
                 name_node = function_node.child_by_field_name("name")
                 if name_node is None:
@@ -549,7 +594,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 function = _Function(_text(name_node, source), symbol, body, function_node)
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
                 result.edges.extend(_spring_edges_for(
-                    function, path, root, source, repository_receivers, jdbc_template_receivers,
+                    function, path, root, source, persistence_receivers,
                 ))
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.message_contracts.extend(
@@ -594,8 +639,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                     evidence = _evidence(path, root, field)
                     result.edges.append(FlowEdge(consumer, contract, "injects", evidence))
                     result.injections.append(Injection(consumer, contract, _first_qualifier(_text(field, source)), evidence))
-            repository_receivers = _spring_repository_receivers(result.injections, class_name)
-            jdbc_template_receivers = _spring_jdbc_template_receivers(result.injections, class_name)
+            persistence_receivers = _spring_persistence_receivers(result.injections, class_name)
             for method_node in (node for node in _walk(class_node) if node.type == "method_declaration"):
                 name_node = method_node.child_by_field_name("name")
                 body = method_node.child_by_field_name("body")
@@ -606,7 +650,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 function = _Function(name, symbol, body, method_node)
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
                 result.edges.extend(_spring_edges_for(
-                    function, path, root, source, repository_receivers, jdbc_template_receivers,
+                    function, path, root, source, persistence_receivers,
                 ))
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.message_contracts.extend(

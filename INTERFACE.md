@@ -138,6 +138,9 @@ Local Spring Data `@Query` methods are reads by default; only a companion
 `@Modifying` annotation establishes a write.
 Spring `JdbcTemplate` and `NamedParameterJdbcTemplate` operations require a locally
 injected template: `query*` reads, while `update` and `batchUpdate` write.
+Spring `MongoTemplate` and `ReactiveMongoTemplate` operations also require a local
+injected template; exact find/count methods read, while save/insert/update/remove
+methods write.
 
 `describe_persistence` also returns `static_facts` for locally proven JPA, GORM or
 Mongoose mappings, including entity/table or collection name, local owner and

@@ -550,6 +550,38 @@ async def test_cli_to_mcp_exposes_jdbc_template_persistence_operations(tmp_path:
 
 
 @pytest.mark.anyio
+async def test_cli_to_mcp_exposes_mongo_template_persistence_operations(tmp_path: Path, fake_backends):
+    root = tmp_path / "orders"
+    root.mkdir()
+    (root / "OrdersController.java").write_text(
+        '''class OrdersController {
+  private final MongoTemplate mongo;
+  @PostMapping("/orders")
+  Order create(Order order) { return mongo.save(order); }
+}
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "orders.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-mongo", "--stack", "jvm-spring",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_entrypoint", {
+            "service": "orders-mongo", "kind": "http", "method": "POST", "name": "/orders",
+        }))
+
+    assert result["persistence_operations"] == [{
+        "operation": "writes", "target": "mongo.save",
+        "evidence": {"file": "OrdersController.java", "start_line": 4, "end_line": 4},
+    }]
+
+
+@pytest.mark.anyio
 async def test_cli_to_mcp_exposes_mongoose_persistence_operations(tmp_path: Path, fake_backends):
     root = tmp_path / "orders"
     root.mkdir()
