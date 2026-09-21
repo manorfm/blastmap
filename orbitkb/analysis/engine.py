@@ -497,6 +497,7 @@ def _go_http_contract(declaration: str) -> dict:
         "returns": None,
         "validations": [],
         "authorization": [],
+        "parameters": _go_bound_parameters(declaration),
     }
 
 
@@ -554,7 +555,24 @@ def _spring_http_contract(declaration: str, annotations: str, kotlin: bool = Fal
         "returns": {"type": return_type, "required": True} if return_type else None,
         "validations": validations,
         "authorization": authorization,
+        "parameters": _spring_bound_parameters(declaration, kotlin),
     }
+
+
+def _spring_bound_parameters(declaration: str, kotlin: bool) -> list[dict]:
+    bindings = []
+    for annotation, kind in (("PathVariable", "path"), ("RequestParam", "query"), ("RequestHeader", "header")):
+        pattern = rf'@{annotation}\s*\(\s*(?:value\s*=\s*)?"([^"]+)"[^)]*\)\s+([\w<>?]+)\s+(\w+)'
+        for name, type_name, variable in re.findall(pattern, declaration):
+            bindings.append({"kind": kind, "name": name, "variable": variable, "type": type_name.rstrip("?"), "required": kind == "path"})
+    return bindings
+
+
+def _go_bound_parameters(declaration: str) -> list[dict]:
+    bindings = []
+    for pattern, kind in ((r'\.PathValue\s*\(\s*"([^"]+)"', "path"), (r'\.Query\s*\(\s*\)\.Get\s*\(\s*"([^"]+)"', "query"), (r'\.Header\.Get\s*\(\s*"([^"]+)"', "header")):
+        bindings.extend({"kind": kind, "name": name, "variable": None, "type": None, "required": kind == "path"} for name in re.findall(pattern, declaration))
+    return bindings
 
 
 def _spring_request(declaration: str, kotlin: bool) -> dict | None:

@@ -293,7 +293,32 @@ def test_java_spring_http_contract_keeps_declared_payload_validation_and_auth(tm
         "returns": {"type": "Order", "required": True},
         "validations": ["Valid"],
         "authorization": ["PreAuthorize"],
+        "parameters": [],
     }
+
+
+def test_rest_contract_extracts_literal_spring_and_go_parameter_bindings(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''class OrdersController {
+  @GetMapping("/orders/{id}")
+  Order get(@PathVariable("id") String id, @RequestParam("expand") String expand, @RequestHeader("X-Trace") String trace) { return null; }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "orders.go").write_text(
+        '''package orders
+func Get(w http.ResponseWriter, r *http.Request) { r.PathValue("id"); r.URL.Query().Get("expand"); r.Header.Get("X-Trace") }
+func register() { router.GET("/orders/{id}", Get) }
+''',
+        encoding="utf-8",
+    )
+
+    java = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+    go = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert [item["kind"] for item in java.contracts["OrdersController.get"]["parameters"]] == ["path", "query", "header"]
+    assert [item["name"] for item in go.contracts["orders.Get"]["parameters"]] == ["id", "expand", "X-Trace"]
 
 
 def test_native_flow_boundaries_are_extracted_from_declared_control_flow(tmp_path: Path):
@@ -345,6 +370,7 @@ func register() { router.POST("/orders", Create) }
         "returns": None,
         "validations": [],
         "authorization": [],
+        "parameters": [],
     }
 
 

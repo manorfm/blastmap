@@ -79,6 +79,9 @@ annotations; Go request data requires a locally declared value passed to JSON
 `Decode`. Unavailable fields are `null` or empty lists.
 HTTP entrypoint names include a Spring `@RequestMapping` or Go `Group` prefix only
 when both source literals make the resulting route deterministic.
+HTTP `contract.parameters` lists literal `path`, `query` and `header` bindings with
+name, variable, type and required status when available. Unproven Go types remain
+`null` rather than inferred.
 When a local Java DTO or Go `struct` declaration is available, request/response
 objects may additionally expose `fields` with their source-declared type, required
 status and validation tags.

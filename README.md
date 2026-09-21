@@ -97,6 +97,9 @@ annotations; Go JSON-decoded local payload types. Missing response or DTO detail
 returned as `null` rather than guessed.
 Literal Spring controller `@RequestMapping` and Go router `Group` prefixes are
 composed with literal handler routes; dynamic path composition is left unchanged.
+REST contracts also list source-proven path, query and header bindings. Spring
+provides declared parameter types; Go HTTP extraction leaves types unknown unless a
+future local type proof is available.
 When a referenced Java DTO or Go `struct` is declared in the indexed source, its
 locally observed fields and validation tags are attached to that contract.
 
