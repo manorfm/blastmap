@@ -102,6 +102,8 @@ locally observed fields and validation tags are attached to that contract.
 
 RabbitMQ consumer entrypoints expose a compact contract with queue, direction and a
 declared payload parameter type when the listener/callback makes it available.
+Literal queue declarations can additionally supply `dead_letter_routing_key` and
+`retry_delay_ms`; dynamic broker configuration is deliberately omitted.
 Publication contracts are persisted separately and returned by `describe_messages`
 as `static_contracts`, including literal channel, routing key and source evidence.
 

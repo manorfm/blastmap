@@ -88,6 +88,9 @@ RabbitMQ consumer contracts use `transport`, `direction`, `queue` and optional
 contracts have their own persisted representation. `describe_messages` now returns
 that representation in `static_contracts`, with channel, routing key, payload type
 when proven, and file/line evidence.
+Matching consumer contracts may include literal `dead_letter_routing_key` and
+`retry_delay_ms` extracted from local queue declarations; missing or dynamic values
+are not represented.
 
 `describe_entrypoint` returns `boundaries` alongside `flow`: branch, async, retry,
 error or transaction markers whose source symbol is reachable under the selected

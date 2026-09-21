@@ -672,6 +672,7 @@ class StaticAnalysisEngine:
             schema = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in files if path.suffix in {".graphql", ".gql"})
             result.contracts.update(_GraphqlContractExtractor().contracts(schema))
         _enrich_contract_fields(result.contracts, files)
+        _enrich_rabbitmq_contracts(result.contracts, files)
         result.persistence_facts.extend(_persistence_facts(files, root))
         result = BoundedFlowResolver().resolve(result)
         result.edges.extend(self._depth_provider.enrich(root, result))
@@ -694,6 +695,34 @@ def _dto_shapes(files: list[Path]) -> dict[str, list[dict]]:
         shapes.update(_java_dto_shapes(source))
         shapes.update(_go_dto_shapes(source))
     return shapes
+
+
+def _enrich_rabbitmq_contracts(contracts: dict[str, dict], files: list[Path]) -> None:
+    queues = _rabbitmq_queue_options(files)
+    for contract in contracts.values():
+        if contract.get("transport") != "rabbitmq" or contract.get("direction") != "consumes":
+            continue
+        if options := queues.get(contract["queue"]):
+            contract.update(options)
+
+
+def _rabbitmq_queue_options(files: list[Path]) -> dict[str, dict]:
+    options = {}
+    for path in files:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for match in re.finditer(r'(?:assertQueue|durable)\s*\(\s*"([^"]+)"', source):
+            queue = match.group(1)
+            declaration = source[match.start() : match.start() + 600]
+            dead_letter = re.search(r'(?:deadLetterRoutingKey\s*\(\s*|deadLetterRoutingKey|x-dead-letter-routing-key)\s*["\':=]+\s*"([^"]+)"', declaration)
+            retry = re.search(r'(?:messageTtl\s*\(\s*|messageTtl|x-message-ttl)\s*["\':=]+\s*(\d+)', declaration)
+            values = {}
+            if dead_letter:
+                values["dead_letter_routing_key"] = dead_letter.group(1)
+            if retry:
+                values["retry_delay_ms"] = int(retry.group(1))
+            if values:
+                options[queue] = values
+    return options
 
 
 def _persistence_facts(files: list[Path], root: Path) -> list[PersistenceFact]:

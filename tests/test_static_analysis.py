@@ -89,7 +89,8 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
 def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_path: Path):
     source = tmp_path / "consumer.ts"
     source.write_text(
-        '''channel.consume("orders.created", async (message: OrderCreated) => {
+        '''channel.assertQueue("orders.created", { deadLetterRoutingKey: "orders.dlq", messageTtl: 5000 });
+channel.consume("orders.created", async (message: OrderCreated) => {
   await orderService.handle(message);
 });
 ''',
@@ -105,6 +106,8 @@ def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_
     assert result.contracts["message.consume:orders.created"]["payload"] == {
         "name": "message", "type": "OrderCreated", "required": True,
     }
+    assert result.contracts["message.consume:orders.created"]["dead_letter_routing_key"] == "orders.dlq"
+    assert result.contracts["message.consume:orders.created"]["retry_delay_ms"] == 5000
 
 
 def test_kotlin_analyzer_exposes_rabbit_listener_and_its_handler_flow(tmp_path: Path):
