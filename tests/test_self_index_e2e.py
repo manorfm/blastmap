@@ -154,6 +154,35 @@ async def test_cli_to_mcp_preserves_a_static_rabbitmq_publication_contract(tmp_p
 
 
 @pytest.mark.anyio
+async def test_cli_to_mcp_preserves_literal_rabbitmq_bindings(tmp_path: Path, fake_backends):
+    root = tmp_path / "consumer"
+    root.mkdir()
+    (root / "consumer.ts").write_text(
+        '''channel.assertQueue("orders.created");
+channel.bindQueue("orders.created", "orders", "order.created");
+channel.consume("orders.created", async (message: OrderCreated) => orderService.handle(message));
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "consumer.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-consumer", "--stack", "node-ts",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_entrypoint", {
+            "service": "orders-consumer", "kind": "message", "method": "CONSUME", "name": "orders.created",
+        }))
+
+    assert result["contract"]["bindings"] == [
+        {"exchange": "orders", "routing_key": "order.created"},
+    ]
+
+
+@pytest.mark.anyio
 async def test_cli_to_mcp_preserves_a_static_jpa_persistence_fact(tmp_path: Path, fake_backends):
     root = tmp_path / "orders"
     root.mkdir()

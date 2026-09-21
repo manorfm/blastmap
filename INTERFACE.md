@@ -97,6 +97,9 @@ when proven, and file/line evidence.
 Matching consumer contracts may include literal `dead_letter_routing_key` and
 `retry_delay_ms` extracted from local queue declarations; missing or dynamic values
 are not represented.
+Consumer `contract.bindings` is an optional ordered list of `{exchange,
+routing_key}` relations. A relation is emitted only when local RabbitMQ declarations
+prove the queue, exchange and routing key as literals; multiple bindings are kept.
 
 `describe_entrypoint` returns `boundaries` alongside `flow`: branch, async, retry,
 error or transaction markers whose source symbol is reachable under the selected

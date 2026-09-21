@@ -89,7 +89,9 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
 def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_path: Path):
     source = tmp_path / "consumer.ts"
     source.write_text(
-        '''channel.assertQueue("orders.created", { deadLetterRoutingKey: "orders.dlq", messageTtl: 5000 });
+        '''channel.assertExchange("orders", "topic");
+channel.assertQueue("orders.created", { deadLetterRoutingKey: "orders.dlq", messageTtl: 5000 });
+channel.bindQueue("orders.created", "orders", "order.created");
 channel.consume("orders.created", async (message: OrderCreated) => {
   await orderService.handle(message);
 });
@@ -108,6 +110,9 @@ channel.consume("orders.created", async (message: OrderCreated) => {
     }
     assert result.contracts["message.consume:orders.created"]["dead_letter_routing_key"] == "orders.dlq"
     assert result.contracts["message.consume:orders.created"]["retry_delay_ms"] == 5000
+    assert result.contracts["message.consume:orders.created"]["bindings"] == [
+        {"exchange": "orders", "routing_key": "order.created"},
+    ]
 
 
 def test_kotlin_analyzer_exposes_rabbit_listener_and_its_handler_flow(tmp_path: Path):
@@ -131,6 +136,52 @@ def test_kotlin_analyzer_exposes_rabbit_listener_and_its_handler_flow(tmp_path: 
         "transport": "rabbitmq", "direction": "consumes", "queue": "orders.created",
         "payload": {"name": "message", "type": "String", "required": True},
     }
+
+
+def test_java_analyzer_links_a_literal_spring_queue_binding_to_its_consumer(tmp_path: Path):
+    source = tmp_path / "OrderListener.java"
+    source.write_text(
+        '''class QueueConfig {
+  Queue orderQueue() { return new Queue("orders.created"); }
+  TopicExchange orderExchange() { return new TopicExchange("orders"); }
+  Binding orderBinding() { return BindingBuilder.bind(orderQueue()).to(orderExchange()).with("order.created"); }
+}
+class OrderListener {
+  @RabbitListener(queues = "orders.created")
+  void consume(OrderCreated message) { orderService.handle(message); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert result.contracts["OrderListener.consume"]["bindings"] == [
+        {"exchange": "orders", "routing_key": "order.created"},
+    ]
+
+
+def test_kotlin_analyzer_links_a_literal_spring_queue_binding_to_its_consumer(tmp_path: Path):
+    source = tmp_path / "OrderListener.kt"
+    source.write_text(
+        '''class QueueConfig {
+  fun orderQueue() = Queue("orders.created")
+  fun orderExchange() = TopicExchange("orders")
+  fun orderBinding() = BindingBuilder.bind(orderQueue()).to(orderExchange()).with("order.created")
+}
+class OrderListener {
+  @RabbitListener(queues = ["orders.created"])
+  fun consume(message: OrderCreated) { orderService.handle(message) }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert result.contracts["OrderListener.consume"]["bindings"] == [
+        {"exchange": "orders", "routing_key": "order.created"},
+    ]
 
 
 def test_service_create_is_not_misclassified_as_direct_persistence(tmp_path: Path):

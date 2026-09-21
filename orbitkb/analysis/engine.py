@@ -742,11 +742,14 @@ def _dto_shapes(files: list[Path]) -> dict[str, list[dict]]:
 
 def _enrich_rabbitmq_contracts(contracts: dict[str, dict], files: list[Path]) -> None:
     queues = _rabbitmq_queue_options(files)
+    bindings = _rabbitmq_bindings(files)
     for contract in contracts.values():
         if contract.get("transport") != "rabbitmq" or contract.get("direction") != "consumes":
             continue
         if options := queues.get(contract["queue"]):
             contract.update(options)
+        if queue_bindings := bindings.get(contract["queue"]):
+            contract["bindings"] = queue_bindings
 
 
 def _rabbitmq_queue_options(files: list[Path]) -> dict[str, dict]:
@@ -766,6 +769,48 @@ def _rabbitmq_queue_options(files: list[Path]) -> dict[str, dict]:
             if values:
                 options[queue] = values
     return options
+
+
+def _rabbitmq_bindings(files: list[Path]) -> dict[str, list[dict]]:
+    bindings: dict[str, set[tuple[str, str]]] = {}
+    for path in files:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for queue, exchange, routing_key in _node_rabbitmq_bindings(source):
+            bindings.setdefault(queue, set()).add((exchange, routing_key))
+        for queue, exchange, routing_key in _spring_rabbitmq_bindings(source):
+            bindings.setdefault(queue, set()).add((exchange, routing_key))
+    return {
+        queue: [{"exchange": exchange, "routing_key": routing_key} for exchange, routing_key in sorted(values)]
+        for queue, values in bindings.items()
+    }
+
+
+def _node_rabbitmq_bindings(source: str) -> list[tuple[str, str, str]]:
+    return re.findall(
+        r'(?:\w+\.)?bindQueue\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"', source,
+    )
+
+
+def _spring_rabbitmq_bindings(source: str) -> list[tuple[str, str, str]]:
+    queues = _spring_rabbitmq_factories(source, "Queue")
+    exchanges = _spring_rabbitmq_factories(source, r"(?:Topic|Direct|Fanout|Headers)?Exchange")
+    bindings = []
+    pattern = (
+        r'BindingBuilder\s*\.\s*bind\s*\(\s*(\w+)\s*\(\s*\)\s*\)\s*'
+        r'\.to\s*\(\s*(\w+)\s*\(\s*\)\s*\)\s*\.with\s*\(\s*"([^"]+)"'
+    )
+    for queue_factory, exchange_factory, routing_key in re.findall(pattern, source):
+        queue = queues.get(queue_factory)
+        exchange = exchanges.get(exchange_factory)
+        if queue and exchange:
+            bindings.append((queue, exchange, routing_key))
+    return bindings
+
+
+def _spring_rabbitmq_factories(source: str, type_pattern: str) -> dict[str, str]:
+    java_pattern = rf'\b(\w+)\s*\([^)]*\)\s*\{{\s*return\s+new\s+(?:\w+\.)?{type_pattern}\s*\(\s*"([^"]+)"'
+    kotlin_pattern = rf'\bfun\s+(\w+)\s*\([^)]*\)\s*(?::\s*[\w.<>?]+\s*)?=\s*(?:\w+\.)?{type_pattern}\s*\(\s*"([^"]+)"'
+    return {name: value for name, value in re.findall(java_pattern, source) + re.findall(kotlin_pattern, source)}
 
 
 def _persistence_facts(files: list[Path], root: Path) -> list[PersistenceFact]:
