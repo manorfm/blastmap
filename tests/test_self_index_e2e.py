@@ -33,9 +33,8 @@ from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation import change_surface
 from orbitkb.mcp import queries
-
-from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
 from tests.mcp_test_helpers import content_json, server_params
+from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SELF_ROOT = REPO_ROOT / "orbitkb"
@@ -144,10 +143,9 @@ async def test_cli_to_mcp_preserves_a_static_rabbitmq_publication_contract(tmp_p
     ]))
 
     assert exit_code == 0
-    async with stdio_client(server_params(db_path)) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = content_json(await session.call_tool("describe_messages", {"service": "orders-publisher"}))
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_messages", {"service": "orders-publisher"}))
 
     assert result["static_contracts"] == [{
         "direction": "publishes", "channel": "orders", "routing_key": "created", "payload_type": None,
@@ -169,15 +167,42 @@ async def test_cli_to_mcp_preserves_a_static_jpa_persistence_fact(tmp_path: Path
     ]))
 
     assert exit_code == 0
-    async with stdio_client(server_params(db_path)) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = content_json(await session.call_tool("describe_persistence", {"service": "orders-jpa"}))
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_persistence", {"service": "orders-jpa"}))
 
     assert result["static_facts"] == [{
         "name": "orders", "kind": "sql_table", "owner": "Order",
         "evidence": {"file": "Order.java", "start_line": 1, "end_line": 1},
     }]
+
+
+@pytest.mark.anyio
+async def test_cli_to_mcp_preserves_literal_rest_response_statuses(tmp_path: Path, fake_backends):
+    root = tmp_path / "orders"
+    root.mkdir()
+    (root / "OrdersController.java").write_text(
+        '''class OrdersController {
+  @PostMapping("/orders") @ResponseStatus(HttpStatus.CREATED)
+  Order create(Order order) { return order; }
+}
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "orders.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-http", "--stack", "jvm-spring",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_entrypoint", {
+            "service": "orders-http", "kind": "http", "method": "POST", "name": "/orders",
+        }))
+
+    assert result["contract"]["response_statuses"] == [{"code": 201, "name": "CREATED"}]
 
 
 def test_knowledge_is_cumulative_across_two_independently_indexed_roots(tmp_path: Path, fake_backends):
