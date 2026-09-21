@@ -97,6 +97,8 @@ when proven, and file/line evidence. `exchange` is the literal first destination
 a RabbitMQ publication; the legacy internal storage name is not exposed. Go AMQP
 publications require a receiver locally declared as `*amqp.Channel` and literal
 exchange/routing-key arguments.
+For Node/TypeScript publications, `payload_type` is present only when the payload
+identifier resolves to an explicitly typed parameter in an enclosing lexical function.
 Matching consumer contracts may include literal `dead_letter_routing_key` and
 `retry_delay_ms` extracted from local queue declarations; missing or dynamic values
 are not represented.

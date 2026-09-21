@@ -71,7 +71,7 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
     source = tmp_path / "resolvers.ts"
     source.write_text(
         '''export const resolvers = {
-  Mutation: { createOrder: (_, input, { service }) => { service.create(input); channel.publish("orders", "created", input); } }
+  Mutation: { createOrder: (_: unknown, input: CreateOrderInput, { service }) => { service.create(input); channel.publish("orders", "created", input); } }
 };
 ''',
         encoding="utf-8",
@@ -83,7 +83,9 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
         ("graphql", "MUTATION", "createOrder")
     ]
     assert any(edge.kind == "publishes" and edge.target == "channel.publish" for edge in result.edges)
-    assert [(item.channel, item.routing_key) for item in result.message_contracts] == [("orders", "created")]
+    assert [(item.channel, item.routing_key, item.payload_type) for item in result.message_contracts] == [
+        ("orders", "created", "CreateOrderInput"),
+    ]
 
 
 def test_spring_analyzers_extract_literal_amqp_publications_with_declared_payloads(tmp_path: Path):

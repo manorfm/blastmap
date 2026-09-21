@@ -116,6 +116,8 @@ Publication contracts are persisted separately and returned by `describe_message
 as `static_contracts`, including literal exchange, routing key, payload type when
 locally declared, and source evidence. Node, Spring AMQP, and Go AMQP `Publish` /
 `PublishWithContext` publishers are covered.
+For Node/TypeScript, a payload type is emitted only when the published identifier
+matches an explicitly typed parameter in its lexical function scope.
 
 `describe_entrypoint` also returns source-proven `boundaries` for branch, async,
 retry, error and transaction constructs reachable in the bounded flow. These are

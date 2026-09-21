@@ -552,8 +552,28 @@ def _node_publish_contracts(tree: Node, source: bytes, path: Path, root: Path) -
         channel = _string(args[0], source) if args else None
         routing_key = _string(args[1], source) if len(args) > 1 else None
         if channel:
-            contracts.append(MessageContract("publishes", channel, routing_key, None, _evidence(path, root, node)))
+            payload_type = _node_payload_type(node, args[2], source) if len(args) > 2 else None
+            contracts.append(MessageContract("publishes", channel, routing_key, payload_type, _evidence(path, root, node)))
     return contracts
+
+
+def _node_payload_type(call: Node, payload: Node, source: bytes) -> str | None:
+    payload_name = _text(payload, source).strip()
+    if not re.fullmatch(r"\w+", payload_name):
+        return None
+    enclosing = call.parent
+    while enclosing is not None:
+        if enclosing.type in {"arrow_function", "function_declaration", "function_expression", "method_definition"}:
+            parameters = enclosing.child_by_field_name("parameters")
+            if parameters is not None:
+                types = {
+                    name: type_name.rstrip("?")
+                    for name, type_name in re.findall(r"\b(\w+)\s*\??\s*:\s*([\w.$<>\[\]?]+)", _text(parameters, source))
+                }
+                if payload_type := types.get(payload_name):
+                    return payload_type
+        enclosing = enclosing.parent
+    return None
 
 
 def _go_amqp_publish_contracts(function: _Function, path: Path, root: Path, source: bytes) -> list[MessageContract]:

@@ -131,7 +131,7 @@ async def test_cli_to_mcp_preserves_a_static_rabbitmq_publication_contract(tmp_p
     root.mkdir()
     (root / "resolvers.ts").write_text(
         '''export const resolvers = {
-  Mutation: { createOrder: (_, input) => channel.publish("orders", "created", input) }
+  Mutation: { createOrder: (_: unknown, input: CreateOrderInput) => channel.publish("orders", "created", input) }
 };
 ''',
         encoding="utf-8",
@@ -148,7 +148,7 @@ async def test_cli_to_mcp_preserves_a_static_rabbitmq_publication_contract(tmp_p
         result = content_json(await session.call_tool("describe_messages", {"service": "orders-publisher"}))
 
     assert result["static_contracts"] == [{
-        "direction": "publishes", "exchange": "orders", "routing_key": "created", "payload_type": None,
+        "direction": "publishes", "exchange": "orders", "routing_key": "created", "payload_type": "CreateOrderInput",
         "evidence": {"file": "resolvers.ts", "start_line": 2, "end_line": 2},
     }]
 
