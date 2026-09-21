@@ -130,6 +130,9 @@ retry, error and transaction constructs reachable in the bounded flow. These are
 observed control-flow markers, not claims that every branch is executed.
 Its `persistence_operations` is a compact projection of reachable `reads` and
 `writes` flow edges, retaining the same source evidence without adding traversal.
+For Node/TypeScript, Mongoose operations enter that projection only when the
+receiver was locally declared by `mongoose.model`; exact operation names determine
+whether the operation reads or writes.
 
 `describe_persistence` exposes source-proven `static_facts` independently of the
 generated entity summaries. JPA `@Entity`/`@Table` and GORM-tagged structs establish

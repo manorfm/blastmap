@@ -119,6 +119,9 @@ edge budget. They report syntactic evidence only, never runtime reachability.
 It also returns `persistence_operations`, a compact list of bounded-flow `reads` and
 `writes` with target and source evidence. It is a projection of `flow`, not a
 separate analysis or reachability claim.
+For Node/TypeScript, Mongoose calls are classified only when the receiver was
+locally declared by `mongoose.model`; exact operation names determine `reads` or
+`writes`.
 
 `describe_persistence` also returns `static_facts` for locally proven JPA, GORM or
 Mongoose mappings, including entity/table or collection name, local owner and

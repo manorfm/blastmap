@@ -509,6 +509,23 @@ def test_node_analyzer_extracts_literal_mongoose_collection_ownership(tmp_path: 
     ]
 
 
+def test_node_analyzer_classifies_explicit_mongoose_model_operations(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''const Order = mongoose.model("Order", orderSchema, "orders");
+function findOrder(id: string) { return Order.findById(id); }
+function createOrder(input: CreateOrderInput) { return Order.create(input); }
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("orders.findOrder", "Order.findById", "reads"),
+        ("orders.createOrder", "Order.create", "writes"),
+    }
+
+
 def test_spring_analyzers_extract_literal_document_collection_ownership(tmp_path: Path):
     (tmp_path / "Order.java").write_text(
         '''@Document(collection = "orders") class Order {}''', encoding="utf-8",
