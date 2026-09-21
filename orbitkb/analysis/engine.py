@@ -20,7 +20,13 @@ import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
 
 from orbitkb.analysis.depth import DepthProvider, NoopDepthProvider
-from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
+from orbitkb.analysis.models import (
+    AnalysisResult,
+    EntryPoint,
+    Evidence,
+    FlowEdge,
+    Symbol,
+)
 from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
@@ -44,6 +50,11 @@ def _string(node: Node, source: bytes) -> str | None:
 
 def _evidence(path: Path, root: Path, node: Node) -> Evidence:
     return Evidence(path.relative_to(root).as_posix(), node.start_point.row + 1, node.end_point.row + 1)
+
+
+def _symbol(function: _Function, path: Path, root: Path, implements: tuple[str, ...] = ()) -> Symbol:
+    owner, _separator, member = function.symbol.rpartition(".")
+    return Symbol(function.symbol, owner, member or function.name, _evidence(path, root, function.declaration), implements)
 
 
 def _call_kind(target: str) -> str:
@@ -129,7 +140,10 @@ class _GoAnalyzer(_FileAnalyzer):
                 receiver = receiver_match.group(1) if receiver_match else ""
             functions.append(_Function(name, f"{receiver}.{name}".strip("."), body, node))
 
-        result = AnalysisResult(edges=[edge for fn in functions for edge in self._edges_for(fn, path, root, source)])
+        result = AnalysisResult(
+            edges=[edge for fn in functions for edge in self._edges_for(fn, path, root, source)],
+            symbols=[_symbol(fn, path, root) for fn in functions],
+        )
         by_last_name = {fn.name: fn for fn in functions}
         for node in _walk(tree):
             if node.type != "call_expression":
@@ -167,6 +181,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
         for class_node in (node for node in _walk(tree) if node.type == "class_declaration"):
             class_name_node = class_node.child_by_field_name("name")
             class_name = _text(class_name_node, source) if class_name_node else path.stem
+            implements = _kotlin_supertypes(_text(class_node, source))
             for parameter in (node for node in _walk(class_node) if node.type == "class_parameter"):
                 types = [node for node in _walk(parameter) if node.type == "user_type"]
                 if types:
@@ -180,6 +195,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 symbol = f"{class_name}.{_text(name_node, source)}"
                 body = function_node.child_by_field_name("body") or function_node
                 function = _Function(_text(name_node, source), symbol, body, function_node)
+                result.symbols.append(_symbol(function, path, root, implements))
                 result.edges.extend(self._edges_for(function, path, root, source))
                 modifiers = next((node for node in function_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
@@ -202,6 +218,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
         for class_node in (node for node in _walk(tree) if node.type == "class_declaration"):
             class_name_node = class_node.child_by_field_name("name")
             class_name = _text(class_name_node, source) if class_name_node else path.stem
+            implements = _java_interfaces(_text(class_node, source))
             for field in (node for node in _walk(class_node) if node.type == "field_declaration"):
                 types = [node for node in _walk(field) if node.type == "type_identifier"]
                 names = [node for node in _walk(field) if node.type == "variable_declarator"]
@@ -217,7 +234,9 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                     continue
                 name = _text(name_node, source)
                 symbol = f"{class_name}.{name}"
-                result.edges.extend(self._edges_for(_Function(name, symbol, body, method_node), path, root, source))
+                function = _Function(name, symbol, body, method_node)
+                result.symbols.append(_symbol(function, path, root, implements))
+                result.edges.extend(self._edges_for(function, path, root, source))
                 modifiers = next((node for node in method_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
@@ -263,6 +282,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 symbol = f"{operation}.{name}"
                 result.entrypoints.append(EntryPoint("graphql", operation.upper(), name, symbol, _evidence(path, root, resolver)))
                 function = _Function(name, symbol, handler, resolver)
+                result.symbols.append(_symbol(function, path, root))
                 result.edges.extend(self._edges_for(function, path, root, source))
         for node in _walk(tree):
             if node.type != "call_expression":
@@ -278,7 +298,9 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 continue
             symbol = f"message.consume:{channel}"
             result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
-            result.edges.extend(self._edges_for(_Function(channel, symbol, handler, node), path, root, source))
+            function = _Function(channel, symbol, handler, node)
+            result.symbols.append(_symbol(function, path, root))
+            result.edges.extend(self._edges_for(function, path, root, source))
         return result
 
 
@@ -337,6 +359,7 @@ class _PythonCliAnalyzer:
         for function in (node for node in tree.body if isinstance(node, ast.FunctionDef)):
             symbol = f"{path.stem}.{function.name}"
             evidence = Evidence(path.relative_to(root).as_posix(), function.lineno, function.end_lineno or function.lineno)
+            result.symbols.append(Symbol(symbol, path.stem, function.name, evidence))
             if function.name == "main":
                 result.entrypoints.append(EntryPoint("cli", "COMMAND", path.stem, symbol, evidence))
             for call in (node for node in ast.walk(function) if isinstance(node, ast.Call)):
@@ -357,6 +380,16 @@ def _python_call_name(node: ast.expr) -> str | None:
         prefix = _python_call_name(node.value)
         return f"{prefix}.{node.attr}" if prefix else node.attr
     return None
+
+
+def _kotlin_supertypes(class_text: str) -> tuple[str, ...]:
+    match = re.search(r"\bclass\s+\w+\s*:\s*([^\{(]+)", class_text)
+    return tuple(item.strip().split("(", 1)[0] for item in match.group(1).split(",")) if match else ()
+
+
+def _java_interfaces(class_text: str) -> tuple[str, ...]:
+    match = re.search(r"\bimplements\s+([^\{]+)", class_text)
+    return tuple(item.strip() for item in match.group(1).split(",")) if match else ()
 
 
 class StaticAnalysisEngine:

@@ -33,13 +33,26 @@ class FlowEdge:
     origin: str = "static"
 
 
+@dataclass(frozen=True)
+class Symbol:
+    """A locally declared callable used only for bounded flow resolution."""
+
+    name: str
+    owner: str
+    member: str
+    evidence: Evidence
+    implements: tuple[str, ...] = ()
+
+
 @dataclass
 class AnalysisResult:
     entrypoints: list[EntryPoint] = field(default_factory=list)
     edges: list[FlowEdge] = field(default_factory=list)
     contracts: dict[str, dict] = field(default_factory=dict)
+    symbols: list[Symbol] = field(default_factory=list)
 
     def extend(self, other: AnalysisResult) -> None:
         self.entrypoints.extend(other.entrypoints)
         self.edges.extend(other.edges)
         self.contracts.update(other.contracts)
+        self.symbols.extend(other.symbols)

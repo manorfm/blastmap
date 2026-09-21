@@ -90,7 +90,9 @@ The initial native coverage is deliberately focused on Go HTTP handlers,
 Java/Kotlin Spring HTTP controllers and Rabbit listeners, and Node/TypeScript
 GraphQL resolvers and Rabbit consumers. It resolves an observed call across files
 when constructor/field injection or one unambiguous local implementation proves the
-target. The model also dogfoods explicit Python CLI `main` functions. Resolution is
+target. A local symbol index includes callable declarations even when they are leaf
+methods, and Java interface implementations are used only when exactly one candidate
+matches. The model also dogfoods explicit Python CLI `main` functions. Resolution is
 bounded by the selected entrypoint; it never builds or returns a whole code graph.
 
 ### Optional depth provider

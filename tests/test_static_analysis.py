@@ -192,3 +192,68 @@ input CreateOrderInput { sku: String! note: String }
         }],
         "returns": {"type": "Order", "required": True},
     }
+
+
+def test_typed_symbol_index_resolves_an_injected_leaf_method_without_outgoing_calls(tmp_path: Path):
+    (tmp_path / "OrdersController.kt").write_text(
+        '''class OrdersController(private val useCase: CreateOrderUseCase) {
+  @PostMapping("/orders")
+  fun create(request: OrderRequest) = useCase.execute(request)
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "CreateOrderUseCase.kt").write_text(
+        '''class CreateOrderUseCase { fun execute(request: OrderRequest) = Unit }
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert any(symbol.name == "CreateOrderUseCase.execute" for symbol in result.symbols)
+    assert any(edge.target == "CreateOrderUseCase.execute" for edge in result.edges)
+
+
+def test_java_interface_injection_resolves_a_unique_implementation_method(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''class OrdersController {
+  private final OrderService service;
+  @PostMapping("/orders")
+  Order create(Order order) { return service.create(order); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "DefaultOrderService.java").write_text(
+        '''class DefaultOrderService implements OrderService {
+  Order create(Order order) { return order; }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert any(edge.target == "DefaultOrderService.create" for edge in result.edges)
+
+
+def test_typed_symbol_index_keeps_an_ambiguous_call_unresolved(tmp_path: Path):
+    (tmp_path / "Handler.java").write_text(
+        '''class Handler {
+  @PostMapping("/orders")
+  Order create(Order order) { return worker.execute(order); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "FirstWorker.java").write_text(
+        "class FirstWorker { Order execute(Order order) { return order; } }\n", encoding="utf-8",
+    )
+    (tmp_path / "SecondWorker.java").write_text(
+        "class SecondWorker { Order execute(Order order) { return order; } }\n", encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert any(edge.target == "worker.execute" for edge in result.edges)
