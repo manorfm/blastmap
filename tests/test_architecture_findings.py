@@ -23,6 +23,7 @@ from orbitkb.generation.architecture import (
     find_duplicate_external_integrations,
     find_fan_imbalance,
     find_flow_hypotheses,
+    find_read_entrypoint_side_effects,
     find_shared_database,
     recompute_architecture_view,
 )
@@ -256,6 +257,48 @@ def test_non_atomic_publish_hypothesis_is_suppressed_when_a_transaction_boundary
     )
 
     assert find_flow_hypotheses(conn) == []
+
+
+def test_read_entrypoint_side_effects_flag_get_and_graphql_query_with_remediation(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "catalog", "/tmp/catalog", "node-ts")
+    get_evidence = Evidence("CatalogController.java", 14, 14)
+    query_evidence = Evidence("resolvers.ts", 27, 27)
+    flows_repo.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[
+                EntryPoint("http", "GET", "/catalog/refresh", "Catalog.refresh", get_evidence),
+                EntryPoint("graphql", "QUERY", "catalog", "Query.catalog", query_evidence),
+                EntryPoint("http", "POST", "/catalog", "Catalog.create", Evidence("CatalogController.java", 40, 40)),
+            ],
+            edges=[
+                FlowEdge("Catalog.refresh", "repository.save", "writes", get_evidence),
+                FlowEdge("Query.catalog", "events.publish", "publishes", query_evidence),
+                FlowEdge("Catalog.create", "repository.save", "writes", Evidence("CatalogController.java", 41, 41)),
+            ],
+        ),
+    )
+
+    findings = find_read_entrypoint_side_effects(conn)
+
+    assert [finding["detail"]["entrypoint"]["symbol"] for finding in findings] == [
+        "Catalog.refresh", "Query.catalog",
+    ]
+    assert all(finding["kind"] == "possible_read_entrypoint_side_effect" for finding in findings)
+    assert all(finding["detail"]["confidence"] == 0.8 for finding in findings)
+    assert findings[0]["detail"]["evidence"] == [
+        {"file": "CatalogController.java", "start_line": 14, "end_line": 14},
+    ]
+    assert findings[0]["detail"]["remediation"] == [
+        "Move externally observable writes or publications behind a command entrypoint, or document the exception.",
+    ]
+
+    recompute_architecture_view(conn)
+    response = queries.find_architecture_smells(conn)
+    exposed = next(item for item in response["findings"] if item["kind"] == "possible_read_entrypoint_side_effect")
+    assert exposed["remediation"] == findings[0]["detail"]["remediation"]
 
 
 def test_recompute_architecture_view_persists_a_new_run_with_findings(tmp_path: Path):

@@ -519,6 +519,7 @@ def find_architecture_smells(conn: sqlite3.Connection) -> dict:
             "reason": finding["reason"], "confidence": detail.get("confidence", 1.0),
             "evidence": detail.get("evidence", []),
             "unknowns": detail.get("unknowns", ["Only indexed services and static facts were evaluated."]),
+            "remediation": detail.get("remediation", []),
         }
 
     response = {

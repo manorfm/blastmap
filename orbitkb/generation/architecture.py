@@ -18,6 +18,7 @@ from orbitkb.db.repositories import architecture as architecture_repo
 # fan-out crosses this count. Low enough to catch small systems, high enough that a
 # handful of legitimate dependencies doesn't trigger noise.
 FAN_THRESHOLD = 4
+READ_ENTRYPOINT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def _internal_edges(conn: sqlite3.Connection) -> list[tuple[int, int]]:
@@ -202,13 +203,8 @@ def _edge_evidence(row: sqlite3.Row) -> dict:
     return {"file": row["file_path"], "start_line": row["start_line"], "end_line": row["end_line"]}
 
 
-def find_flow_hypotheses(conn: sqlite3.Connection) -> list[dict]:
-    """Surface bounded flow risks as hypotheses, never as architecture verdicts.
-
-    The evidence comes only from direct static edges owned by an entrypoint. Whether
-    a GraphQL service is actually a BFF, or whether a transaction really encloses a
-    publication at runtime, remains deliberately explicit in `unknowns`.
-    """
+def _direct_entrypoint_operations(conn: sqlite3.Connection) -> list[dict]:
+    """Return source-proven persistence/message operations owned by each entrypoint."""
     names = _service_names(conn)
     rows = conn.execute(
         """
@@ -218,6 +214,7 @@ def find_flow_hypotheses(conn: sqlite3.Connection) -> list[dict]:
         FROM entrypoints e
         JOIN services s ON s.id = e.service_id
         JOIN flow_edges fe ON fe.entrypoint_id = e.id
+        WHERE fe.origin = 'static' AND fe.kind IN ('writes', 'publishes')
         ORDER BY s.name, e.id, fe.id
         """
     ).fetchall()
@@ -228,20 +225,34 @@ def find_flow_hypotheses(conn: sqlite3.Connection) -> list[dict]:
             {
                 "service_id": row["service_id"], "service_name": names[row["service_id"]],
                 "kind": row["entrypoint_kind"], "method": row["method"], "name": row["name"],
-                "symbol": row["symbol"], "writes": [], "publishes": [],
+                "symbol": row["symbol"], "operations": [],
             },
         )
-        if row["edge_kind"] in {"writes", "publishes"}:
-            entrypoint[row["edge_kind"]].append({"target": row["to_symbol"], "evidence": _edge_evidence(row)})
+        entrypoint["operations"].append({
+            "kind": row["edge_kind"], "target": row["to_symbol"], "evidence": _edge_evidence(row),
+        })
+    return list(by_entrypoint.values())
 
+
+def _entrypoint_detail(entrypoint: dict) -> dict:
+    return {
+        "kind": entrypoint["kind"], "method": entrypoint["method"],
+        "name": entrypoint["name"], "symbol": entrypoint["symbol"],
+    }
+
+
+def find_flow_hypotheses(conn: sqlite3.Connection) -> list[dict]:
+    """Surface bounded flow risks as hypotheses, never as architecture verdicts.
+
+    The evidence comes only from direct static edges owned by an entrypoint. Whether
+    a GraphQL service is actually a BFF, or whether a transaction really encloses a
+    publication at runtime, remains deliberately explicit in `unknowns`.
+    """
     findings: list[dict] = []
-    for entrypoint in by_entrypoint.values():
-        writes = entrypoint["writes"]
-        publishes = entrypoint["publishes"]
-        entrypoint_detail = {
-            "kind": entrypoint["kind"], "method": entrypoint["method"],
-            "name": entrypoint["name"], "symbol": entrypoint["symbol"],
-        }
+    for entrypoint in _direct_entrypoint_operations(conn):
+        writes = [operation for operation in entrypoint["operations"] if operation["kind"] == "writes"]
+        publishes = [operation for operation in entrypoint["operations"] if operation["kind"] == "publishes"]
+        entrypoint_detail = _entrypoint_detail(entrypoint)
         if entrypoint["kind"] == "graphql" and entrypoint["method"] == "MUTATION" and (writes or publishes):
             evidence = [item["evidence"] for item in [*writes, *publishes]]
             findings.append(
@@ -255,6 +266,9 @@ def find_flow_hypotheses(conn: sqlite3.Connection) -> list[dict]:
                     "detail": {
                         "entrypoint": entrypoint_detail, "confidence": 0.6, "evidence": evidence,
                         "unknowns": ["The static flow cannot establish whether this GraphQL service is a BFF."],
+                        "remediation": [
+                            "Keep reusable domain policy behind a domain service when this service is a BFF.",
+                        ],
                     },
                 }
             )
@@ -279,6 +293,48 @@ def find_flow_hypotheses(conn: sqlite3.Connection) -> list[dict]:
                     "entrypoint": entrypoint_detail, "confidence": 0.5,
                     "evidence": [writes[0]["evidence"], publishes[0]["evidence"]],
                     "unknowns": ["The static flow cannot prove the runtime transaction scope or broker delivery semantics."],
+                    "remediation": [
+                        "Validate a transactional outbox or equivalent delivery guarantee for this write and publication.",
+                    ],
+                },
+            }
+        )
+    return findings
+
+
+def find_read_entrypoint_side_effects(conn: sqlite3.Connection) -> list[dict]:
+    """Flag source-proven side effects behind read-only transport contracts.
+
+    This is intentionally narrower than a generic controller-to-repository rule:
+    it only observes direct static writes or publications from HTTP safe methods and
+    GraphQL queries. A source fact proves the side effect; whether it is an accepted
+    cache, metric or legacy exception remains explicit for human validation.
+    """
+    findings: list[dict] = []
+    for entrypoint in _direct_entrypoint_operations(conn):
+        is_safe_http = entrypoint["kind"] == "http" and entrypoint["method"] in READ_ENTRYPOINT_METHODS
+        is_graphql_query = entrypoint["kind"] == "graphql" and entrypoint["method"] == "QUERY"
+        if not (is_safe_http or is_graphql_query):
+            continue
+        operations = entrypoint["operations"]
+        findings.append(
+            {
+                "kind": "possible_read_entrypoint_side_effect", "severity": "warning",
+                "services": [entrypoint["service_name"]],
+                "reason": (
+                    "A read-only transport entrypoint directly writes state or publishes an event; "
+                    "validate whether this observable side effect is intentional."
+                ),
+                "detail": {
+                    "entrypoint": _entrypoint_detail(entrypoint), "confidence": 0.8,
+                    "operations": [{"kind": item["kind"], "target": item["target"]} for item in operations],
+                    "evidence": [item["evidence"] for item in operations],
+                    "unknowns": [
+                        "The static flow cannot determine whether the side effect is an approved cache, metric or legacy exception.",
+                    ],
+                    "remediation": [
+                        "Move externally observable writes or publications behind a command entrypoint, or document the exception.",
+                    ],
                 },
             }
         )
@@ -286,7 +342,8 @@ def find_flow_hypotheses(conn: sqlite3.Connection) -> list[dict]:
 
 
 _DETECTORS = (
-    find_cycles, find_fan_imbalance, find_shared_database, find_duplicate_external_integrations, find_flow_hypotheses,
+    find_cycles, find_fan_imbalance, find_shared_database, find_duplicate_external_integrations,
+    find_flow_hypotheses, find_read_entrypoint_side_effects,
 )
 
 

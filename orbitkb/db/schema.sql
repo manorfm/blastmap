@@ -315,11 +315,9 @@ CREATE TABLE IF NOT EXISTS architecture_runs (
 CREATE TABLE IF NOT EXISTS architecture_findings (
     id            INTEGER PRIMARY KEY,
     run_id        INTEGER NOT NULL REFERENCES architecture_runs(id) ON DELETE CASCADE,
-    kind          TEXT NOT NULL CHECK (kind IN (
-        'cycle', 'fan_in', 'fan_out', 'shared_database',
-        'duplicate_external_integration', 'possible_bff_domain_leakage',
-        'possible_non_atomic_publish'
-    )),
+    -- Finding categories evolve with deterministic detectors; a fixed enum would
+    -- force a destructive table rebuild for every new evidence-backed signal.
+    kind          TEXT NOT NULL,
     severity      TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')) DEFAULT 'info',
     services_json TEXT NOT NULL,
     detail_json   TEXT,

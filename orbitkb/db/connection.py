@@ -4,7 +4,7 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 DEFAULT_DB_PATH = Path.home() / ".orbitkb" / "orbitkb.db"
 
 
@@ -40,26 +40,23 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, de
 
 
 def _migrate_architecture_findings_if_needed(conn: sqlite3.Connection) -> None:
-    """Expand the finding-kind constraint without losing historical runs.
+    """Remove the obsolete finding-kind constraint without losing historical runs.
 
     SQLite cannot alter a CHECK constraint in place. The table is intentionally
-    rebuilt only for databases created before flow hypotheses were persisted.
+    rebuilt only for databases whose fixed enum would make new deterministic
+    detectors require a schema migration for every finding category.
     """
     table_sql = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'architecture_findings'"
     ).fetchone()["sql"]
-    if "possible_bff_domain_leakage" in table_sql:
+    if "kind IN (" not in table_sql:
         return
     conn.executescript(
         """
         CREATE TABLE architecture_findings_replacement (
             id            INTEGER PRIMARY KEY,
             run_id        INTEGER NOT NULL REFERENCES architecture_runs(id) ON DELETE CASCADE,
-            kind          TEXT NOT NULL CHECK (kind IN (
-                'cycle', 'fan_in', 'fan_out', 'shared_database',
-                'duplicate_external_integration', 'possible_bff_domain_leakage',
-                'possible_non_atomic_publish'
-            )),
+            kind          TEXT NOT NULL,
             severity      TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')) DEFAULT 'info',
             services_json TEXT NOT NULL,
             detail_json   TEXT,
