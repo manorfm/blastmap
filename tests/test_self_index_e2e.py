@@ -148,8 +148,37 @@ async def test_cli_to_mcp_preserves_a_static_rabbitmq_publication_contract(tmp_p
         result = content_json(await session.call_tool("describe_messages", {"service": "orders-publisher"}))
 
     assert result["static_contracts"] == [{
-        "direction": "publishes", "channel": "orders", "routing_key": "created", "payload_type": None,
+        "direction": "publishes", "exchange": "orders", "routing_key": "created", "payload_type": None,
         "evidence": {"file": "resolvers.ts", "start_line": 2, "end_line": 2},
+    }]
+
+
+@pytest.mark.anyio
+async def test_cli_to_mcp_preserves_a_literal_spring_amqp_publication(tmp_path: Path, fake_backends):
+    root = tmp_path / "publisher"
+    root.mkdir()
+    (root / "OrderPublisher.java").write_text(
+        '''class OrderPublisher {
+  RabbitTemplate publisher;
+  void publish(OrderCreated event) { publisher.convertAndSend("orders", "order.created", event); }
+}
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "publisher.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-publisher", "--stack", "jvm-spring",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = content_json(await session.call_tool("describe_messages", {"service": "orders-publisher"}))
+
+    assert result["static_contracts"] == [{
+        "direction": "publishes", "exchange": "orders", "routing_key": "order.created", "payload_type": "OrderCreated",
+        "evidence": {"file": "OrderPublisher.java", "start_line": 3, "end_line": 3},
     }]
 
 

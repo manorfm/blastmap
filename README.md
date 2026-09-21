@@ -113,7 +113,8 @@ Literal queue declarations can additionally supply `dead_letter_routing_key` and
 When a local RabbitMQ binding proves a queue, exchange and routing key, the consumer
 contract includes its ordered `bindings`; multiple literal bindings remain distinct.
 Publication contracts are persisted separately and returned by `describe_messages`
-as `static_contracts`, including literal channel, routing key and source evidence.
+as `static_contracts`, including literal exchange, routing key, payload type when
+locally declared, and source evidence. Node and Spring AMQP publishers are covered.
 
 `describe_entrypoint` also returns source-proven `boundaries` for branch, async,
 retry, error and transaction constructs reachable in the bounded flow. These are

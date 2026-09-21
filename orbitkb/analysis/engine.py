@@ -233,6 +233,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
             route_prefix = _spring_route_prefix(annotations)
             qualifiers = _qualifiers(annotations)
             primary = "@Primary" in annotations
+            publishers = _spring_amqp_publishers(_text(class_node, source))
             for parameter in (node for node in _walk(class_node) if node.type == "class_parameter"):
                 types = [node for node in _walk(parameter) if node.type == "user_type"]
                 if types:
@@ -252,6 +253,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
                 result.edges.extend(self._edges_for(function, path, root, source))
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
+                result.message_contracts.extend(
+                    _spring_publish_contracts(_text(function_node, source), publishers, path, root, function_node, kotlin=True)
+                )
                 modifiers = next((node for node in function_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
@@ -280,6 +284,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
             route_prefix = _spring_route_prefix(annotations)
             qualifiers = _qualifiers(annotations)
             primary = "@Primary" in annotations
+            publishers = _spring_amqp_publishers(_text(class_node, source))
             for field in (node for node in _walk(class_node) if node.type == "field_declaration"):
                 types = [node for node in _walk(field) if node.type == "type_identifier"]
                 names = [node for node in _walk(field) if node.type == "variable_declarator"]
@@ -301,6 +306,9 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
                 result.edges.extend(self._edges_for(function, path, root, source))
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
+                result.message_contracts.extend(
+                    _spring_publish_contracts(_text(method_node, source), publishers, path, root, method_node)
+                )
                 modifiers = next((node for node in method_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
@@ -541,6 +549,61 @@ def _node_publish_contracts(tree: Node, source: bytes, path: Path, root: Path) -
         if channel:
             contracts.append(MessageContract("publishes", channel, routing_key, None, _evidence(path, root, node)))
     return contracts
+
+
+def _spring_amqp_publishers(class_source: str) -> set[str]:
+    java_fields = re.findall(r"\b(?:RabbitTemplate|AmqpTemplate)\s+(\w+)", class_source)
+    kotlin_properties = re.findall(r"\b(?:val|var)\s+(\w+)\s*:\s*(?:RabbitTemplate|AmqpTemplate)", class_source)
+    return set(java_fields) | set(kotlin_properties)
+
+
+def _spring_publish_contracts(
+    declaration: str,
+    publishers: set[str],
+    path: Path,
+    root: Path,
+    node: Node,
+    *,
+    kotlin: bool = False,
+) -> list[MessageContract]:
+    if not publishers:
+        return []
+    receivers = "|".join(re.escape(name) for name in sorted(publishers))
+    pattern = rf'\b(?:{receivers})\s*\.\s*convertAndSend\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*(\w+)\s*\)'
+    parameter_types = _declared_parameter_types(declaration, kotlin)
+    contracts = []
+    for match in re.finditer(pattern, declaration):
+        exchange, routing_key, payload = match.groups()
+        contracts.append(MessageContract(
+            "publishes", exchange, routing_key, parameter_types.get(payload),
+            _declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+        ))
+    return contracts
+
+
+def _declared_parameter_types(declaration: str, kotlin: bool) -> dict[str, str]:
+    parameters = re.search(r"\((.*?)\)", declaration, re.DOTALL)
+    if parameters is None:
+        return {}
+    if kotlin:
+        return {name: type_name.rstrip("?") for name, type_name in re.findall(r"(\w+)\s*:\s*([\w.<>?]+)", parameters.group(1))}
+    return {
+        name: type_name
+        for type_name, name in re.findall(r"(?:@\w+\s+)*([\w<>?]+)\s+(\w+)", parameters.group(1))
+    }
+
+
+def _declaration_match_evidence(
+    path: Path,
+    root: Path,
+    node: Node,
+    declaration: str,
+    start_offset: int,
+    end_offset: int,
+) -> Evidence:
+    start_line = node.start_point.row + declaration.count("\n", 0, start_offset) + 1
+    end_line = node.start_point.row + declaration.count("\n", 0, end_offset) + 1
+    return Evidence(path.relative_to(root).as_posix(), start_line, end_line)
 
 
 def _java_interfaces(class_text: str) -> tuple[str, ...]:

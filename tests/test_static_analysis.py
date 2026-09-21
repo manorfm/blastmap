@@ -86,6 +86,31 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
     assert [(item.channel, item.routing_key) for item in result.message_contracts] == [("orders", "created")]
 
 
+def test_spring_analyzers_extract_literal_amqp_publications_with_declared_payloads(tmp_path: Path):
+    (tmp_path / "OrderPublisher.java").write_text(
+        '''class OrderPublisher {
+  RabbitTemplate publisher;
+  void publish(OrderCreated event) { publisher.convertAndSend("orders", "order.created", event); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "PaymentPublisher.kt").write_text(
+        '''class PaymentPublisher(private val publisher: AmqpTemplate) {
+  fun publish(event: PaymentCreated) { publisher.convertAndSend("payments", "payment.created", event) }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(item.channel, item.routing_key, item.payload_type) for item in result.message_contracts] == [
+        ("orders", "order.created", "OrderCreated"),
+        ("payments", "payment.created", "PaymentCreated"),
+    ]
+
+
 def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_path: Path):
     source = tmp_path / "consumer.ts"
     source.write_text(

@@ -92,8 +92,9 @@ status and validation tags.
 RabbitMQ consumer contracts use `transport`, `direction`, `queue` and optional
 `payload` fields. Producer calls remain bounded flow evidence until publication
 contracts have their own persisted representation. `describe_messages` now returns
-that representation in `static_contracts`, with channel, routing key, payload type
-when proven, and file/line evidence.
+that representation in `static_contracts`, with exchange, routing key, payload type
+when proven, and file/line evidence. `exchange` is the literal first destination of
+a RabbitMQ publication; the legacy internal storage name is not exposed.
 Matching consumer contracts may include literal `dead_letter_routing_key` and
 `retry_delay_ms` extracted from local queue declarations; missing or dynamic values
 are not represented.
