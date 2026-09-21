@@ -5,6 +5,8 @@ import pytest
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
 
 
 def test_ensure_service_and_overview(tmp_path: Path):
@@ -96,3 +98,32 @@ def test_same_service_name_is_isolated_by_repository(tmp_path: Path):
     assert services_repo.get_service_by_name(conn, "orders", repository_id=fulfillment_id)["id"] == fulfillment_service_id
     with pytest.raises(ValueError, match="ambiguous service: orders; specify repository"):
         services_repo.ensure_service(conn, "orders", "/tmp/orders", "python")
+
+
+def test_internal_call_reconciliation_stays_within_the_callers_repository(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    checkout_id = repositories_repo.ensure_repository(conn, "checkout-repo", "/tmp/checkout-repo")
+    fulfillment_id = repositories_repo.ensure_repository(conn, "fulfillment-repo", "/tmp/fulfillment-repo")
+    checkout_service_id = services_repo.ensure_service(
+        conn, "checkout", "/tmp/checkout-repo/checkout", "python", repository_id=checkout_id,
+    )
+    local_orders_id = services_repo.ensure_service(
+        conn, "orders", "/tmp/checkout-repo/orders", "python", repository_id=checkout_id,
+    )
+    services_repo.ensure_service(
+        conn, "orders", "/tmp/fulfillment-repo/orders", "jvm-spring", repository_id=fulfillment_id,
+    )
+    api_id = apis_repo.upsert_api(conn, checkout_service_id, "POST", "/checkout", "s", "d", [], [])
+
+    service_calls_repo.replace_calls_for_api(
+        conn,
+        checkout_service_id,
+        api_id,
+        [{
+            "to_service_name": "orders", "call_kind": "http", "reason": "create order",
+            "data_needed": [], "purpose_kind": "other", "confidence": 0.9,
+        }],
+        [],
+    )
+
+    assert service_calls_repo.list_calls_for_service(conn, checkout_service_id)[0]["to_service_id"] == local_orders_id

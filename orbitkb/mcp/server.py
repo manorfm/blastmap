@@ -72,31 +72,35 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.describe_service(conn, service, limit, offset, repository)
 
     @mcp.tool()
-    def list_apis(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    def list_apis(
+        service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
+    ) -> dict:
         """One-line summary of every API on one microservice — a thinner view than
         describe_service's own apis list, useful once you already know the service
         and just need the endpoint list. Capped at `limit` items (default 50) starting
         at `offset`; `total`/`truncated` in the response tell you whether to page
-        further. Next: describe_api for a specific one."""
+        further. Pass repository when the service name is duplicated. Next: describe_api for a specific one."""
         with closing(_conn()) as conn:
-            return queries.list_apis(conn, service, limit, offset)
+            return queries.list_apis(conn, service, limit, offset, repository)
 
     @mcp.tool()
-    def describe_api(service: str, method: str, path: str) -> dict:
+    def describe_api(service: str, method: str, path: str, repository: str | None = None) -> dict:
         """The most detailed level for one API: response shape field by field, its
         calls to other services/queues (business reason + exact data needed), and
         validation/authorization rules. Call this once you know exactly which
-        endpoint a change touches and need its full contract before editing it."""
+        endpoint a change touches and need its full contract before editing it. Pass repository when needed."""
         with closing(_conn()) as conn:
-            return queries.describe_api(conn, service, method, path)
+            return queries.describe_api(conn, service, method, path, repository)
 
     @mcp.tool()
-    def list_entrypoints(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    def list_entrypoints(
+        service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
+    ) -> dict:
         """List HTTP, GraphQL, message, CLI and job entrypoints for one service.
         Call this after describe_service when an agent needs to select one narrow flow.
-        Next: describe_entrypoint on the relevant item; responses are paginated."""
+        Next: describe_entrypoint on the relevant item; responses are paginated. Pass repository when needed."""
         with closing(_conn()) as conn:
-            return queries.list_entrypoints(conn, service, limit, offset)
+            return queries.list_entrypoints(conn, service, limit, offset, repository)
 
     @mcp.tool()
     def describe_entrypoint(
@@ -105,6 +109,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         method: str,
         name: str,
         max_edges: int = queries.DEFAULT_FLOW_EDGE_LIMIT,
+        repository: str | None = None,
     ) -> dict:
         """Return one entrypoint plus its deterministic local flow: invocations,
         validation, reads/writes and messages, each with evidence and provenance.
@@ -113,30 +118,34 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         agent context; `flow_pagination.truncated` tells the caller to ask again with
         a larger budget. This is the preferred narrow context primitive before reading source files."""
         with closing(_conn()) as conn:
-            return queries.describe_entrypoint(conn, service, kind, method, name, max_edges)
+            return queries.describe_entrypoint(conn, service, kind, method, name, max_edges, repository)
 
     @mcp.tool()
-    def list_security_findings(service: str) -> dict:
+    def list_security_findings(service: str, repository: str | None = None) -> dict:
         """List deterministic security findings for one service. Values of secrets and
         source excerpts are never returned. Use this before planning a change that
-        touches configuration, credentials or an external integration."""
+        touches configuration, credentials or an external integration. Pass repository when needed."""
         with closing(_conn()) as conn:
-            return queries.list_security_findings(conn, service)
+            return queries.list_security_findings(conn, service, repository)
 
     @mcp.tool()
-    def describe_persistence(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    def describe_persistence(
+        service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
+    ) -> dict:
         """Full field-level schema of everything one microservice persists (tables/
         documents/caches), including the concrete engine (postgres/mysql/mongodb/
         cassandra/dynamodb/redis/elasticsearch/sqlite/unknown) — describe_service only names
         these, this returns the actual fields. Capped at `limit` entities (default 50)
         starting at `offset`; `total`/`truncated` tell you whether to page further.
         Call this before changing anything that reads or writes this service's
-        storage."""
+        storage. Pass repository when the service name is duplicated."""
         with closing(_conn()) as conn:
-            return queries.describe_persistence(conn, service, limit, offset)
+            return queries.describe_persistence(conn, service, limit, offset, repository)
 
     @mcp.tool()
-    def describe_messages(service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    def describe_messages(
+        service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
+    ) -> dict:
         """Full field-level shape of async messages one microservice publishes/
         consumes, including the concrete broker (kafka/rabbitmq/sqs/sns/service_bus/
         activemq/nats/unknown) — describe_service only names the channels, this
@@ -144,43 +153,52 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         starting at `offset`; `total`/`truncated` tell you whether to page further.
         Call this before changing an event's contract; then check
         get_relationships/find_change_surface's contracts_at_risk for who else
-        consumes it."""
+        consumes it. Pass repository when the service name is duplicated."""
         with closing(_conn()) as conn:
-            return queries.describe_messages(conn, service, limit, offset)
+            return queries.describe_messages(conn, service, limit, offset, repository)
 
     @mcp.tool()
-    def search(query: str) -> dict:
+    def search(query: str, repository: str | None = None) -> dict:
         """Keyword search across services, APIs, persistence entities and message
-        relationships (SQLite FTS5, not semantic). Call this when you don't know
+        relationships (SQLite FTS5, not semantic). Optionally pass repository to
+        scope a cumulative KB. Call this when you don't know
         which service/API a keyword belongs to. Next: describe_service or
         describe_api on whatever it turns up."""
         with closing(_conn()) as conn:
-            return queries.search(conn, query)
+            return queries.search(conn, query, repository)
 
     @mcp.tool()
-    def get_relationships(service: str, direction: str = "both") -> dict:
+    def get_relationships(service: str, direction: str = "both", repository: str | None = None) -> dict:
         """Graph of edges around one service: outbound calls it makes, inbound calls other
         services make into it ('who depends on me'), and queue/topic links inferred from
         matching publish/consume channel names. direction: 'outbound', 'inbound' or 'both'.
         Each edge carries its business reason, confidence, provenance (llm vs.
         deterministic) and evidence (file/line) when known — this is the navigation
         primitive behind find_change_surface. Call this once you know a service and
-        want its immediate neighborhood. Next: trace_flow if the service you're
+        want its immediate neighborhood. Pass repository when the service name is
+        duplicated. Next: trace_flow if the service you're
         looking for isn't a direct neighbor, or describe_api on a specific edge's API."""
         with closing(_conn()) as conn:
-            return queries.get_relationships(conn, service, direction)
+            return queries.get_relationships(conn, service, direction, repository)
 
     @mcp.tool()
-    def trace_flow(from_service: str, to_service: str, max_hops: int = 6) -> dict:
+    def trace_flow(
+        from_service: str,
+        to_service: str,
+        max_hops: int = 6,
+        from_repository: str | None = None,
+        to_repository: str | None = None,
+    ) -> dict:
         """Shortest path connecting two services, walking outbound calls and
         publish->consume message links (the multi-hop counterpart to
         get_relationships' single hop). Use this when you know two services are
         related but not how — e.g. 'does checkout-service's request ever reach
         ledger-service, and through what?'. Each hop carries its business reason and
-        evidence when known. Next: describe_api/describe_messages on the hop that
-        looks most relevant to your change."""
+        evidence when known. Pass from_repository and to_repository independently
+        when either endpoint name is duplicated. Next: describe_api/describe_messages
+        on the hop that looks most relevant to your change."""
         with closing(_conn()) as conn:
-            return queries.trace_flow(conn, from_service, to_service, max_hops)
+            return queries.trace_flow(conn, from_service, to_service, max_hops, from_repository, to_repository)
 
     @mcp.tool()
     def find_architecture_smells() -> dict:
@@ -209,7 +227,9 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.find_architecture_smells(conn)
 
     @mcp.tool()
-    def find_change_surface(task: str, hint_services: list[str] | None = None) -> dict:
+    def find_change_surface(
+        task: str, hint_services: list[str] | None = None, repository: str | None = None,
+    ) -> dict:
         """Given a business task/epic description, find which indexed services likely
         need code changes — WITHOUT reading any source file. Call this FIRST when handed
         an epic, before exploring the codebase. Returns primary/secondary/no_change_hint
@@ -233,6 +253,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         cost; prefer it over exploring blindly. This is a task-specific inference,
         not a verified fact — treat it as a starting point, not ground truth. Pass
         hint_services if you already suspect specific services, to anchor the search.
+        If the KB contains duplicate service names, repository is required and scopes
+        retrieval, the generated context and recommended next calls to that repository.
         The response includes a run_id — pass it to record_change_surface_feedback once
         you know whether the findings were actually right, to improve future confidence
         for this service. run_cost_usd reports this call's own LLM cost when the
@@ -245,7 +267,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         self-reported outcomes, or 'no feedback yet') — historical precedent for
         whether a similarly-worded task actually panned out."""
         with closing(_conn()) as conn:
-            return queries.find_change_surface(conn, resolved_backend, task, hint_services)
+            return queries.find_change_surface(conn, resolved_backend, task, hint_services, repository)
 
     @mcp.tool()
     def record_change_surface_feedback(run_id: int, service: str, outcome: str) -> dict:

@@ -30,30 +30,38 @@ class NextQueryRecommender:
         primary: list[str],
         secondary: list[str],
         unmapped_internal_hint: list[dict],
+        repository_id: int | None = None,
     ) -> list[dict]:
         recs: list[dict] = []
         for service_name in [*primary, *secondary]:
-            recs.extend(self._recommendations_for_service(conn, service_name))
+            recs.extend(self._recommendations_for_service(conn, service_name, repository_id))
         recs.extend(self._recommendations_for_unmapped(unmapped_internal_hint))
         return recs[: self._max_recommendations]
 
-    def _recommendations_for_service(self, conn: sqlite3.Connection, service_name: str) -> list[dict]:
-        row = services_repo.get_service_by_name(conn, service_name)
+    def _recommendations_for_service(
+        self, conn: sqlite3.Connection, service_name: str, repository_id: int | None,
+    ) -> list[dict]:
+        row = services_repo.get_service_by_name(conn, service_name, repository_id=repository_id)
         if row is None:
             return []
         recs: list[dict] = []
+        service_arguments = {"service": service_name}
+        if row["repository_name"] is not None:
+            service_arguments["repository"] = row["repository_name"]
         apis = apis_repo.list_apis(conn, row["id"])
         if apis:
             first = apis[0]
             recs.append({
                 "tool": "describe_api",
-                "arguments": {"service": service_name, "method": first["method"], "path": first["path"]},
+                "arguments": {
+                    **service_arguments, "method": first["method"], "path": first["path"],
+                },
                 "reason": "relevant service — inspect its API contract before changing it.",
             })
         if messages_repo.list_messages(conn, row["id"]):
             recs.append({
                 "tool": "describe_messages",
-                "arguments": {"service": service_name},
+                "arguments": service_arguments,
                 "reason": "publishes or consumes messages that may need to change too.",
             })
         return recs

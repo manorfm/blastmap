@@ -849,6 +849,10 @@ func register() { router.POST("/fulfillment/orders", Create) }
         selected = content_json(await session.call_tool("describe_service", {
             "service": "orders", "repository": "fulfillment-repo",
         }))
+        ambiguous_apis = content_json(await session.call_tool("list_apis", {"service": "orders"}))
+        selected_apis = content_json(await session.call_tool("list_apis", {
+            "service": "orders", "repository": "fulfillment-repo",
+        }))
 
     assert [(service["name"], service["repository"]) for service in listed["services"]] == [
         ("orders", "checkout-repo"),
@@ -859,3 +863,5 @@ func register() { router.POST("/fulfillment/orders", Create) }
     }
     assert selected["repository"] == "fulfillment-repo"
     assert selected["name"] == "orders"
+    assert ambiguous_apis["error"] == "ambiguous service: orders; specify repository"
+    assert selected_apis["repository"] == "fulfillment-repo"

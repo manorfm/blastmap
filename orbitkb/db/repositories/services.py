@@ -26,7 +26,11 @@ def get_service_by_name(
 
 
 def get_service_by_id(conn: sqlite3.Connection, service_id: int) -> sqlite3.Row | None:
-    return conn.execute("SELECT * FROM services WHERE id = ?", (service_id,)).fetchone()
+    return conn.execute(
+        "SELECT s.*, r.name AS repository_name FROM services s "
+        "LEFT JOIN repositories r ON r.id = s.repository_id WHERE s.id = ?",
+        (service_id,),
+    ).fetchone()
 
 
 def ensure_service(
@@ -87,6 +91,16 @@ def list_service_candidates_by_name(conn: sqlite3.Connection, name: str) -> list
         "LEFT JOIN repositories r ON r.id = s.repository_id WHERE s.name = ? ORDER BY r.name",
         (name,),
     ).fetchall()
+
+
+def list_duplicate_service_names(conn: sqlite3.Connection) -> list[str]:
+    """Names requiring an explicit repository qualifier in cumulative tools."""
+    return [
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM services GROUP BY name HAVING COUNT(*) > 1 ORDER BY name"
+        ).fetchall()
+    ]
 
 
 def list_services_for_repository(conn: sqlite3.Connection, repository_id: int) -> list[sqlite3.Row]:

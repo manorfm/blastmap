@@ -300,6 +300,35 @@ def test_analyze_command_accepts_hint_services(tmp_path: Path, capsys, monkeypat
     assert fake.calls == 1
 
 
+def test_analyze_requires_repository_scope_for_duplicate_service_names(tmp_path: Path, capsys, monkeypatch):
+    import json
+
+    from tests.test_change_surface import FakeBackend
+
+    db_path = tmp_path / "duplicate-services.db"
+    conn = open_db(db_path)
+    checkout_id = repositories_repo.ensure_repository(conn, "checkout-repo", "/tmp/checkout-repo")
+    fulfillment_id = repositories_repo.ensure_repository(conn, "fulfillment-repo", "/tmp/fulfillment-repo")
+    services_repo.ensure_service(conn, "orders", "/tmp/checkout-repo/orders", "go", repository_id=checkout_id)
+    services_repo.ensure_service(conn, "orders", "/tmp/fulfillment-repo/orders", "jvm-spring", repository_id=fulfillment_id)
+    fake = FakeBackend({
+        "primary": [{"service": "orders", "reason": "scoped", "confidence": 0.8}],
+        "secondary": [], "no_change": [],
+    })
+    monkeypatch.setattr(cli, "resolve_backend", lambda *a, **kw: fake)
+
+    ambiguous_exit = cli.main(["analyze", "orders change", "--db", str(db_path)])
+    scoped_exit = cli.main([
+        "analyze", "orders change", "--repository", "checkout-repo", "--hint-services", "orders", "--db", str(db_path),
+    ])
+
+    captured = capsys.readouterr()
+    assert ambiguous_exit == 1
+    assert "ambiguous service identities; specify repository" in captured.err
+    assert scoped_exit == 0
+    assert json.loads(captured.out)["scope"] == {"repository": "checkout-repo"}
+
+
 def test_main_dispatches_to_list_command(tmp_path: Path, capsys):
     db_path = tmp_path / "test.db"
     open_db(db_path)

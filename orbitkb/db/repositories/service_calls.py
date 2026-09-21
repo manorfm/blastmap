@@ -43,9 +43,10 @@ def replace_calls_for_api(
 
 
 def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | None = None) -> None:
-    """Resolve to_service_id by exact name match, then refine target_kind:
+    """Resolve to_service_id by exact name within the caller's repository, then refine target_kind:
 
-    - Ground truth wins: any call that resolves to a real indexed service is
+    - Ground truth wins: any call that resolves to a real indexed service in the
+      same repository is
       'internal', full stop, overriding whatever the LLM guessed earlier.
     - For calls that stay unresolved and whose target_kind is still 'unknown' (the
       LLM couldn't tell from the code alone), fall back to the deterministic
@@ -71,9 +72,19 @@ def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | N
         conn.execute(
             """
             UPDATE service_calls
-            SET to_service_id = (SELECT id FROM services WHERE services.name = service_calls.to_service_name)
+            SET to_service_id = (
+                SELECT target.id FROM services target
+                JOIN services source ON source.id = service_calls.from_service_id
+                WHERE target.name = service_calls.to_service_name
+                  AND target.repository_id IS source.repository_id
+            )
             WHERE (to_service_id IS NULL
-               OR to_service_id != (SELECT id FROM services WHERE services.name = service_calls.to_service_name))
+               OR to_service_id != (
+                    SELECT target.id FROM services target
+                    JOIN services source ON source.id = service_calls.from_service_id
+                    WHERE target.name = service_calls.to_service_name
+                      AND target.repository_id IS source.repository_id
+               ))
                AND from_service_id = ?
             """,
             scope_params,
@@ -87,9 +98,19 @@ def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | N
         conn.execute(
             """
             UPDATE service_calls
-            SET to_service_id = (SELECT id FROM services WHERE services.name = service_calls.to_service_name)
+            SET to_service_id = (
+                SELECT target.id FROM services target
+                JOIN services source ON source.id = service_calls.from_service_id
+                WHERE target.name = service_calls.to_service_name
+                  AND target.repository_id IS source.repository_id
+            )
             WHERE (to_service_id IS NULL
-               OR to_service_id != (SELECT id FROM services WHERE services.name = service_calls.to_service_name))
+               OR to_service_id != (
+                    SELECT target.id FROM services target
+                    JOIN services source ON source.id = service_calls.from_service_id
+                    WHERE target.name = service_calls.to_service_name
+                      AND target.repository_id IS source.repository_id
+               ))
             """
         )
         conn.execute("UPDATE service_calls SET target_kind = 'internal' WHERE to_service_id IS NOT NULL")
@@ -134,7 +155,7 @@ def reconcile_service_call_targets(conn: sqlite3.Connection, service_id: int | N
 
 def list_calls_for_service(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT to_service_name, call_kind, reason, data_needed, purpose_kind, confidence,
+        """SELECT to_service_id, to_service_name, call_kind, reason, data_needed, purpose_kind, confidence,
                   target_kind, resource_type, evidence_json
            FROM service_calls WHERE from_service_id = ? ORDER BY to_service_name""",
         (service_id,),

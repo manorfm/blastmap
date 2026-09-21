@@ -311,9 +311,11 @@ Knowledge is cumulative by nature: you can index one repository at a time
 — the same SQLite database accumulates both cases. A service identity is its
 repository plus its name, so same-named services remain separate. `list_services`
 returns the repository for every result and accepts an optional repository filter;
-pass that repository to `describe_service` whenever a name is ambiguous.
-`find_change_surface`/`search` always see everything indexed so far, not just the
-last repository indexed.
+pass that repository to every service-scoped MCP tool (`describe_service`, API,
+entrypoint, persistence, message, security, relationship and flow tools) whenever a
+name is ambiguous. `find_change_surface` and `orbitkb analyze` require
+`repository`/`--repository` in that situation and then constrain retrieval to that
+repository; `search` results also include the owning repository.
 
 ## MCP response format
 

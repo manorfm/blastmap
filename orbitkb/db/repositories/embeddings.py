@@ -27,7 +27,7 @@ def upsert_service_embedding(conn: sqlite3.Connection, service_id: int, model_na
 
 def get_all_service_embeddings(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT se.service_id, se.vector_json, s.name AS service_name
+        """SELECT se.service_id, se.vector_json, s.name AS service_name, s.repository_id
            FROM service_embeddings se JOIN services s ON s.id = se.service_id"""
     ).fetchall()
 

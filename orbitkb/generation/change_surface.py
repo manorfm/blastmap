@@ -123,11 +123,13 @@ class ChangeSurfaceBuilder:
         return result
 
 
-def _build_context(conn: sqlite3.Connection, candidates: list[str]) -> tuple[str, dict[str, list[dict]]]:
+def _build_context(
+    conn: sqlite3.Connection, candidates: list[str], repository_id: int | None = None,
+) -> tuple[str, dict[str, list[dict]]]:
     blocks: list[str] = []
     evidence_by_service: dict[str, list[dict]] = {}
     for name in candidates:
-        row = services_repo.get_service_by_name(conn, name)
+        row = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
         evidence: list[dict] = []
 
         apis = apis_repo.list_apis(conn, row["id"])[:MAX_LISTED_PER_SERVICE]
@@ -203,10 +205,10 @@ def _filter_known(
     return out
 
 
-def _derive_flow(conn: sqlite3.Connection, service_names: set[str]) -> list[dict]:
+def _derive_flow(conn: sqlite3.Connection, service_names: set[str], repository_id: int | None = None) -> list[dict]:
     flow = []
     for name in service_names:
-        row = services_repo.get_service_by_name(conn, name)
+        row = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
         if row is None:
             continue
         for c in service_calls_repo.list_calls_for_service(conn, row["id"]):
@@ -215,7 +217,9 @@ def _derive_flow(conn: sqlite3.Connection, service_names: set[str]) -> list[dict
     return flow
 
 
-def _derive_dependency_hints(conn: sqlite3.Connection, service_names: set[str], lister) -> list[dict]:
+def _derive_dependency_hints(
+    conn: sqlite3.Connection, service_names: set[str], lister, repository_id: int | None = None,
+) -> list[dict]:
     """Shared shape for external_integrations/unmapped_internal_hint: both are just
     'this relevant service's outbound calls of one target_kind', attributed back to
     which service they came from. Computed purely from already-classified
@@ -223,7 +227,7 @@ def _derive_dependency_hints(conn: sqlite3.Connection, service_names: set[str], 
     """
     out: list[dict] = []
     for name in sorted(service_names):
-        row = services_repo.get_service_by_name(conn, name)
+        row = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
         if row is None:
             continue
         for c in lister(conn, row["id"]):
@@ -239,17 +243,21 @@ def _derive_dependency_hints(conn: sqlite3.Connection, service_names: set[str], 
     return out
 
 
-def _compute_freshness_for(conn: sqlite3.Connection, service_names: set[str]) -> dict[str, dict]:
+def _compute_freshness_for(
+    conn: sqlite3.Connection, service_names: set[str], repository_id: int | None = None,
+) -> dict[str, dict]:
     freshness: dict[str, dict] = {}
     for name in service_names:
-        row = services_repo.get_service_by_name(conn, name)
+        row = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
         if row is None:
             continue
         freshness[name] = compute_freshness(row["updated_at"], row["last_commit"], row["root_path"])
     return freshness
 
 
-def _derive_contracts_at_risk(conn: sqlite3.Connection, service_names: set[str]) -> list[dict]:
+def _derive_contracts_at_risk(
+    conn: sqlite3.Connection, service_names: set[str], repository_id: int | None = None,
+) -> list[dict]:
     """Events published by a relevant service, and every other indexed service that
     consumes them — reuses the same publish<->consume channel-name join as
     get_relationships/trace_flow (messages_repo.list_message_links), just grouped by
@@ -258,7 +266,7 @@ def _derive_contracts_at_risk(conn: sqlite3.Connection, service_names: set[str])
     """
     contracts: dict[str, dict] = {}
     for name in sorted(service_names):
-        row = services_repo.get_service_by_name(conn, name)
+        row = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
         if row is None:
             continue
         published = {m["channel"]: m for m in messages_repo.list_messages(conn, row["id"]) if m["direction"] == "publishes"}
@@ -282,14 +290,16 @@ def _derive_contracts_at_risk(conn: sqlite3.Connection, service_names: set[str])
     return list(contracts.values())
 
 
-def _derive_persistence_for(conn: sqlite3.Connection, service_names: set[str]) -> list[dict]:
+def _derive_persistence_for(
+    conn: sqlite3.Connection, service_names: set[str], repository_id: int | None = None,
+) -> list[dict]:
     """What each relevant service persists — a direct read of persistence_entities,
     no LLM cost. Tells an agent what storage a change might also need to touch
     without a separate describe_persistence round trip for the obvious cases.
     """
     out: list[dict] = []
     for name in sorted(service_names):
-        row = services_repo.get_service_by_name(conn, name)
+        row = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
         if row is None:
             continue
         for p in persistence_repo.list_persistence(conn, row["id"]):
@@ -405,17 +415,18 @@ def analyze_change_surface(
     hint_services: list[str] | None = None,
     max_candidates: int = MAX_CANDIDATES,
     retrieval: CandidateRetrieval | None = None,
+    repository_id: int | None = None,
 ) -> dict:
     embedding_backend = embeddings.try_create_default_backend()
     retrieval = retrieval or _default_retrieval(embedding_backend)
-    candidates = retrieval.candidates(conn, task, hint_services, max_candidates)
+    candidates = retrieval.candidates(conn, task, hint_services, max_candidates, repository_id)
     if not candidates:
         note = "no indexed service matched this task; pass hint_services or index more of the system"
         suggestion = "pass hint_services or index more of the system"
         unknown = {"status": "unknown", "reason": "no indexed service matched this task", "suggestion": suggestion}
         return ChangeSurfaceBuilder().with_note(note).with_unknowns([unknown]).build()
 
-    candidates_block, evidence_by_service = _build_context(conn, candidates)
+    candidates_block, evidence_by_service = _build_context(conn, candidates, repository_id)
     prompt = _render_prompt(task, candidates_block)
     schema = load_schema("change_surface")
     failures_dir = Path.home() / ".orbitkb" / "failures"
@@ -433,9 +444,13 @@ def analyze_change_surface(
     primary_names = [f["service"] for f in primary]
     secondary_names = [f["service"] for f in secondary]
     relevant = set(primary_names) | set(secondary_names)
-    unmapped_internal_hint = _derive_dependency_hints(conn, relevant, service_calls_repo.list_unmapped_internal_calls)
-    next_queries = NextQueryRecommender().recommend(conn, primary_names, secondary_names, unmapped_internal_hint)
-    freshness = _compute_freshness_for(conn, relevant)
+    unmapped_internal_hint = _derive_dependency_hints(
+        conn, relevant, service_calls_repo.list_unmapped_internal_calls, repository_id,
+    )
+    next_queries = NextQueryRecommender().recommend(
+        conn, primary_names, secondary_names, unmapped_internal_hint, repository_id,
+    )
+    freshness = _compute_freshness_for(conn, relevant, repository_id)
     unknowns = _derive_unknowns_from_unmapped(unmapped_internal_hint) + _derive_stale_unknowns(freshness)
 
     # Computed once here (not inside the Builder) so the SAME vector is both looked
@@ -447,11 +462,13 @@ def analyze_change_surface(
     response = (
         ChangeSurfaceBuilder()
         .with_findings(primary, secondary, no_change)
-        .with_flow(_derive_flow(conn, relevant))
-        .with_external_integrations(_derive_dependency_hints(conn, relevant, service_calls_repo.list_external_integration_calls))
+        .with_flow(_derive_flow(conn, relevant, repository_id))
+        .with_external_integrations(_derive_dependency_hints(
+            conn, relevant, service_calls_repo.list_external_integration_calls, repository_id,
+        ))
         .with_unmapped_internal_hint(unmapped_internal_hint)
-        .with_contracts_at_risk(_derive_contracts_at_risk(conn, relevant))
-        .with_persistence_affected(_derive_persistence_for(conn, relevant))
+        .with_contracts_at_risk(_derive_contracts_at_risk(conn, relevant, repository_id))
+        .with_persistence_affected(_derive_persistence_for(conn, relevant, repository_id))
         .with_freshness(freshness)
         .with_unknowns(unknowns)
         .with_recommended_next_queries(next_queries)

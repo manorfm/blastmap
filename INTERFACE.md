@@ -8,15 +8,25 @@ question.
 ## Cumulative service identity
 
 A service is identified by `(repository, name)`, not by its name alone. Every
-`list_services` item includes `repository`, and the tool accepts an optional
-`repository` filter. `describe_service(service, repository?)` returns an ambiguity
-error with the candidate repository names when the unqualified service name is not
-unique; agents must then pass one of those names. This prevents a cumulative KB from
-silently mixing two independently indexed services named, for example, `orders`.
+`list_services` item and `search` result includes `repository`; both tools accept an
+optional `repository` filter. Every service-scoped tool accepts optional
+`repository`: `describe_service`, `list_apis`, `describe_api`, `list_entrypoints`,
+`describe_entrypoint`, `describe_persistence`, `describe_messages`,
+`list_security_findings` and `get_relationships`. An unqualified duplicate returns
+an ambiguity error with candidate repository names; agents must pass one of them.
+`trace_flow` independently accepts `from_repository` and `to_repository`.
+
+`find_change_surface(task, hint_services?, repository?)` and `orbitkb analyze`
+refuse a global analysis when duplicate service names exist, because a name-only
+candidate would be unsafe. Pass `repository` (or CLI `--repository`) to scope
+retrieval, generated context and recommended follow-up calls to one repository.
+This prevents a cumulative KB from silently mixing two independently indexed
+services named, for example, `orders`.
 
 ## Agent workflow
 
-1. Call `find_change_surface(task)` for an epic.
+1. Call `find_change_surface(task, repository?)` for an epic; provide the repository
+   whenever the KB reports duplicate service identities.
 2. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
 3. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job

@@ -161,30 +161,35 @@ def describe_service(
     }
 
 
-def list_apis(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+def list_apis(
+    conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
+    repository: str | None = None,
+) -> dict:
     error = _validate_pagination(limit, offset)
     if error:
         return {"error": error}
-    row = services_repo.get_service_by_name(conn, service)
-    if row is None:
-        return {"error": f"unknown service: {service}"}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
     apis, page = _paginate(apis_repo.list_apis(conn, row["id"]), limit, offset)
     return {
+        "service": row["name"], "repository": row["repository_name"],
         "apis": [{"method": a["method"], "path": a["path"], "summary": a["summary"]} for a in apis],
         **page,
     }
 
 
-def describe_api(conn: sqlite3.Connection, service: str, method: str, path: str) -> dict:
-    row = services_repo.get_service_by_name(conn, service)
-    if row is None:
-        return {"error": f"unknown service: {service}"}
+def describe_api(conn: sqlite3.Connection, service: str, method: str, path: str, repository: str | None = None) -> dict:
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
     api = apis_repo.get_api_by_key(conn, row["id"], method.upper(), path)
     if api is None:
         return {"error": f"unknown api: {method} {path} on {service}"}
     calls = service_calls_repo.list_calls_for_api(conn, api["id"])
     validations = apis_repo.list_validations_for_api(conn, api["id"])
     return {
+        "service": row["name"], "repository": row["repository_name"],
         "method": api["method"],
         "path": api["path"],
         "summary": api["summary"],
@@ -196,17 +201,20 @@ def describe_api(conn: sqlite3.Connection, service: str, method: str, path: str)
     }
 
 
-def list_entrypoints(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+def list_entrypoints(
+    conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
+    repository: str | None = None,
+) -> dict:
     """List every transport entry into a service without loading its flow bodies."""
     error = _validate_pagination(limit, offset)
     if error:
         return {"error": error}
-    row = services_repo.get_service_by_name(conn, service)
-    if row is None:
-        return {"error": f"unknown service: {service}"}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
     entrypoints, page = _paginate(flows_repo.list_entrypoints(conn, row["id"]), limit, offset)
     return {
-        "entrypoints": [
+        "service": row["name"], "repository": row["repository_name"], "entrypoints": [
             {
                 "kind": entry["kind"], "method": entry["method"], "name": entry["name"],
                 "symbol": entry["symbol"], "evidence": {
@@ -219,13 +227,13 @@ def list_entrypoints(conn: sqlite3.Connection, service: str, limit: int = DEFAUL
     }
 
 
-def list_security_findings(conn: sqlite3.Connection, service: str) -> dict:
+def list_security_findings(conn: sqlite3.Connection, service: str, repository: str | None = None) -> dict:
     """Return security findings without exposing source excerpts or secret values."""
-    row = services_repo.get_service_by_name(conn, service)
-    if row is None:
-        return {"error": f"unknown service: {service}"}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
     return {
-        "findings": [
+        "service": row["name"], "repository": row["repository_name"], "findings": [
             {"kind": item["kind"], "severity": item["severity"], "file": item["file_path"], "line": item["line"], "reason": item["reason"]}
             for item in security_findings_repo.list_findings(conn, row["id"])
         ]
@@ -239,13 +247,14 @@ def describe_entrypoint(
     method: str,
     name: str,
     max_edges: int = DEFAULT_FLOW_EDGE_LIMIT,
+    repository: str | None = None,
 ) -> dict:
     """Return a compact deterministic flow for one HTTP, GraphQL, message or CLI entrypoint."""
     if max_edges < 1:
         return {"error": f"max_edges must be >= 1 (got {max_edges})"}
-    row = services_repo.get_service_by_name(conn, service)
-    if row is None:
-        return {"error": f"unknown service: {service}"}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
     entrypoint = flows_repo.get_entrypoint(conn, row["id"], kind, method, name)
     if entrypoint is None:
         return {"error": f"unknown entrypoint: {kind} {method} {name} on {service}"}
@@ -255,6 +264,7 @@ def describe_entrypoint(
     edges = bounded_edges[:effective_max_edges]
     flow_symbols = {entrypoint["symbol"]} | {edge["from_symbol"] for edge in edges} | {edge["to_symbol"] for edge in edges}
     return {
+        "service": row["name"], "repository": row["repository_name"],
         "entrypoint": {
             "kind": entrypoint["kind"], "method": entrypoint["method"], "name": entrypoint["name"],
             "symbol": entrypoint["symbol"], "evidence": {
@@ -291,16 +301,19 @@ def describe_entrypoint(
     }
 
 
-def describe_persistence(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+def describe_persistence(
+    conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
+    repository: str | None = None,
+) -> dict:
     error = _validate_pagination(limit, offset)
     if error:
         return {"error": error}
-    row = services_repo.get_service_by_name(conn, service)
-    if row is None:
-        return {"error": f"unknown service: {service}"}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
     entities, page = _paginate(persistence_repo.list_persistence(conn, row["id"]), limit, offset)
     return {
-        "entities": [
+        "service": row["name"], "repository": row["repository_name"], "entities": [
             {
                 "name": e["name"], "kind": e["kind"], "engine": e["engine"],
                 "schema_json": json.loads(e["schema_json"] or "[]"),
@@ -317,16 +330,19 @@ def describe_persistence(conn: sqlite3.Connection, service: str, limit: int = DE
     }
 
 
-def describe_messages(conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+def describe_messages(
+    conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
+    repository: str | None = None,
+) -> dict:
     error = _validate_pagination(limit, offset)
     if error:
         return {"error": error}
-    row = services_repo.get_service_by_name(conn, service)
-    if row is None:
-        return {"error": f"unknown service: {service}"}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
     messages, page = _paginate(messages_repo.list_messages(conn, row["id"]), limit, offset)
     return {
-        "messages": [
+        "service": row["name"], "repository": row["repository_name"], "messages": [
             {
                 "direction": m["direction"],
                 "channel": m["channel"],
@@ -348,8 +364,14 @@ def describe_messages(conn: sqlite3.Connection, service: str, limit: int = DEFAU
     }
 
 
-def search(conn: sqlite3.Connection, query: str) -> dict:
-    return {"results": search_repo.search(conn, query)}
+def search(conn: sqlite3.Connection, query: str, repository: str | None = None) -> dict:
+    repository_id = None
+    if repository is not None:
+        repo = repositories_repo.get_repository_by_name(conn, repository)
+        if repo is None:
+            return {"error": f"unknown repository: {repository}"}
+        repository_id = repo["id"]
+    return {"results": search_repo.search(conn, query, repository_id=repository_id)}
 
 
 def _fmt_relationship_call(c: sqlite3.Row, *, direction: str, other_key: str, other_value: str) -> dict:
@@ -380,13 +402,15 @@ def _fmt_message_link(link: sqlite3.Row) -> dict:
     }
 
 
-def get_relationships(conn: sqlite3.Connection, service: str, direction: str = "both") -> dict:
+def get_relationships(
+    conn: sqlite3.Connection, service: str, direction: str = "both", repository: str | None = None,
+) -> dict:
     """Fact + semantic-interpretation edges around one service: outbound calls it
     makes, inbound calls other services make into it, and queue/topic links inferred
     from matching publish/consume channel names."""
-    row = services_repo.get_service_by_name(conn, service)
-    if row is None:
-        return {"error": f"unknown service: {service}"}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
 
     relationships: list[dict] = []
     if direction in ("outbound", "both"):
@@ -405,7 +429,7 @@ def get_relationships(conn: sqlite3.Connection, service: str, direction: str = "
         if direction == "both" or (direction == "outbound" and local_is_outbound) or (direction == "inbound" and not local_is_outbound):
             relationships.append(_fmt_message_link(link))
 
-    return {"service": service, "relationships": relationships}
+    return {"service": row["name"], "repository": row["repository_name"], "relationships": relationships}
 
 
 def _outgoing_edges(conn: sqlite3.Connection, service_row: sqlite3.Row) -> list[dict]:
@@ -413,6 +437,7 @@ def _outgoing_edges(conn: sqlite3.Connection, service_row: sqlite3.Row) -> list[
     for c in service_calls_repo.list_calls_for_service(conn, service_row["id"]):
         edges.append(
             {
+                "to_service_id": c["to_service_id"],
                 "to": c["to_service_name"],
                 "type": c["call_kind"].upper(),
                 "reason": c["reason"],
@@ -434,33 +459,49 @@ def _outgoing_edges(conn: sqlite3.Connection, service_row: sqlite3.Row) -> list[
     return edges
 
 
-def trace_flow(conn: sqlite3.Connection, from_service: str, to_service: str, max_hops: int = 6) -> dict:
+def trace_flow(
+    conn: sqlite3.Connection,
+    from_service: str,
+    to_service: str,
+    max_hops: int = 6,
+    from_repository: str | None = None,
+    to_repository: str | None = None,
+) -> dict:
     """Shortest directed path from one service to another, walking outbound calls and
     publish->consume message links — the multi-hop counterpart to get_relationships'
     single hop. Facts + semantic reasons per hop, same as get_relationships."""
-    from_row = services_repo.get_service_by_name(conn, from_service)
-    if from_row is None:
-        return {"error": f"unknown service: {from_service}"}
-    if services_repo.get_service_by_name(conn, to_service) is None:
-        return {"error": f"unknown service: {to_service}"}
-    if from_service == to_service:
+    from_row, from_error = _resolve_service(conn, from_service, from_repository)
+    if from_error:
+        return from_error
+    to_row, to_error = _resolve_service(conn, to_service, to_repository)
+    if to_error:
+        return to_error
+    if from_row["id"] == to_row["id"]:
         return {"path": [], "reachable": True, "hops": 0, "note": "from and to are the same service"}
 
-    visited = {from_service}
-    queue = deque([(from_service, [])])
+    visited = {from_row["id"]}
+    queue = deque([(from_row, [])])
     while queue:
-        current, path = queue.popleft()
+        current_row, path = queue.popleft()
         if len(path) >= max_hops:
             continue
-        current_row = services_repo.get_service_by_name(conn, current)
         for edge in _outgoing_edges(conn, current_row):
-            hop = {"from": current, **edge}
+            target_id = edge.pop("to_service_id")
+            if target_id is None:
+                continue
+            target_row = services_repo.get_service_by_id(conn, target_id)
+            if target_row is None:
+                continue
+            hop = {
+                "from": current_row["name"], "from_repository": current_row["repository_name"],
+                **edge, "to": target_row["name"], "to_repository": target_row["repository_name"],
+            }
             new_path = path + [hop]
-            if hop["to"] == to_service:
+            if target_id == to_row["id"]:
                 return {"path": new_path, "reachable": True, "hops": len(new_path)}
-            if hop["to"] not in visited and services_repo.get_service_by_name(conn, hop["to"]) is not None:
-                visited.add(hop["to"])
-                queue.append((hop["to"], new_path))
+            if target_id not in visited:
+                visited.add(target_id)
+                queue.append((target_row, new_path))
 
     return {"path": [], "reachable": False, "note": f"no path found within {max_hops} hops"}
 
@@ -493,12 +534,32 @@ def find_architecture_smells(conn: sqlite3.Connection) -> dict:
 
 
 def find_change_surface(
-    conn: sqlite3.Connection, backend: LLMBackend, task: str, hint_services: list[str] | None = None
+    conn: sqlite3.Connection,
+    backend: LLMBackend,
+    task: str,
+    hint_services: list[str] | None = None,
+    repository: str | None = None,
 ) -> dict:
     """Task/epic -> likely change surface, computed from the already-indexed System
     Knowledge Model (no source file is read here). This is a task inference, not a
     fact: every finding carries reason + confidence + evidence."""
-    return change_surface.analyze_change_surface(conn, task, backend, hint_services)
+    repository_id = None
+    if repository is not None:
+        repo = repositories_repo.get_repository_by_name(conn, repository)
+        if repo is None:
+            return {"error": f"unknown repository: {repository}"}
+        repository_id = repo["id"]
+    elif duplicate_names := services_repo.list_duplicate_service_names(conn):
+        return {
+            "error": "ambiguous service identities; specify repository",
+            "duplicate_services": duplicate_names,
+        }
+    response = change_surface.analyze_change_surface(
+        conn, task, backend, hint_services, repository_id=repository_id,
+    )
+    if repository is not None:
+        response["scope"] = {"repository": repository}
+    return response
 
 
 def record_change_surface_feedback(conn: sqlite3.Connection, run_id: int, service: str, outcome: str) -> dict:

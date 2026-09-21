@@ -37,16 +37,28 @@ def _build_fts_query(query: str) -> str | None:
     return " OR ".join(f'"{t}"*' for t in tokens)
 
 
-def search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search(
+    conn: sqlite3.Connection, query: str, limit: int = 20, repository_id: int | None = None,
+) -> list[dict[str, Any]]:
     fts_query = _build_fts_query(query)
     if fts_query is None:
         return []
     rows = conn.execute(
-        """SELECT kind, service, ref, snippet FROM search_fts
-           WHERE search_fts MATCH ? ORDER BY bm25(search_fts) LIMIT ?""",
-        (fts_query, limit),
+        """SELECT f.kind, f.service, f.ref, f.snippet, r.name AS repository
+           FROM search_fts f
+           JOIN services s ON s.id = f.service_id
+           LEFT JOIN repositories r ON r.id = s.repository_id
+           WHERE f.search_fts MATCH ? AND (? IS NULL OR s.repository_id = ?)
+           ORDER BY bm25(f.search_fts) LIMIT ?""",
+        (fts_query, repository_id, repository_id, limit),
     ).fetchall()
-    return [{"kind": r["kind"], "service": r["service"], "ref": r["ref"], "snippet": r["snippet"] or ""} for r in rows]
+    return [
+        {
+            "kind": r["kind"], "service": r["service"], "repository": r["repository"],
+            "ref": r["ref"], "snippet": r["snippet"] or "",
+        }
+        for r in rows
+    ]
 
 
 def _populate_search_index_for_service(conn: sqlite3.Connection, service_id: int) -> None:

@@ -39,6 +39,7 @@ class CandidateRetrieval(Protocol):
         task: str,
         hint_services: list[str] | None,
         max_candidates: int,
+        repository_id: int | None = None,
     ) -> list[str]: ...
 
 
@@ -59,15 +60,16 @@ class KeywordGraphRetrieval:
         task: str,
         hint_services: list[str] | None,
         max_candidates: int,
+        repository_id: int | None = None,
     ) -> list[str]:
-        seeds = self._seed_services(conn, task)
+        seeds = self._seed_services(conn, task, repository_id)
         if hint_services:
             seeds |= set(hint_services)
         if not seeds:
             return []
-        return self._expand_candidates(conn, seeds, max_candidates)
+        return self._expand_candidates(conn, seeds, max_candidates, repository_id)
 
-    def _seed_services(self, conn: sqlite3.Connection, task: str) -> set[str]:
+    def _seed_services(self, conn: sqlite3.Connection, task: str, repository_id: int | None) -> set[str]:
         keywords = _extract_keywords(task)
         if not keywords:
             return set()
@@ -78,9 +80,15 @@ class KeywordGraphRetrieval:
         # task with several distinct keywords doesn't get capped below what the old
         # per-keyword loop (limit=20 each) would have found in aggregate.
         limit = 20 * len(keywords)
-        return {r["service"] for r in search_repo.search(conn, " ".join(keywords), limit=limit)}
+        if repository_id is None:
+            rows = search_repo.search(conn, " ".join(keywords), limit=limit)
+        else:
+            rows = search_repo.search(conn, " ".join(keywords), limit=limit, repository_id=repository_id)
+        return {r["service"] for r in rows}
 
-    def _expand_candidates(self, conn: sqlite3.Connection, seeds: set[str], max_candidates: int) -> list[str]:
+    def _expand_candidates(
+        self, conn: sqlite3.Connection, seeds: set[str], max_candidates: int, repository_id: int | None,
+    ) -> list[str]:
         visited: set[str] = set()
         frontier: set[str] = set(seeds)
         for _ in range(self._hops):
@@ -89,7 +97,7 @@ class KeywordGraphRetrieval:
             newly_found: set[str] = set()
             for name in frontier:
                 visited.add(name)
-                row = services_repo.get_service_by_name(conn, name)
+                row = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
                 if row is None:
                     continue
                 for c in service_calls_repo.list_calls_for_service(conn, row["id"]):
@@ -103,7 +111,10 @@ class KeywordGraphRetrieval:
 
         # Only keep names that resolve to a real indexed service — a dangling
         # to_service_name with no matching row can't be given any context afterward.
-        known = [name for name in visited if services_repo.get_service_by_name(conn, name) is not None]
+        known = [
+            name for name in visited
+            if services_repo.get_service_by_name(conn, name, repository_id=repository_id) is not None
+        ]
         return sorted(known)[:max_candidates]
 
 
@@ -128,8 +139,12 @@ class SemanticRetrieval:
         task: str,
         hint_services: list[str] | None,
         max_candidates: int,
+        repository_id: int | None = None,
     ) -> list[str]:
-        hints = list(hint_services or [])
+        hints = [
+            name for name in (hint_services or [])
+            if services_repo.get_service_by_name(conn, name, repository_id=repository_id) is not None
+        ]
         rows = embeddings_repo.get_all_service_embeddings(conn)
         if not rows:
             return hints[:max_candidates]
@@ -138,6 +153,7 @@ class SemanticRetrieval:
         scored = [
             (cosine_similarity(task_vector, json.loads(row["vector_json"])), row["service_name"])
             for row in rows
+            if repository_id is None or row["repository_id"] == repository_id
         ]
         ranked = [name for score, name in sorted(scored, key=lambda item: item[0], reverse=True) if score >= self.SIMILARITY_FLOOR]
 
@@ -160,8 +176,9 @@ class FallbackRetrieval:
         task: str,
         hint_services: list[str] | None,
         max_candidates: int,
+        repository_id: int | None = None,
     ) -> list[str]:
-        found = self._primary.candidates(conn, task, hint_services, max_candidates)
+        found = self._primary.candidates(conn, task, hint_services, max_candidates, repository_id)
         if found:
             return found
-        return self._secondary.candidates(conn, task, hint_services, max_candidates)
+        return self._secondary.candidates(conn, task, hint_services, max_candidates, repository_id)

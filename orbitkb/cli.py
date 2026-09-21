@@ -16,11 +16,11 @@ from orbitkb.db.repositories import services as services_repo
 from orbitkb.db.repositories import verification as verification_repo
 from orbitkb.export.markdown import export_markdown
 from orbitkb.export.mermaid import export_mermaid
-from orbitkb.generation import change_surface
 from orbitkb.generation.backend_base import GenerationError
 from orbitkb.generation.embeddings import try_create_default_backend
 from orbitkb.generation.orchestrator import DiscoveryError, index_path, index_service
 from orbitkb.generation.verification import verify_change_surface
+from orbitkb.mcp import queries as mcp_queries
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
@@ -168,7 +168,12 @@ def _cmd_export(args: argparse.Namespace) -> int:
 def _cmd_analyze(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
-    result = change_surface.analyze_change_surface(conn, args.task, backend, hint_services=args.hint_services)
+    result = mcp_queries.find_change_surface(
+        conn, backend, args.task, hint_services=args.hint_services, repository=args.repository,
+    )
+    if "error" in result:
+        print(f"error: {result['error']}", file=sys.stderr)
+        return 1
     print(json.dumps(result, indent=2))
     return 0
 
@@ -315,12 +320,13 @@ def build_parser() -> argparse.ArgumentParser:
             "examples:\n"
             "  orbitkb analyze \"Add support for Pix in checkout\"\n"
             "  orbitkb analyze \"Add support for Pix in checkout\" --backend claude --db verify/sample_project.db\n"
-            "  orbitkb analyze \"xyz internal cleanup\" --hint-services notification-service\n"
+            "  orbitkb analyze \"xyz internal cleanup\" --repository billing --hint-services notification-service\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_analyze.add_argument("task", help="Free-text engineering task/epic, e.g. \"Add support for Pix in checkout\"")
     p_analyze.add_argument("--hint-services", nargs="+", default=None, help="Anchor the search on these services even without a keyword match")
+    p_analyze.add_argument("--repository", default=None, help="Limit analysis to one repository; required when duplicate service names exist")
     add_backend_args(p_analyze)
     p_analyze.set_defaults(func=_cmd_analyze)
 
