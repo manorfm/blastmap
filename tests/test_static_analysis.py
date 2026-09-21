@@ -194,6 +194,48 @@ input CreateOrderInput { sku: String! note: String }
     }
 
 
+def test_java_spring_http_contract_keeps_declared_payload_validation_and_auth(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''class OrdersController {
+  @PostMapping("/orders") @PreAuthorize("hasRole('ORDER_WRITE')")
+  Order create(@Valid @RequestBody CreateOrderRequest request) { return service.create(request); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert result.contracts["OrdersController.create"] == {
+        "request": {"name": "request", "type": "CreateOrderRequest", "required": True},
+        "returns": {"type": "Order", "required": True},
+        "validations": ["Valid"],
+        "authorization": ["PreAuthorize"],
+    }
+
+
+def test_go_http_contract_keeps_the_json_decoded_payload_type(tmp_path: Path):
+    (tmp_path / "orders.go").write_text(
+        '''package orders
+func Create(w http.ResponseWriter, r *http.Request) {
+  var request CreateOrderRequest
+  json.NewDecoder(r.Body).Decode(&request)
+}
+func register() { router.POST("/orders", Create) }
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert result.contracts["orders.Create"] == {
+        "request": {"name": "request", "type": "CreateOrderRequest", "required": True},
+        "returns": None,
+        "validations": [],
+        "authorization": [],
+    }
+
+
 def test_typed_symbol_index_resolves_an_injected_leaf_method_without_outgoing_calls(tmp_path: Path):
     (tmp_path / "OrdersController.kt").write_text(
         '''class OrdersController(private val useCase: CreateOrderUseCase) {

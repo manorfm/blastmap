@@ -178,6 +178,7 @@ class _GoAnalyzer(_FileAnalyzer):
             function = by_last_name.get(handler)
             if route and function:
                 result.entrypoints.append(EntryPoint("http", method, route, function.symbol, _evidence(path, root, node)))
+                result.contracts[function.symbol] = _go_http_contract(_text(function.declaration, source))
         return result
 
 
@@ -224,6 +225,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
                 if match:
                     result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], match.group(2), symbol, _evidence(path, root, function_node)))
+                    result.contracts[symbol] = _spring_http_contract(_text(function_node, source), modifier_text, kotlin=True)
                 listener = re.search(r"@RabbitListener\s*\([^)]*\[\s*\"([^\"]+)\"", modifier_text)
                 if listener:
                     result.entrypoints.append(EntryPoint("message", "CONSUME", listener.group(1), symbol, _evidence(path, root, function_node)))
@@ -269,6 +271,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
                 if match:
                     result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], match.group(2), symbol, _evidence(path, root, method_node)))
+                    result.contracts[symbol] = _spring_http_contract(_text(method_node, source), modifier_text)
                 listener = re.search(r"@RabbitListener\s*\([^)]*(?:queues\s*=\s*)?\"([^\"]+)\"", modifier_text)
                 if listener:
                     result.entrypoints.append(EntryPoint("message", "CONSUME", listener.group(1), symbol, _evidence(path, root, method_node)))
@@ -426,9 +429,51 @@ def _kotlin_supertypes(class_text: str) -> tuple[str, ...]:
     return tuple(item.strip().split("(", 1)[0] for item in match.group(1).split(",")) if match else ()
 
 
+def _go_http_contract(declaration: str) -> dict:
+    variables = dict(re.findall(r"\bvar\s+(\w+)\s+([\w\[\]*]+)", declaration))
+    decoded = re.search(r"\.Decode\s*\(\s*&?(\w+)\s*\)", declaration)
+    request_name = decoded.group(1) if decoded else None
+    request_type = variables.get(request_name or "")
+    return {
+        "request": {"name": request_name, "type": request_type, "required": True} if request_type else None,
+        "returns": None,
+        "validations": [],
+        "authorization": [],
+    }
+
+
 def _java_interfaces(class_text: str) -> tuple[str, ...]:
     match = re.search(r"\bimplements\s+([^\{]+)", class_text)
     return tuple(item.strip() for item in match.group(1).split(",")) if match else ()
+
+
+def _spring_http_contract(declaration: str, annotations: str, kotlin: bool = False) -> dict:
+    request = _spring_request(declaration, kotlin)
+    return_type = _spring_return_type(declaration, kotlin)
+    validations = re.findall(r"@(Valid|Validated|NotNull|NotBlank|NotEmpty|Positive|Negative|Size|Pattern)\b", declaration)
+    authorization = re.findall(r"@(PreAuthorize|Secured|RolesAllowed)\b", annotations)
+    return {
+        "request": request,
+        "returns": {"type": return_type, "required": True} if return_type else None,
+        "validations": validations,
+        "authorization": authorization,
+    }
+
+
+def _spring_request(declaration: str, kotlin: bool) -> dict | None:
+    if kotlin:
+        match = re.search(r"@RequestBody\s+(\w+)\s*:\s*([\w<>?]+)", declaration)
+        return {"name": match.group(1), "type": match.group(2).rstrip("?"), "required": not match.group(2).endswith("?")} if match else None
+    match = re.search(r"@RequestBody\s+([\w<>]+)\s+(\w+)", declaration)
+    return {"name": match.group(2), "type": match.group(1), "required": True} if match else None
+
+
+def _spring_return_type(declaration: str, kotlin: bool) -> str | None:
+    if kotlin:
+        match = re.search(r"\)\s*:\s*([\w<>?]+)", declaration)
+    else:
+        match = re.search(r"\b([A-Z][\w<>]*)\s+\w+\s*\(", declaration)
+    return match.group(1).rstrip("?") if match else None
 
 
 def _class_annotations(class_node: Node, source: bytes) -> str:

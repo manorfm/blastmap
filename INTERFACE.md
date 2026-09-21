@@ -68,6 +68,11 @@ interface injection can additionally resolve from one explicit `@Qualifier` or o
 it comes from `.graphql`/`.gql` schema definitions; absent data remains `null`, never
 a fabricated contract.
 
+For HTTP entrypoints, `contract` may include `request`, `returns`, `validations` and
+`authorization`. Spring values are extracted from its handler declaration and
+annotations; Go request data requires a locally declared value passed to JSON
+`Decode`. Unavailable fields are `null` or empty lists.
+
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an
 agent can deliberately request more depth instead of receiving it by default.

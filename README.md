@@ -86,6 +86,11 @@ local `.graphql`/`.gql` schema defines the selected resolver: arguments, require
 flags, input fields and return type. This avoids spending LLM context on a schema
 file just to answer a contract question.
 
+For native HTTP handlers, the contract includes only source-proven facts: Spring
+`@RequestBody` name/type, declared return type and validation/authorization
+annotations; Go JSON-decoded local payload types. Missing response or DTO detail is
+returned as `null` rather than guessed.
+
 The initial native coverage is deliberately focused on Go HTTP handlers,
 Java/Kotlin Spring HTTP controllers and Rabbit listeners, and Node/TypeScript
 GraphQL resolvers and Rabbit consumers. It resolves an observed call across files
