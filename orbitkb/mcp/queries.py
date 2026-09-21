@@ -218,6 +218,7 @@ def describe_entrypoint(conn: sqlite3.Connection, service: str, kind: str, metho
             }
             for edge in edges
         ],
+        "contract": flows_repo.get_entrypoint_contract(conn, entrypoint["id"]),
         "smells": find_entrypoint_smells(entrypoint, edges),
     }
 

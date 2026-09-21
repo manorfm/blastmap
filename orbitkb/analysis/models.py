@@ -37,7 +37,9 @@ class FlowEdge:
 class AnalysisResult:
     entrypoints: list[EntryPoint] = field(default_factory=list)
     edges: list[FlowEdge] = field(default_factory=list)
+    contracts: dict[str, dict] = field(default_factory=dict)
 
     def extend(self, other: AnalysisResult) -> None:
         self.entrypoints.extend(other.entrypoints)
         self.edges.extend(other.edges)
+        self.contracts.update(other.contracts)

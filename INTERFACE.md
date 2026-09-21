@@ -39,7 +39,11 @@ question.
       "origin": "static",
       "evidence": {"file": "resolvers/orders.ts", "start_line": 17, "end_line": 17}
     }
-  ]
+  ],
+  "contract": {
+    "arguments": [{"name": "input", "type": "CreateOrderInput", "required": true, "fields": []}],
+    "returns": {"type": "Order", "required": true}
+  }
 }
 ```
 
@@ -50,6 +54,10 @@ selected entrypoint, with a hard edge budget; unrelated service flow is omitted.
 optional `smells` list contains explicit hypotheses, never a conclusive architecture
 classification; for example, a GraphQL mutation that directly writes state is flagged
 as possible BFF domain-policy leakage for human validation.
+
+`contract` is present only when deterministic local extraction found one. For GraphQL
+it comes from `.graphql`/`.gql` schema definitions; absent data remains `null`, never
+a fabricated contract.
 
 ## External depth-provider contract
 

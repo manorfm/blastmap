@@ -52,3 +52,21 @@ def test_describe_entrypoint_returns_the_reachable_bounded_flow(tmp_path):
         ("OrdersController.create", "CreateOrderUseCase.execute"),
         ("CreateOrderUseCase.execute", "orderRepository.save"),
     ]
+
+
+def test_describe_entrypoint_includes_a_deterministic_graphql_contract(tmp_path):
+    conn = open_db(tmp_path / "graphql-contract.db")
+    service_id = services.ensure_service(conn, "checkout", "/repos/checkout", "node-ts")
+    evidence = Evidence("schema.graphql", 1, 1)
+    flows.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[EntryPoint("graphql", "MUTATION", "checkout", "Mutation.checkout", evidence)],
+            contracts={"Mutation.checkout": {"arguments": [], "returns": {"type": "Receipt", "required": True}}},
+        ),
+    )
+
+    detail = queries.describe_entrypoint(conn, "checkout", "graphql", "mutation", "checkout")
+
+    assert detail["contract"] == {"arguments": [], "returns": {"type": "Receipt", "required": True}}

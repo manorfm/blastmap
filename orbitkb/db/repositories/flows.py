@@ -1,6 +1,7 @@
 """Persistence for bounded, deterministic entrypoint flow maps."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from orbitkb.analysis.models import AnalysisResult
@@ -24,6 +25,13 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
             ),
         )
         entrypoint_ids[entry.symbol] = cursor.lastrowid
+    for symbol, contract in analysis.contracts.items():
+        entrypoint_id = entrypoint_ids.get(symbol)
+        if entrypoint_id is not None:
+            conn.execute(
+                "INSERT INTO entrypoint_contracts (entrypoint_id, contract_json) VALUES (?, ?)",
+                (entrypoint_id, json.dumps(contract)),
+            )
     for edge in analysis.edges:
         conn.execute(
             """INSERT INTO flow_edges
@@ -54,6 +62,13 @@ def list_entrypoint_edges(conn: sqlite3.Connection, entrypoint_id: int) -> list[
     return conn.execute(
         "SELECT * FROM flow_edges WHERE entrypoint_id = ? ORDER BY id", (entrypoint_id,)
     ).fetchall()
+
+
+def get_entrypoint_contract(conn: sqlite3.Connection, entrypoint_id: int) -> dict | None:
+    row = conn.execute(
+        "SELECT contract_json FROM entrypoint_contracts WHERE entrypoint_id = ?", (entrypoint_id,)
+    ).fetchone()
+    return json.loads(row["contract_json"]) if row else None
 
 
 def list_reachable_edges(conn: sqlite3.Connection, service_id: int, symbol: str, max_edges: int = 100) -> list[sqlite3.Row]:

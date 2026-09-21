@@ -81,6 +81,11 @@ entrypoint and its deterministic edges: invocation, dependency injection,
 validation, read/write and message publish/consume. The agent can then call
 `describe_entrypoint` to receive just that flow with file/line evidence.
 
+For GraphQL, the same response includes a deterministic schema contract when a
+local `.graphql`/`.gql` schema defines the selected resolver: arguments, required
+flags, input fields and return type. This avoids spending LLM context on a schema
+file just to answer a contract question.
+
 The initial native coverage is deliberately focused on Go HTTP handlers,
 Java/Kotlin Spring HTTP controllers and Rabbit listeners, and Node/TypeScript
 GraphQL resolvers and Rabbit consumers. It resolves an observed call across files

@@ -95,6 +95,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
     def describe_entrypoint(service: str, kind: str, method: str, name: str) -> dict:
         """Return one entrypoint plus its deterministic local flow: invocations,
         validation, reads/writes and messages, each with evidence and provenance.
+        Includes a GraphQL argument/input/return contract when a local schema proves it.
         This is the preferred narrow context primitive before reading source files."""
         with closing(_conn()) as conn:
             return queries.describe_entrypoint(conn, service, kind, method, name)

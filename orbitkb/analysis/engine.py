@@ -242,6 +242,8 @@ class _JvmSpringAnalyzer:
 
 class _NodeGraphqlAnalyzer(_FileAnalyzer):
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
+        if path.suffix in {".graphql", ".gql"}:
+            return _GraphqlContractExtractor().analyze(path, root)
         source = path.read_bytes()
         tree = self.parse(source)
         result = AnalysisResult()
@@ -278,6 +280,43 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
             result.edges.extend(self._edges_for(_Function(channel, symbol, handler, node), path, root, source))
         return result
+
+
+class _GraphqlContractExtractor:
+    """Extracts GraphQL schemas into compact, deterministic entrypoint contracts."""
+
+    _TYPE_BLOCK = re.compile(r"\btype\s+(Query|Mutation|Subscription)\s*\{(?P<body>.*?)\}", re.DOTALL)
+    _INPUT_BLOCK = re.compile(r"\binput\s+(\w+)\s*\{(?P<body>.*?)\}", re.DOTALL)
+    _FIELD = re.compile(r"\b(\w+)\s*(?:\(([^)]*)\))?\s*:\s*([\[\]\w!]+)")
+    _INPUT_FIELD = re.compile(r"\b(\w+)\s*:\s*([\[\]\w!]+)")
+
+    def analyze(self, path: Path, root: Path) -> AnalysisResult:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        input_fields = {name: self._fields(body) for name, body in self._INPUT_BLOCK.findall(source)}
+        result = AnalysisResult()
+        for operation, body in self._TYPE_BLOCK.findall(source):
+            for name, arguments, return_type in self._FIELD.findall(body):
+                result.contracts[f"{operation}.{name}"] = {
+                    "arguments": self._arguments(arguments, input_fields),
+                    "returns": self._type_shape(return_type),
+                }
+        return result
+
+    def _arguments(self, text: str, input_fields: dict[str, list[dict]]) -> list[dict]:
+        return [
+            {"name": name, **self._type_shape(type_name), "fields": input_fields.get(self._base_type(type_name), [])}
+            for name, type_name in self._INPUT_FIELD.findall(text)
+        ]
+
+    def _fields(self, text: str) -> list[dict]:
+        return [{"name": name, **self._type_shape(type_name)} for name, type_name in self._INPUT_FIELD.findall(text)]
+
+    @staticmethod
+    def _base_type(type_name: str) -> str:
+        return type_name.rstrip("!").strip("[]")
+
+    def _type_shape(self, type_name: str) -> dict:
+        return {"type": self._base_type(type_name), "required": type_name.endswith("!")}
 
 
 class _PythonCliAnalyzer:
@@ -328,8 +367,8 @@ class StaticAnalysisEngine:
         self._analyzers = {
             "go": (_GoAnalyzer(Language(tree_sitter_go.language())), ("*.go",)),
             "jvm-spring": (_JvmSpringAnalyzer(), ("*.java", "*.kt")),
-            "node-ts": (_NodeGraphqlAnalyzer(Language(tree_sitter_typescript.language_typescript())), ("*.ts", "*.tsx")),
-            "node-js": (_NodeGraphqlAnalyzer(Language(tree_sitter_javascript.language())), ("*.js", "*.jsx")),
+            "node-ts": (_NodeGraphqlAnalyzer(Language(tree_sitter_typescript.language_typescript())), ("*.ts", "*.tsx", "*.graphql", "*.gql")),
+            "node-js": (_NodeGraphqlAnalyzer(Language(tree_sitter_javascript.language())), ("*.js", "*.jsx", "*.graphql", "*.gql")),
             "python": (_PythonCliAnalyzer(), ("*.py",)),
         }
 

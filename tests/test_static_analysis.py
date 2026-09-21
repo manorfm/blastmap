@@ -166,3 +166,29 @@ class OrdersController {
     ]
     assert any(edge.target == "CreateOrderUseCase.execute" for edge in result.edges)
     assert any(edge.kind == "writes" and edge.target == "repository.save" for edge in result.edges)
+
+
+def test_graphql_schema_contract_is_linked_to_its_resolver_entrypoint(tmp_path: Path):
+    (tmp_path / "resolvers.ts").write_text(
+        '''export const resolvers = { Mutation: { createOrder: (_, input) => orderService.create(input) } };''',
+        encoding="utf-8",
+    )
+    (tmp_path / "schema.graphql").write_text(
+        '''type Mutation { createOrder(input: CreateOrderInput!): Order! }
+input CreateOrderInput { sku: String! note: String }
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.contracts["Mutation.createOrder"] == {
+        "arguments": [{
+            "name": "input", "type": "CreateOrderInput", "required": True,
+            "fields": [
+                {"name": "sku", "type": "String", "required": True},
+                {"name": "note", "type": "String", "required": False},
+            ],
+        }],
+        "returns": {"type": "Order", "required": True},
+    }

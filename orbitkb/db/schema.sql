@@ -160,6 +160,11 @@ CREATE INDEX IF NOT EXISTS idx_entrypoints_service ON entrypoints(service_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_service ON flow_edges(service_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_entrypoint ON flow_edges(entrypoint_id);
 
+CREATE TABLE IF NOT EXISTS entrypoint_contracts (
+    entrypoint_id  INTEGER PRIMARY KEY REFERENCES entrypoints(id) ON DELETE CASCADE,
+    contract_json  TEXT NOT NULL
+);
+
 -- Findings contain only a category, location and remediation guidance. Secret values
 -- are deliberately never persisted in the knowledge base.
 CREATE TABLE IF NOT EXISTS security_findings (
