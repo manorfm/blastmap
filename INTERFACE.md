@@ -60,6 +60,10 @@ state and publishes an event is also flagged for a transaction/outbox review.
 it comes from `.graphql`/`.gql` schema definitions; absent data remains `null`, never
 a fabricated contract.
 
+`describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
+`flow_pagination.truncated` field is `true` when more reachable flow exists, so an
+agent can deliberately request more depth instead of receiving it by default.
+
 ## External depth-provider contract
 
 Configure `--depth-command`, optional repeated `--depth-arg`, and `--depth-tool`.

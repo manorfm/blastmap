@@ -92,13 +92,21 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.list_entrypoints(conn, service, limit, offset)
 
     @mcp.tool()
-    def describe_entrypoint(service: str, kind: str, method: str, name: str) -> dict:
+    def describe_entrypoint(
+        service: str,
+        kind: str,
+        method: str,
+        name: str,
+        max_edges: int = queries.DEFAULT_FLOW_EDGE_LIMIT,
+    ) -> dict:
         """Return one entrypoint plus its deterministic local flow: invocations,
         validation, reads/writes and messages, each with evidence and provenance.
         Includes a GraphQL argument/input/return contract when a local schema proves it.
-        This is the preferred narrow context primitive before reading source files."""
+        `max_edges` defaults to 50 and is capped at 200 so a deep flow cannot flood
+        agent context; `flow_pagination.truncated` tells the caller to ask again with
+        a larger budget. This is the preferred narrow context primitive before reading source files."""
         with closing(_conn()) as conn:
-            return queries.describe_entrypoint(conn, service, kind, method, name)
+            return queries.describe_entrypoint(conn, service, kind, method, name, max_edges)
 
     @mcp.tool()
     def list_security_findings(service: str) -> dict:

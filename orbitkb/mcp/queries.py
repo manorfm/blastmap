@@ -34,6 +34,8 @@ from orbitkb.generation.verification import (
 # capped by default instead of returned whole — see README's context-efficiency notes.
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 500
+DEFAULT_FLOW_EDGE_LIMIT = 50
+MAX_FLOW_EDGE_LIMIT = 200
 
 
 def _validate_pagination(limit: int, offset: int) -> str | None:
@@ -193,15 +195,27 @@ def list_security_findings(conn: sqlite3.Connection, service: str) -> dict:
     }
 
 
-def describe_entrypoint(conn: sqlite3.Connection, service: str, kind: str, method: str, name: str) -> dict:
+def describe_entrypoint(
+    conn: sqlite3.Connection,
+    service: str,
+    kind: str,
+    method: str,
+    name: str,
+    max_edges: int = DEFAULT_FLOW_EDGE_LIMIT,
+) -> dict:
     """Return a compact deterministic flow for one HTTP, GraphQL, message or CLI entrypoint."""
+    if max_edges < 1:
+        return {"error": f"max_edges must be >= 1 (got {max_edges})"}
     row = services_repo.get_service_by_name(conn, service)
     if row is None:
         return {"error": f"unknown service: {service}"}
     entrypoint = flows_repo.get_entrypoint(conn, row["id"], kind, method, name)
     if entrypoint is None:
         return {"error": f"unknown entrypoint: {kind} {method} {name} on {service}"}
-    edges = flows_repo.list_reachable_edges(conn, row["id"], entrypoint["symbol"])
+    effective_max_edges = min(max_edges, MAX_FLOW_EDGE_LIMIT)
+    bounded_edges = flows_repo.list_reachable_edges(conn, row["id"], entrypoint["symbol"], effective_max_edges + 1)
+    truncated = len(bounded_edges) > effective_max_edges
+    edges = bounded_edges[:effective_max_edges]
     return {
         "entrypoint": {
             "kind": entrypoint["kind"], "method": entrypoint["method"], "name": entrypoint["name"],
@@ -218,6 +232,7 @@ def describe_entrypoint(conn: sqlite3.Connection, service: str, kind: str, metho
             }
             for edge in edges
         ],
+        "flow_pagination": {"max_edges": effective_max_edges, "truncated": truncated},
         "contract": flows_repo.get_entrypoint_contract(conn, entrypoint["id"]),
         "smells": find_entrypoint_smells(entrypoint, edges),
     }

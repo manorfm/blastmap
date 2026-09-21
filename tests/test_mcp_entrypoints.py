@@ -70,3 +70,25 @@ def test_describe_entrypoint_includes_a_deterministic_graphql_contract(tmp_path)
     detail = queries.describe_entrypoint(conn, "checkout", "graphql", "mutation", "checkout")
 
     assert detail["contract"] == {"arguments": [], "returns": {"type": "Receipt", "required": True}}
+
+
+def test_describe_entrypoint_bounds_flow_context_and_reports_truncation(tmp_path):
+    conn = open_db(tmp_path / "flow-budget.db")
+    service_id = services.ensure_service(conn, "orders", "/repos/orders", "jvm-spring")
+    evidence = Evidence("OrdersController.kt", 8, 12)
+    flows.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "OrdersController.create", evidence)],
+            edges=[
+                FlowEdge("OrdersController.create", "UseCase.execute", "invokes", evidence),
+                FlowEdge("UseCase.execute", "Repository.save", "writes", evidence),
+            ],
+        ),
+    )
+
+    detail = queries.describe_entrypoint(conn, "orders", "http", "post", "/orders", max_edges=1)
+
+    assert len(detail["flow"]) == 1
+    assert detail["flow_pagination"] == {"max_edges": 1, "truncated": True}
