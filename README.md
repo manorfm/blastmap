@@ -90,6 +90,8 @@ For native HTTP handlers, the contract includes only source-proven facts: Spring
 `@RequestBody` name/type, declared return type and validation/authorization
 annotations; Go JSON-decoded local payload types. Missing response or DTO detail is
 returned as `null` rather than guessed.
+Literal Spring controller `@RequestMapping` and Go router `Group` prefixes are
+composed with literal handler routes; dynamic path composition is left unchanged.
 When a referenced Java DTO or Go `struct` is declared in the indexed source, its
 locally observed fields and validation tags are attached to that contract.
 

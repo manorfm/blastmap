@@ -44,6 +44,29 @@ class OrdersController(private val useCase: CreateOrderUseCase) {
     assert any(edge.kind == "invokes" and edge.target == "useCase.execute" for edge in result.edges)
 
 
+def test_native_literal_route_prefixes_are_composed(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''@RequestMapping("/api") class OrdersController {
+  @PostMapping("/orders") Order create(Order order) { return order; }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "routes.go").write_text(
+        '''package api
+func Create() {}
+func register() { orders := router.Group("/api/orders"); orders.POST("/create", Create) }
+''',
+        encoding="utf-8",
+    )
+
+    java = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+    go = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert any(entry.name == "/api/orders" for entry in java.entrypoints)
+    assert any(entry.name == "/api/orders/create" for entry in go.entrypoints)
+
+
 def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Path):
     source = tmp_path / "resolvers.ts"
     source.write_text(

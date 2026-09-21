@@ -177,6 +177,7 @@ class _GoAnalyzer(_FileAnalyzer):
             symbols=[_symbol(fn, path, root, imports=imports) for fn in functions],
         )
         by_last_name = {fn.name: fn for fn in functions}
+        groups = _go_route_groups(tree, source)
         for node in _walk(tree):
             if node.type != "call_expression":
                 continue
@@ -201,6 +202,8 @@ class _GoAnalyzer(_FileAnalyzer):
             if method not in self.ROUTE_METHODS or len(args) < 2:
                 continue
             route = _string(args[0], source)
+            receiver = callee_text.rsplit(".", 1)[0] if "." in callee_text else ""
+            route = _join_route(groups.get(receiver), route)
             handler = _text(args[-1], source).rsplit(".", 1)[-1]
             function = by_last_name.get(handler)
             if route and function:
@@ -227,6 +230,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
             class_name = _text(class_name_node, source) if class_name_node else path.stem
             implements = _kotlin_supertypes(_text(class_node, source))
             annotations = _class_annotations(class_node, source)
+            route_prefix = _spring_route_prefix(annotations)
             qualifiers = _qualifiers(annotations)
             primary = "@Primary" in annotations
             for parameter in (node for node in _walk(class_node) if node.type == "class_parameter"):
@@ -252,7 +256,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 modifier_text = _text(modifiers, source) if modifiers else ""
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
                 if match:
-                    result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], match.group(2), symbol, _evidence(path, root, function_node)))
+                    result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], _join_route(route_prefix, match.group(2)), symbol, _evidence(path, root, function_node)))
                     result.contracts[symbol] = _spring_http_contract(_text(function_node, source), modifier_text, kotlin=True)
                 listener = re.search(r"@RabbitListener\s*\([^)]*\[\s*\"([^\"]+)\"", modifier_text)
                 if listener:
@@ -273,6 +277,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
             class_name = _text(class_name_node, source) if class_name_node else path.stem
             implements = _java_interfaces(_text(class_node, source))
             annotations = _class_annotations(class_node, source)
+            route_prefix = _spring_route_prefix(annotations)
             qualifiers = _qualifiers(annotations)
             primary = "@Primary" in annotations
             for field in (node for node in _walk(class_node) if node.type == "field_declaration"):
@@ -300,7 +305,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 modifier_text = _text(modifiers, source) if modifiers else ""
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
                 if match:
-                    result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], match.group(2), symbol, _evidence(path, root, method_node)))
+                    result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], _join_route(route_prefix, match.group(2)), symbol, _evidence(path, root, method_node)))
                     result.contracts[symbol] = _spring_http_contract(_text(method_node, source), modifier_text)
                 listener = re.search(r"@RabbitListener\s*\([^)]*(?:queues\s*=\s*)?\"([^\"]+)\"", modifier_text)
                 if listener:
@@ -556,6 +561,11 @@ def _class_annotations(class_node: Node, source: bytes) -> str:
     return _text(modifiers, source) if modifiers else ""
 
 
+def _spring_route_prefix(annotations: str) -> str | None:
+    match = re.search(r'@RequestMapping\s*\(\s*(?:value\s*=\s*)?"([^"]+)"', annotations)
+    return match.group(1) if match else None
+
+
 def _qualifiers(source: str) -> tuple[str, ...]:
     return tuple(re.findall(r'@(?:Qualifier|Service|Component|Repository)\s*\(\s*"([^"]+)"', source))
 
@@ -585,6 +595,23 @@ def _go_imports(source: str) -> tuple[tuple[str, str], ...]:
         if local_name not in {"_", "."}:
             imports.append((local_name, package))
     return tuple(imports)
+
+
+def _go_route_groups(tree: Node, source: bytes) -> dict[str, str]:
+    groups = {}
+    for node in _walk(tree):
+        if node.type != "short_var_declaration":
+            continue
+        match = re.search(r'(\w+)\s*:=\s*\w+\.Group\s*\(\s*"([^"]+)"', _text(node, source))
+        if match:
+            groups[match.group(1)] = match.group(2)
+    return groups
+
+
+def _join_route(prefix: str | None, route: str | None) -> str | None:
+    if route is None or prefix is None:
+        return route
+    return f"{prefix.rstrip('/')}/{route.lstrip('/')}"
 
 
 def _node_named_imports(source: str) -> tuple[tuple[str, str], ...]:
