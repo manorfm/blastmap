@@ -22,6 +22,8 @@ change-surface computation over the combined graph — runs for real.
 from pathlib import Path
 
 import pytest
+from mcp import ClientSession
+from mcp.client.stdio import stdio_client
 
 from orbitkb import cli
 from orbitkb.analysis.engine import StaticAnalysisEngine
@@ -33,6 +35,7 @@ from orbitkb.generation import change_surface
 from orbitkb.mcp import queries
 
 from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
+from tests.mcp_test_helpers import content_json, server_params
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SELF_ROOT = REPO_ROOT / "orbitkb"
@@ -121,6 +124,35 @@ def test_describe_and_search_work_against_the_self_indexed_service(tmp_path: Pat
     assert described["name"] == "orbitkb-core"
     assert described["short_desc"]
     assert "freshness" in described
+
+
+@pytest.mark.anyio
+async def test_cli_to_mcp_preserves_a_static_rabbitmq_publication_contract(tmp_path: Path, fake_backends):
+    root = tmp_path / "publisher"
+    root.mkdir()
+    (root / "resolvers.ts").write_text(
+        '''export const resolvers = {
+  Mutation: { createOrder: (_, input) => channel.publish("orders", "created", input) }
+};
+''',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "publisher.db"
+
+    exit_code = cli._cmd_index(_parse([
+        "index", str(root), "--db", str(db_path), "--service", "orders-publisher", "--stack", "node-ts",
+    ]))
+
+    assert exit_code == 0
+    async with stdio_client(server_params(db_path)) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = content_json(await session.call_tool("describe_messages", {"service": "orders-publisher"}))
+
+    assert result["static_contracts"] == [{
+        "direction": "publishes", "channel": "orders", "routing_key": "created", "payload_type": None,
+        "evidence": {"file": "resolvers.ts", "start_line": 2, "end_line": 2},
+    }]
 
 
 def test_knowledge_is_cumulative_across_two_independently_indexed_roots(tmp_path: Path, fake_backends):
