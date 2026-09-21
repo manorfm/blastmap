@@ -102,7 +102,9 @@ orbitkb index /repo/orders --depth-mode augment \
 `off` (the default) uses only OrbitKB. `augment` keeps the native result if the
 provider is unavailable; `require` fails the index explicitly. The provider gets
 one repository path and one selected entrypoint symbol at a time, and may return
-only documented flow edges. It cannot inject an opaque whole-repository graph.
+only documented flow edges. `--depth-timeout` bounds the full MCP session and
+`--depth-max-edges` bounds added context per service. It cannot inject an opaque
+whole-repository graph.
 
 See [INTERFACE.md](INTERFACE.md) for the MCP edge contract and response formats.
 

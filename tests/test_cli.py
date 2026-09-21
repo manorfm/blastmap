@@ -229,6 +229,15 @@ def test_index_help_includes_a_runnable_example(capsys):
     assert "orbitkb index" in out
 
 
+def test_index_command_exposes_external_depth_budgets():
+    args = cli.build_parser().parse_args([
+        "index", "/repo", "--depth-mode", "augment", "--depth-command", "codegraph",
+        "--depth-timeout", "7", "--depth-max-edges", "42",
+    ])
+
+    assert (args.depth_timeout, args.depth_max_edges) == (7.0, 42)
+
+
 def test_version_flag_prints_the_installed_version(capsys):
     import orbitkb
 

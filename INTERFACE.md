@@ -78,4 +78,5 @@ The tool must return structured JSON (or a JSON text content item):
 ```
 
 Unknown kinds and malformed edges are dropped. In `augment` mode a provider error
-leaves the native AST result intact; in `require` mode indexing fails.
+leaves the native AST result intact; in `require` mode indexing fails. The CLI also
+enforces a session timeout and a maximum number of enriched edges per service.

@@ -48,6 +48,8 @@ class McpDepthProvider:
     args: tuple[str, ...]
     tool_name: str
     mode: DepthMode
+    timeout_seconds: float = 15.0
+    max_edges: int = 100
 
     def enrich(self, root: Path, analysis: AnalysisResult) -> list[FlowEdge]:
         try:
@@ -61,18 +63,22 @@ class McpDepthProvider:
     async def _enrich(self, root: Path, analysis: AnalysisResult) -> list[FlowEdge]:
         params = StdioServerParameters(command=self.command, args=list(self.args))
         edges: list[FlowEdge] = []
-        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
-            await session.initialize()
-            for entrypoint in analysis.entrypoints:
-                result = await session.call_tool(
-                    self.tool_name,
-                    {"repository": str(root), "symbol": entrypoint.symbol},
-                )
-                edges.extend(_parse_edges(result, entrypoint.symbol))
+        symbols = list(dict.fromkeys(entrypoint.symbol for entrypoint in analysis.entrypoints))
+        async with asyncio.timeout(self.timeout_seconds):
+            async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+                await session.initialize()
+                for symbol in symbols:
+                    if len(edges) >= self.max_edges:
+                        break
+                    result = await session.call_tool(
+                        self.tool_name,
+                        {"repository": str(root), "symbol": symbol},
+                    )
+                    edges.extend(_parse_edges(result, symbol, max_edges=self.max_edges - len(edges)))
         return edges
 
 
-def _parse_edges(result: object, default_source: str) -> list[FlowEdge]:
+def _parse_edges(result: object, default_source: str, max_edges: int = 100) -> list[FlowEdge]:
     payload = result if isinstance(result, dict) else getattr(result, "structuredContent", None)
     if payload is None:
         for content in getattr(result, "content", []):
@@ -84,6 +90,8 @@ def _parse_edges(result: object, default_source: str) -> list[FlowEdge]:
         return []
     edges = []
     for item in payload.get("edges", []):
+        if len(edges) >= max_edges:
+            break
         if not isinstance(item, dict) or not isinstance(item.get("to"), str):
             continue
         evidence = item.get("evidence") or {}
@@ -106,10 +114,19 @@ def _parse_edges(result: object, default_source: str) -> list[FlowEdge]:
 
 
 def resolve_depth_provider(
-    mode: DepthMode, command: str | None, args: tuple[str, ...], tool_name: str,
+    mode: DepthMode,
+    command: str | None,
+    args: tuple[str, ...],
+    tool_name: str,
+    timeout_seconds: float = 15.0,
+    max_edges: int = 100,
 ) -> DepthProvider:
+    if timeout_seconds <= 0:
+        raise ValueError("--depth-timeout must be greater than zero")
+    if max_edges < 1:
+        raise ValueError("--depth-max-edges must be greater than zero")
     if mode is DepthMode.OFF or (mode is DepthMode.AUGMENT and not command):
         return NoopDepthProvider()
     if not command:
         raise ValueError("depth mode 'require' requires --depth-command")
-    return McpDepthProvider(command, args, tool_name, mode)
+    return McpDepthProvider(command, args, tool_name, mode, timeout_seconds, max_edges)

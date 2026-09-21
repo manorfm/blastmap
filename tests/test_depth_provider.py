@@ -57,3 +57,22 @@ def test_depth_payload_drops_malformed_edges_without_discarding_valid_ones():
     assert [(edge.source, edge.target, edge.origin) for edge in edges] == [
         ("Handler.create", "UseCase.execute", "codegraph")
     ]
+
+
+def test_depth_payload_is_capped_to_its_declared_edge_budget():
+    edges = _parse_edges(
+        {"edges": [{"to": "UseCase.one", "kind": "invokes"}, {"to": "UseCase.two", "kind": "invokes"}]},
+        "Handler.create",
+        max_edges=1,
+    )
+
+    assert [edge.target for edge in edges] == ["UseCase.one"]
+
+
+def test_depth_provider_rejects_an_invalid_execution_budget():
+    try:
+        resolve_depth_provider(DepthMode.AUGMENT, command="codegraph", args=(), tool_name="trace", max_edges=0)
+    except ValueError as error:
+        assert "--depth-max-edges" in str(error)
+    else:
+        raise AssertionError("invalid depth budget must be rejected")

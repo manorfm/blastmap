@@ -30,6 +30,7 @@ def _cmd_index(args: argparse.Namespace) -> int:
     try:
         depth_provider = resolve_depth_provider(
             DepthMode(args.depth_mode), args.depth_command, tuple(args.depth_arg), args.depth_tool,
+            args.depth_timeout, args.depth_max_edges,
         )
         with RichProgressReporter() as progress:
             results = index_path(
@@ -73,6 +74,7 @@ def _cmd_update(args: argparse.Namespace) -> int:
     try:
         depth_provider = resolve_depth_provider(
             DepthMode(args.depth_mode), args.depth_command, tuple(args.depth_arg), args.depth_tool,
+            args.depth_timeout, args.depth_max_edges,
         )
         with RichProgressReporter() as progress:
             result = index_service(
@@ -235,6 +237,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--depth-command", default=None, help="External code-intelligence MCP executable for augment/require mode.")
         p.add_argument("--depth-arg", action="append", default=[], help="One argument for --depth-command; repeat for multiple arguments.")
         p.add_argument("--depth-tool", default="trace_entrypoint", help="MCP tool returning the documented bounded edge payload.")
+        p.add_argument("--depth-timeout", type=float, default=15.0, help="Maximum seconds for the external MCP session (default: 15).")
+        p.add_argument("--depth-max-edges", type=int, default=100, help="Maximum enriched edges per indexed service (default: 100).")
 
     p_index = sub.add_parser(
         "index", help="Index a monorepo root or a single service repo",
