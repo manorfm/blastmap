@@ -52,9 +52,17 @@ def _evidence(path: Path, root: Path, node: Node) -> Evidence:
     return Evidence(path.relative_to(root).as_posix(), node.start_point.row + 1, node.end_point.row + 1)
 
 
-def _symbol(function: _Function, path: Path, root: Path, implements: tuple[str, ...] = ()) -> Symbol:
+def _symbol(
+    function: _Function,
+    path: Path,
+    root: Path,
+    implements: tuple[str, ...] = (),
+    imports: tuple[tuple[str, str], ...] = (),
+) -> Symbol:
     owner, _separator, member = function.symbol.rpartition(".")
-    return Symbol(function.symbol, owner, member or function.name, _evidence(path, root, function.declaration), implements)
+    return Symbol(
+        function.symbol, owner, member or function.name, _evidence(path, root, function.declaration), implements, imports,
+    )
 
 
 def _call_kind(target: str) -> str:
@@ -266,6 +274,18 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         source = path.read_bytes()
         tree = self.parse(source)
         result = AnalysisResult()
+        imports = _node_named_imports(source.decode("utf-8", errors="ignore"))
+        for node in _walk(tree):
+            if node.type != "function_declaration":
+                continue
+            name_node = node.child_by_field_name("name")
+            body = node.child_by_field_name("body")
+            if name_node is None or body is None:
+                continue
+            name = _text(name_node, source)
+            function = _Function(name, f"{path.stem}.{name}", body, node)
+            result.symbols.append(_symbol(function, path, root, imports=imports))
+            result.edges.extend(self._edges_for(function, path, root, source))
         for parent in _walk(tree):
             if parent.type != "pair" or _text(parent.child_by_field_name("key"), source) not in {"Query", "Mutation", "Subscription"}:
                 continue
@@ -282,7 +302,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 symbol = f"{operation}.{name}"
                 result.entrypoints.append(EntryPoint("graphql", operation.upper(), name, symbol, _evidence(path, root, resolver)))
                 function = _Function(name, symbol, handler, resolver)
-                result.symbols.append(_symbol(function, path, root))
+                result.symbols.append(_symbol(function, path, root, imports=imports))
                 result.edges.extend(self._edges_for(function, path, root, source))
         for node in _walk(tree):
             if node.type != "call_expression":
@@ -299,7 +319,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             symbol = f"message.consume:{channel}"
             result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
             function = _Function(channel, symbol, handler, node)
-            result.symbols.append(_symbol(function, path, root))
+            result.symbols.append(_symbol(function, path, root, imports=imports))
             result.edges.extend(self._edges_for(function, path, root, source))
         return result
 
@@ -390,6 +410,16 @@ def _kotlin_supertypes(class_text: str) -> tuple[str, ...]:
 def _java_interfaces(class_text: str) -> tuple[str, ...]:
     match = re.search(r"\bimplements\s+([^\{]+)", class_text)
     return tuple(item.strip() for item in match.group(1).split(",")) if match else ()
+
+
+def _node_named_imports(source: str) -> tuple[tuple[str, str], ...]:
+    imports = []
+    for names, module in re.findall(r"import\s*\{([^}]+)\}\s*from\s*[\"']([^\"']+)[\"']", source):
+        module_name = Path(module).name
+        for item in names.split(","):
+            original, _as, local = item.strip().partition(" as ")
+            imports.append(((local or original).strip(), f"{module_name}.{original.strip()}"))
+    return tuple(imports)
 
 
 class StaticAnalysisEngine:

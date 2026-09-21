@@ -92,8 +92,10 @@ GraphQL resolvers and Rabbit consumers. It resolves an observed call across file
 when constructor/field injection or one unambiguous local implementation proves the
 target. A local symbol index includes callable declarations even when they are leaf
 methods, and Java interface implementations are used only when exactly one candidate
-matches. The model also dogfoods explicit Python CLI `main` functions. Resolution is
-bounded by the selected entrypoint; it never builds or returns a whole code graph.
+matches. Node/TypeScript named imports, including `import { source as alias }`, bind
+an observed call to the declared local module before any method-name fallback. The
+model also dogfoods explicit Python CLI `main` functions. Resolution is bounded by
+the selected entrypoint; it never builds or returns a whole code graph.
 
 ### Optional depth provider
 

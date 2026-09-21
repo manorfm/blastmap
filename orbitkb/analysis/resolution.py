@@ -25,7 +25,7 @@ class BoundedFlowResolver:
             if edge.kind == "injects" and "." in edge.source
         }
         result.edges = [
-            self._resolve_edge(edge, implementations, injections, implementation_types)
+            self._resolve_edge(edge, symbols, implementations, injections, implementation_types)
             for edge in result.edges
         ]
         return result
@@ -40,11 +40,18 @@ class BoundedFlowResolver:
 
     @staticmethod
     def _resolve_edge(
-        edge: FlowEdge, implementations: set[str], injections: dict[str, str],
+        edge: FlowEdge,
+        symbols: dict[str, Symbol],
+        implementations: set[str],
+        injections: dict[str, str],
         implementation_types: dict[str, set[str]],
     ) -> FlowEdge:
         if edge.kind != "invokes" or edge.target in implementations:
             return edge
+        source_symbol = symbols.get(edge.source)
+        imported_target = dict(source_symbol.imports).get(edge.target) if source_symbol else None
+        if imported_target in implementations:
+            return replace(edge, target=imported_target, confidence="high")
         receiver, separator, method = edge.target.rpartition(".")
         owner = edge.source.split(".", 1)[0]
         injected_type = injections.get(f"{owner}.{receiver}") if separator else None

@@ -42,6 +42,7 @@ class Symbol:
     member: str
     evidence: Evidence
     implements: tuple[str, ...] = ()
+    imports: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass

@@ -257,3 +257,22 @@ def test_typed_symbol_index_keeps_an_ambiguous_call_unresolved(tmp_path: Path):
     result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
 
     assert any(edge.target == "worker.execute" for edge in result.edges)
+
+
+def test_node_import_alias_resolves_the_declared_module_among_homonymous_symbols(tmp_path: Path):
+    (tmp_path / "resolvers.ts").write_text(
+        '''import { createOrder as createExternalOrder } from "./orders-service";
+export const resolvers = { Mutation: { createOrder: (_, input) => createExternalOrder(input) } };
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "orders-service.ts").write_text(
+        "export function createOrder(input: unknown) { return input; }\n", encoding="utf-8",
+    )
+    (tmp_path / "admin-service.ts").write_text(
+        "export function createOrder(input: unknown) { return input; }\n", encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert any(edge.source == "Mutation.createOrder" and edge.target == "orders-service.createOrder" for edge in result.edges)
