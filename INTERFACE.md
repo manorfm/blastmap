@@ -76,6 +76,10 @@ When a local Java DTO or Go `struct` declaration is available, request/response
 objects may additionally expose `fields` with their source-declared type, required
 status and validation tags.
 
+RabbitMQ consumer contracts use `transport`, `direction`, `queue` and optional
+`payload` fields. Producer calls remain bounded flow evidence until publication
+contracts have their own persisted representation.
+
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an
 agent can deliberately request more depth instead of receiving it by default.

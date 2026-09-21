@@ -171,6 +171,16 @@ class _GoAnalyzer(_FileAnalyzer):
             callee_text = _text(callee, source)
             method = callee_text.rsplit(".", 1)[-1].upper()
             args = arguments.named_children
+            if callee_text.endswith(".Consume") and args and args[-1].type == "func_literal":
+                channel = _string(args[0], source)
+                body = args[-1].child_by_field_name("body")
+                if channel and body:
+                    symbol = f"message.consume:{channel}"
+                    handler = _Function(channel, symbol, body, args[-1])
+                    result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
+                    result.symbols.append(_symbol(handler, path, root, imports=imports))
+                    result.edges.extend(self._edges_for(handler, path, root, source))
+                    result.contracts[symbol] = _message_contract(channel, _text(args[-1], source), "go")
             if method not in self.ROUTE_METHODS or len(args) < 2:
                 continue
             route = _string(args[0], source)
@@ -229,6 +239,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 listener = re.search(r"@RabbitListener\s*\([^)]*\[\s*\"([^\"]+)\"", modifier_text)
                 if listener:
                     result.entrypoints.append(EntryPoint("message", "CONSUME", listener.group(1), symbol, _evidence(path, root, function_node)))
+                    result.contracts[symbol] = _message_contract(listener.group(1), _text(function_node, source), "kotlin")
         return result
 
 
@@ -275,6 +286,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 listener = re.search(r"@RabbitListener\s*\([^)]*(?:queues\s*=\s*)?\"([^\"]+)\"", modifier_text)
                 if listener:
                     result.entrypoints.append(EntryPoint("message", "CONSUME", listener.group(1), symbol, _evidence(path, root, method_node)))
+                    result.contracts[symbol] = _message_contract(listener.group(1), _text(method_node, source), "java")
         return result
 
 
@@ -343,6 +355,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             function = _Function(channel, symbol, handler, node)
             result.symbols.append(_symbol(function, path, root, imports=imports))
             result.edges.extend(self._edges_for(function, path, root, source))
+            result.contracts[symbol] = _message_contract(channel, _text(handler, source), "node")
         return result
 
 
@@ -439,6 +452,28 @@ def _go_http_contract(declaration: str) -> dict:
         "returns": None,
         "validations": [],
         "authorization": [],
+    }
+
+
+def _message_contract(channel: str, declaration: str, language: str) -> dict:
+    patterns = {
+        "java": r"\(\s*([\w<>]+)\s+(\w+)",
+        "kotlin": r"\(\s*(\w+)\s*:\s*([\w?]+)",
+        "node": r"\(?\s*(\w+)\s*:\s*([\w?]+)",
+        "go": r"func\s*\(\s*(\w+)\s+([\w*]+)",
+    }
+    match = re.search(patterns[language], declaration)
+    if language == "java" and match:
+        type_name, name = match.groups()
+    elif match:
+        name, type_name = match.groups()
+    else:
+        name = type_name = None
+    return {
+        "transport": "rabbitmq",
+        "direction": "consumes",
+        "queue": channel,
+        "payload": {"name": name, "type": type_name.rstrip("?").lstrip("*") if type_name else None, "required": True} if type_name else None,
     }
 
 

@@ -93,6 +93,9 @@ returned as `null` rather than guessed.
 When a referenced Java DTO or Go `struct` is declared in the indexed source, its
 locally observed fields and validation tags are attached to that contract.
 
+RabbitMQ consumer entrypoints expose a compact contract with queue, direction and a
+declared payload parameter type when the listener/callback makes it available.
+
 The initial native coverage is deliberately focused on Go HTTP handlers,
 Java/Kotlin Spring HTTP controllers and Rabbit listeners, and Node/TypeScript
 GraphQL resolvers and Rabbit consumers. It resolves an observed call across files

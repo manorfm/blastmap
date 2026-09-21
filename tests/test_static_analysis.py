@@ -65,7 +65,7 @@ def test_node_graphql_analyzer_exposes_mutation_and_rabbit_publish(tmp_path: Pat
 def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_path: Path):
     source = tmp_path / "consumer.ts"
     source.write_text(
-        '''channel.consume("orders.created", async (message) => {
+        '''channel.consume("orders.created", async (message: OrderCreated) => {
   await orderService.handle(message);
 });
 ''',
@@ -78,6 +78,9 @@ def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_
         ("message", "CONSUME", "orders.created")
     ]
     assert any(edge.source == "message.consume:orders.created" and edge.target == "orderService.handle" for edge in result.edges)
+    assert result.contracts["message.consume:orders.created"]["payload"] == {
+        "name": "message", "type": "OrderCreated", "required": True,
+    }
 
 
 def test_kotlin_analyzer_exposes_rabbit_listener_and_its_handler_flow(tmp_path: Path):
@@ -97,6 +100,10 @@ def test_kotlin_analyzer_exposes_rabbit_listener_and_its_handler_flow(tmp_path: 
         ("message", "CONSUME", "orders.created")
     ]
     assert any(edge.source == "OrderListener.consume" and edge.target == "orderService.handle" for edge in result.edges)
+    assert result.contracts["OrderListener.consume"] == {
+        "transport": "rabbitmq", "direction": "consumes", "queue": "orders.created",
+        "payload": {"name": "message", "type": "String", "required": True},
+    }
 
 
 def test_service_create_is_not_misclassified_as_direct_persistence(tmp_path: Path):
