@@ -127,6 +127,7 @@ _SPRING_DATA_REPOSITORY_BASE_TYPES = frozenset({
     "CrudRepository", "JpaRepository", "ListCrudRepository", "ListPagingAndSortingRepository",
     "MongoRepository", "PagingAndSortingRepository", "ReactiveCrudRepository", "ReactiveMongoRepository",
 })
+_SPRING_JDBC_TEMPLATE_TYPES = frozenset({"JdbcTemplate", "NamedParameterJdbcTemplate"})
 
 
 def _mongoose_model_variables(source: str) -> frozenset[str]:
@@ -236,13 +237,44 @@ def _spring_repository_call_kind(target: str, receivers: frozenset[str]) -> str 
     return None
 
 
+def _spring_jdbc_template_receivers(injections: list[Injection], class_name: str) -> frozenset[str]:
+    """Return locally injected members whose declared type is a Spring JDBC template."""
+    prefix = f"{class_name}."
+    return frozenset(
+        injection.consumer.removeprefix(prefix)
+        for injection in injections
+        if injection.consumer.startswith(prefix)
+        and injection.contract.split("<", 1)[0].rsplit(".", 1)[-1] in _SPRING_JDBC_TEMPLATE_TYPES
+    )
+
+
+def _spring_jdbc_template_call_kind(target: str, receivers: frozenset[str]) -> str | None:
+    """Classify exact query/update operations on a local Spring JDBC template."""
+    receiver, separator, method = target.rpartition(".")
+    if not separator or receiver not in receivers:
+        return None
+    if method.startswith("query"):
+        return "reads"
+    if method in {"update", "batchUpdate"}:
+        return "writes"
+    return None
+
+
 def _spring_edges_for(
-    function: _Function, path: Path, root: Path, source: bytes, repository_receivers: frozenset[str],
+    function: _Function,
+    path: Path,
+    root: Path,
+    source: bytes,
+    repository_receivers: frozenset[str],
+    jdbc_template_receivers: frozenset[str],
 ) -> list[FlowEdge]:
     edges = _FileAnalyzer._edges_for(function, path, root, source)
     classified = []
     for edge in edges:
-        kind = _spring_repository_call_kind(edge.target, repository_receivers)
+        kind = (
+            _spring_repository_call_kind(edge.target, repository_receivers)
+            or _spring_jdbc_template_call_kind(edge.target, jdbc_template_receivers)
+        )
         # Generic name matching is disabled for JVM persistence: `repository.save`
         # is an operation only with a local repository dependency.
         if kind is None and edge.kind in {"reads", "writes"}:
@@ -507,6 +539,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                     result.edges.append(FlowEdge(injection_symbol, contract, "injects", evidence))
                     result.injections.append(Injection(injection_symbol, contract, _first_qualifier(_text(parameter, source)), evidence))
             repository_receivers = _spring_repository_receivers(result.injections, class_name)
+            jdbc_template_receivers = _spring_jdbc_template_receivers(result.injections, class_name)
             for function_node in (node for node in _walk(class_node) if node.type == "function_declaration"):
                 name_node = function_node.child_by_field_name("name")
                 if name_node is None:
@@ -515,7 +548,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 body = function_node.child_by_field_name("body") or function_node
                 function = _Function(_text(name_node, source), symbol, body, function_node)
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
-                result.edges.extend(_spring_edges_for(function, path, root, source, repository_receivers))
+                result.edges.extend(_spring_edges_for(
+                    function, path, root, source, repository_receivers, jdbc_template_receivers,
+                ))
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(function_node, source), publishers, path, root, function_node, kotlin=True)
@@ -560,6 +595,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                     result.edges.append(FlowEdge(consumer, contract, "injects", evidence))
                     result.injections.append(Injection(consumer, contract, _first_qualifier(_text(field, source)), evidence))
             repository_receivers = _spring_repository_receivers(result.injections, class_name)
+            jdbc_template_receivers = _spring_jdbc_template_receivers(result.injections, class_name)
             for method_node in (node for node in _walk(class_node) if node.type == "method_declaration"):
                 name_node = method_node.child_by_field_name("name")
                 body = method_node.child_by_field_name("body")
@@ -569,7 +605,9 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 symbol = f"{class_name}.{name}"
                 function = _Function(name, symbol, body, method_node)
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
-                result.edges.extend(_spring_edges_for(function, path, root, source, repository_receivers))
+                result.edges.extend(_spring_edges_for(
+                    function, path, root, source, repository_receivers, jdbc_template_receivers,
+                ))
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(method_node, source), publishers, path, root, method_node)

@@ -148,6 +148,8 @@ Derived Spring Data methods such as `findByStatus` and `deleteByCustomerId` requ
 the stronger proof of a local interface extending a supported Spring Data contract.
 Local Spring Data `@Query` methods are reads by default; only a companion
 `@Modifying` annotation makes their operation a write.
+Spring `JdbcTemplate` and `NamedParameterJdbcTemplate` operations require a locally
+injected template: `query*` reads, while `update` and `batchUpdate` write.
 
 `describe_persistence` exposes source-proven `static_facts` independently of the
 generated entity summaries. JPA `@Entity`/`@Table` and GORM-tagged structs establish

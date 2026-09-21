@@ -489,6 +489,39 @@ def test_spring_data_query_operations_require_local_repository_and_modifying_evi
     }
 
 
+def test_spring_analyzers_classify_only_explicit_jdbc_template_dependencies(tmp_path: Path):
+    (tmp_path / "Orders.java").write_text(
+        '''class Orders {
+  private final JdbcTemplate jdbc;
+  Order find(String id) { return jdbc.queryForObject("select id from orders", Order.class, id); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Payments.kt").write_text(
+        '''class Payments(private val jdbc: NamedParameterJdbcTemplate) {
+  fun archive() = jdbc.update("update payments set archived = true", emptyMap<String, Any>())
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Unproven.java").write_text(
+        '''class Unproven {
+  Order find(Client jdbc, String id) { return jdbc.queryForObject("select id from orders", Order.class, id); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(edge.source, edge.target, edge.kind) for edge in result.edges} >= {
+        ("Orders.find", "jdbc.queryForObject", "reads"),
+        ("Payments.archive", "jdbc.update", "writes"),
+        ("Unproven.find", "jdbc.queryForObject", "invokes"),
+    }
+
+
 def test_graphql_schema_contract_is_linked_to_its_resolver_entrypoint(tmp_path: Path):
     (tmp_path / "resolvers.ts").write_text(
         '''export const resolvers = { Mutation: { createOrder: (_, input) => orderService.create(input) } };''',
