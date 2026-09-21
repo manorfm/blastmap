@@ -342,6 +342,8 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
         if path.suffix in {".graphql", ".gql"}:
             return _GraphqlContractExtractor().analyze(path, root)
+        if path.suffix == ".prisma":
+            return AnalysisResult()
         source = path.read_bytes()
         tree = self.parse(source)
         result = AnalysisResult()
@@ -858,8 +860,8 @@ class StaticAnalysisEngine:
         self._analyzers = {
             "go": (_GoAnalyzer(Language(tree_sitter_go.language())), ("*.go",)),
             "jvm-spring": (_JvmSpringAnalyzer(), ("*.java", "*.kt")),
-            "node-ts": (_NodeGraphqlAnalyzer(Language(tree_sitter_typescript.language_typescript())), ("*.ts", "*.tsx", "*.graphql", "*.gql")),
-            "node-js": (_NodeGraphqlAnalyzer(Language(tree_sitter_javascript.language())), ("*.js", "*.jsx", "*.graphql", "*.gql")),
+            "node-ts": (_NodeGraphqlAnalyzer(Language(tree_sitter_typescript.language_typescript())), ("*.ts", "*.tsx", "*.graphql", "*.gql", "*.prisma")),
+            "node-js": (_NodeGraphqlAnalyzer(Language(tree_sitter_javascript.language())), ("*.js", "*.jsx", "*.graphql", "*.gql", "*.prisma")),
             "python": (_PythonCliAnalyzer(), ("*.py",)),
         }
 
@@ -1024,6 +1026,24 @@ def _persistence_facts(files: list[Path], root: Path) -> list[PersistenceFact]:
         for match in re.finditer(r'\bmongoose\.model\s*(?:<[^>]+>)?\s*\(\s*["\']([^"\']+)["\']\s*,\s*[^,]+,\s*["\']([^"\']+)["\']', source):
             owner, collection = match.groups()
             facts.append(PersistenceFact(collection, "document", owner, _line_evidence(path, root, source, match.start())))
+        facts.extend(_prisma_persistence_facts(source, path, root))
+    return facts
+
+
+def _prisma_persistence_facts(source: str, path: Path, root: Path) -> list[PersistenceFact]:
+    providers = set(re.findall(r'datasource\s+\w+\s*\{[^}]*\bprovider\s*=\s*"([^"]+)"', source, re.DOTALL))
+    kinds = {
+        "postgresql": "sql_table", "mysql": "sql_table", "sqlite": "sql_table",
+        "sqlserver": "sql_table", "cockroachdb": "sql_table", "mongodb": "document",
+    }
+    if len(providers) != 1 or (kind := kinds.get(next(iter(providers)))) is None:
+        return []
+    facts = []
+    for match in re.finditer(r'model\s+(\w+)\s*\{(.*?)\}', source, re.DOTALL):
+        owner, body = match.groups()
+        mapping = re.search(r'@@map\s*\(\s*"([^"]+)"\s*\)', body)
+        if mapping:
+            facts.append(PersistenceFact(mapping.group(1), kind, owner, _line_evidence(path, root, source, match.start())))
     return facts
 
 

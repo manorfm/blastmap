@@ -121,7 +121,9 @@ edge budget. They report syntactic evidence only, never runtime reachability.
 Mongoose mappings, including entity/table or collection name, local owner and
 file/line evidence. Mongoose requires `mongoose.model` with a literal third
 collection argument; Spring Data Mongo requires a literal `@Document` collection
-argument. These do not replace the generated persistence entities.
+argument. Prisma requires a literal datasource provider and `@@map`; supported SQL
+providers yield `sql_table` facts while MongoDB yields `document` facts. These do
+not replace the generated persistence entities.
 
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an

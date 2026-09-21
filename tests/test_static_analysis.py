@@ -525,6 +525,26 @@ def test_spring_analyzers_extract_literal_document_collection_ownership(tmp_path
     ]
 
 
+def test_node_analyzer_extracts_literal_prisma_model_ownership(tmp_path: Path):
+    (tmp_path / "schema.prisma").write_text(
+        '''datasource db {
+  provider = "postgresql"
+}
+model Order {
+  id String @id
+  @@map("orders")
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(fact.name, fact.kind, fact.owner) for fact in result.persistence_facts] == [
+        ("orders", "sql_table", "Order"),
+    ]
+
+
 def test_go_http_contract_keeps_the_json_decoded_payload_type(tmp_path: Path):
     (tmp_path / "orders.go").write_text(
         '''package orders
