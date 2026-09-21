@@ -67,6 +67,9 @@ interface injection can additionally resolve from one explicit `@Qualifier` or o
 `contract` is present only when deterministic local extraction found one. For GraphQL
 it comes from `.graphql`/`.gql` schema definitions; absent data remains `null`, never
 a fabricated contract.
+For locally declared GraphQL interface or union returns, `contract.returns` may
+include sorted `possible_types`. Directives and federation semantics remain outside
+this deterministic subset.
 
 For HTTP entrypoints, `contract` may include `request`, `returns`, `validations` and
 `authorization`. Spring values are extracted from its handler declaration and

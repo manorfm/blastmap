@@ -394,16 +394,20 @@ class _GraphqlContractExtractor:
     _INPUT_BLOCK = re.compile(r"\binput\s+(\w+)\s*\{(?P<body>.*?)\}", re.DOTALL)
     _FIELD = re.compile(r"\b(\w+)\s*(?:\(([^)]*)\))?\s*:\s*([\[\]\w!]+)")
     _INPUT_FIELD = re.compile(r"\b(\w+)\s*:\s*([\[\]\w!]+)")
+    _INTERFACE = re.compile(r"\binterface\s+(\w+)\s*\{", re.DOTALL)
+    _IMPLEMENTS = re.compile(r"\btype\s+(\w+)\s+implements\s+([\w\s&]+)\s*\{", re.DOTALL)
+    _UNION = re.compile(r"\bunion\s+(\w+)\s*=\s*([^\n]+)")
 
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
         source = path.read_text(encoding="utf-8", errors="ignore")
         input_fields = {name: self._fields(body) for name, body in self._INPUT_BLOCK.findall(source)}
+        return_options = self._return_options(source)
         result = AnalysisResult()
         for operation, body in self._TYPE_BLOCK.findall(source):
             for name, arguments, return_type in self._FIELD.findall(body):
                 result.contracts[f"{operation}.{name}"] = {
                     "arguments": self._arguments(arguments, input_fields),
-                    "returns": self._type_shape(return_type),
+                    "returns": {**self._type_shape(return_type), **return_options.get(self._base_type(return_type), {})},
                 }
         return result
 
@@ -416,9 +420,19 @@ class _GraphqlContractExtractor:
     def _fields(self, text: str) -> list[dict]:
         return [{"name": name, **self._type_shape(type_name)} for name, type_name in self._INPUT_FIELD.findall(text)]
 
+    def _return_options(self, source: str) -> dict[str, dict]:
+        options: dict[str, set[str]] = {name: set() for name in self._INTERFACE.findall(source)}
+        for type_name, interfaces in self._IMPLEMENTS.findall(source):
+            for interface in interfaces.split("&"):
+                if interface.strip() in options:
+                    options[interface.strip()].add(type_name)
+        for union, members in self._UNION.findall(source):
+            options[union] = {member.strip() for member in members.split("|") if member.strip()}
+        return {name: {"possible_types": sorted(members)} for name, members in options.items() if members}
+
     @staticmethod
     def _base_type(type_name: str) -> str:
-        return type_name.rstrip("!").strip("[]")
+        return type_name.replace("[", "").replace("]", "").rstrip("!")
 
     def _type_shape(self, type_name: str) -> dict:
         return {"type": self._base_type(type_name), "required": type_name.endswith("!")}

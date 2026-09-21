@@ -85,6 +85,9 @@ For GraphQL, the same response includes a deterministic schema contract when a
 local `.graphql`/`.gql` schema defines the selected resolver: arguments, required
 flags, input fields and return type. This avoids spending LLM context on a schema
 file just to answer a contract question.
+When that local schema defines an interface or union return type, the contract also
+lists its declared `possible_types`; directives and federation metadata are not
+interpreted as behavior.
 
 For native HTTP handlers, the contract includes only source-proven facts: Spring
 `@RequestBody` name/type, declared return type and validation/authorization

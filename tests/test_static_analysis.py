@@ -225,6 +225,26 @@ input CreateOrderInput { sku: String! note: String }
     }
 
 
+def test_graphql_contract_includes_local_interface_and_union_return_options(tmp_path: Path):
+    (tmp_path / "resolvers.ts").write_text(
+        '''export const resolvers = { Query: { node: () => null, search: () => [] } };''', encoding="utf-8",
+    )
+    (tmp_path / "schema.graphql").write_text(
+        '''type Query { node: Node! search: [SearchResult!]! }
+interface Node { id: ID! }
+type User implements Node { id: ID! }
+type Order implements Node { id: ID! }
+union SearchResult = User | Order
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.contracts["Query.node"]["returns"]["possible_types"] == ["Order", "User"]
+    assert result.contracts["Query.search"]["returns"]["possible_types"] == ["Order", "User"]
+
+
 def test_java_spring_http_contract_keeps_declared_payload_validation_and_auth(tmp_path: Path):
     (tmp_path / "OrdersController.java").write_text(
         '''class OrdersController {
