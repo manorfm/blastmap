@@ -5,14 +5,11 @@ deterministically without a real subprocess call — matching the harness's own
 """
 from pathlib import Path
 
+from benchmark.fixtures import build_pix_fixture
 from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
 from orbitkb.db.repositories import embeddings as embeddings_repo
-from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
-from orbitkb.db.repositories import search as search_repo
-from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation import change_surface
 from orbitkb.generation.backend_base import GenerationOutcome
@@ -30,80 +27,7 @@ class FakeBackend:
         return GenerationOutcome(structured=self.response)
 
 
-def _build_pix_fixture(db_path: Path):
-    conn = open_db(db_path)
-    checkout_id = services_repo.ensure_service(conn, "checkout-service", "/tmp/checkout", "python")
-    payments_id = services_repo.ensure_service(conn, "payments-service", "/tmp/payments", "node-ts")
-    order_id = services_repo.ensure_service(conn, "order-service", "/tmp/order", "python")
-    notif_id = services_repo.ensure_service(conn, "notification-service", "/tmp/notif", "python")
-
-    services_repo.update_service_overview(conn, checkout_id, "Owns the checkout entry point and forwards payment method.", "L")
-    services_repo.update_service_overview(conn, payments_id, "Owns payment method resolution and payment authorization.", "L")
-    services_repo.update_service_overview(conn, order_id, "Consumes payment confirmation to create orders.", "L")
-    services_repo.update_service_overview(conn, notif_id, "Sends emails when an order ships.", "L")
-
-    api_id = apis_repo.upsert_api(
-        conn, checkout_id, "POST", "/checkout", "starts checkout", "desc", [],
-        [{"file": "checkout.py", "start_line": 1, "end_line": 20}],
-    )
-    service_calls_repo.replace_calls_for_api(
-        conn, checkout_id, api_id,
-        [{
-            "to_service_name": "payments-service", "call_kind": "http",
-            "reason": "authorize the pix payment for the order", "data_needed": ["amount", "pix_key"],
-            "purpose_kind": "data_fetch", "confidence": 0.9,
-        }],
-        [{"file": "checkout.py", "start_line": 1, "end_line": 20}],
-    )
-    service_calls_repo.reconcile_service_call_targets(conn)
-
-    order_api_id = apis_repo.upsert_api(conn, order_id, "POST", "/orders", "creates order", "desc", [], [])
-    service_calls_repo.replace_calls_for_api(
-        conn, order_id, order_api_id,
-        [
-            {
-                "to_service_name": "payments-service", "call_kind": "http",
-                "reason": "check payment confirmation status", "data_needed": ["order_id"],
-                "purpose_kind": "data_fetch", "confidence": 0.7,
-            },
-            {
-                # Looks internal (shares the "-service" naming convention) but was
-                # never indexed — should surface as an unmapped_internal_hint.
-                "to_service_name": "shipping-service", "call_kind": "http",
-                "reason": "schedule delivery once the order is confirmed", "data_needed": ["order_id"],
-                "purpose_kind": "other", "confidence": 0.6, "target_kind": "unknown",
-            },
-        ],
-        [],
-    )
-    service_calls_repo.reconcile_service_call_targets(conn)
-
-    payments_api_id = apis_repo.upsert_api(conn, payments_id, "POST", "/charge", "charges a card", "desc", [], [])
-    service_calls_repo.replace_calls_for_api(
-        conn, payments_id, payments_api_id,
-        [{
-            # A genuine external integration — should surface as external_integrations.
-            "to_service_name": "Stripe API", "call_kind": "http",
-            "reason": "charge the customer's card via the vendor gateway", "data_needed": ["amount", "pix_key"],
-            "purpose_kind": "data_fetch", "confidence": 0.85, "target_kind": "external",
-        }],
-        [],
-    )
-    service_calls_repo.reconcile_service_call_targets(conn)
-
-    # notification-service is only reachable via a message link off payments-service —
-    # exercises the same "connected but unlikely to change" shape as the user's own
-    # example (order events reaching a notifier that has nothing to do with Pix).
-    messages_repo.replace_messages(
-        conn, payments_id,
-        [{"direction": "publishes", "channel": "payment_authorized", "shape_json": [], "description": "d"}], [],
-    )
-    messages_repo.replace_messages(
-        conn, notif_id,
-        [{"direction": "consumes", "channel": "payment_authorized", "shape_json": [], "description": "d"}], [],
-    )
-    search_repo.rebuild_search_index(conn)
-    return conn
+_build_pix_fixture = build_pix_fixture
 
 
 def test_no_matching_service_short_circuits_without_calling_backend(tmp_path: Path):

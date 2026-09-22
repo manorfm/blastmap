@@ -1262,23 +1262,20 @@ corpus exactly; it is a deterministic regression signal, not a claim about arbit
 codebases or an LLM's architectural judgment. Add a case only with manually reviewed
 source and expected facts.
 
-`benchmark/` also maintains a separate retrieval benchmark:
+`make evaluate-change-surface` evaluates the separate deterministic candidate-
+retrieval stage for `find_change_surface`. It is deliberately distinct from LLM
+synthesis, because feeding a fake backend a desired answer and asserting that the
+pipeline repeats it would be circular:
 
-`benchmark/` measures whether `find_change_surface` actually finds the right
-services — not just whether the mechanism doesn't break. It's deliberately split
-into two levels, because a benchmark that feeds a fake backend the "right
-answer" and then checks whether the pipeline reproduces that answer is circular;
-it proves nothing about the system's judgment:
-
-- **Retrieval recall (`tests/test_benchmark.py`, runs in CI)**: measures only
-  whether `KeywordGraphRetrieval.candidates()` — no LLM involved — puts each
-  task's expected services into the candidate set, before any LLM (real or fake)
-  gets a chance to choose among them. Is a task findable today, and will it still
-  be tomorrow? `benchmark/tasks.py` has 8 hand-picked tasks (there's no real
-  corpus of past tasks yet) covering different reach patterns: direct keyword
-  match, 1- and 2-hop expansion via calls, expansion via a messaging link, and
-  anchoring by `hint_services` alone. Run `python scripts/run_benchmark_report.py`
-  to see the table. The same report also shows `reduction_ratio` per task: of
+- **Candidate-retrieval goldens (`tests/test_benchmark.py`, runs in CI)**:
+  measure only `KeywordGraphRetrieval.candidates()` — no LLM involved — before
+  later synthesis can choose among candidates. `benchmark/tasks.py` has 8
+  hand-reviewed tasks covering direct keyword matching, 1- and 2-hop calls,
+  messaging links and `hint_services`. Every case records an impact-service floor
+  (impact recall) plus an exact, reviewed candidate envelope (candidate precision
+  and recall). A full envelope in the small Pix fixture is expected because its
+  two-hop traversal reaches the whole graph; that does not mean every service must
+  change. The report also shows `reduction_ratio` per task: of
   all services indexed in that task's fixture, what fraction
   `KeywordGraphRetrieval` did **not** need to put forward as a candidate — the
   deterministic, non-circular half of "exploration reduction" (the other half —
@@ -1304,7 +1301,8 @@ it proves nothing about the system's judgment:
   verify/sample_project.db` for each task in `benchmark/tasks.py` (no need to
   spin up an MCP session) and compare `primary`/`secondary` against
   `expected_services` by hand — the same manual treatment
-  `verify/sample_project.db`'s real e2e already gets.
+  `verify/sample_project.db`'s real e2e already gets. The deterministic candidate
+  envelope is not a substitute for this later judgment/ground-truth check.
   `verify_change_surface`/`orbitkb verify` automates that comparison once a
   real "after" commit exists to compare against via `git diff`.
 

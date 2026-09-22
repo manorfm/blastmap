@@ -1,7 +1,4 @@
-"""CI-safe regression guard: does candidate retrieval (no LLM involved) still surface
-every benchmark task's expected services? See benchmark/__init__.py and this
-project's README for why this measures recall only, not end-to-end precision.
-"""
+"""CI-safe golden evaluation for deterministic change-surface candidate retrieval."""
 from pathlib import Path
 
 from benchmark.runner import run_retrieval_recall
@@ -25,6 +22,14 @@ def test_report_has_one_result_per_task(tmp_path: Path):
     report = run_retrieval_recall(TASKS, tmp_path)
 
     assert {r.task_id for r in report.results} == {t.id for t in TASKS}
+
+
+def test_change_surface_golden_candidates_match_the_reviewed_envelope(tmp_path: Path):
+    report = run_retrieval_recall(TASKS, tmp_path)
+
+    assert report.aggregate_candidate_recall == 1.0
+    assert report.aggregate_candidate_precision == 1.0
+    assert all(not result.unexpected_candidates for result in report.results)
 
 
 def test_reduction_ratio_shows_candidates_are_a_minority_of_the_system(tmp_path: Path):
@@ -68,7 +73,8 @@ SEMANTIC_ONLY_TASK = BenchmarkTask(
     id="semantic-only-no-keyword-overlap",
     description="reconcile monetary records across accounts",
     build_fixture=_build_semantic_only_fixture,
-    expected_services={"ledger-service"},
+    expected_impacted_services={"ledger-service"},
+    expected_candidates={"ledger-service"},
 )
 
 
