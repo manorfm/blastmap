@@ -195,6 +195,8 @@ def test_node_analyzer_exposes_rabbit_consumer_and_its_bounded_handler_flow(tmp_
 channel.assertQueue("orders.created", { deadLetterRoutingKey: "orders.dlq", messageTtl: 5000 });
 channel.bindQueue("orders.created", "orders", "order.created");
 channel.consume("orders.created", async (message: OrderCreated) => {
+  // idempotency key prevents duplicate handling
+  const timeout = 500;
   await orderService.handle(message);
 });
 ''',
@@ -212,6 +214,8 @@ channel.consume("orders.created", async (message: OrderCreated) => {
     }
     assert result.contracts["message.consume:orders.created"]["dead_letter_routing_key"] == "orders.dlq"
     assert result.contracts["message.consume:orders.created"]["retry_delay_ms"] == 5000
+    assert result.contracts["message.consume:orders.created"]["idempotency"] == "detected"
+    assert result.contracts["message.consume:orders.created"]["timeout"] == "detected"
     assert result.contracts["message.consume:orders.created"]["bindings"] == [
         {"exchange": "orders", "routing_key": "order.created"},
     ]
