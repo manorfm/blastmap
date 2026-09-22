@@ -553,6 +553,7 @@ def index_service(
             changed.add(rel)
     removed = set(old_hashes) - set(new_hashes)
 
+    index_runs_repo.recover_unfinished_runs(conn, service_id)
     run_id = index_runs_repo.start_index_run(conn, service_id, backend.name)
 
     ctx = IndexContext(

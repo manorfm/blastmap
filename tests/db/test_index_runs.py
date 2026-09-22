@@ -76,3 +76,15 @@ def test_usage_totals_are_none_when_no_runs_recorded_usage(tmp_path: Path):
 
     assert totals["input_tokens"] is None
     assert totals["cost_usd"] is None
+
+
+def test_recover_unfinished_runs_marks_abandoned_attempts_failed(tmp_path: Path):
+    conn = open_db(tmp_path / "runs.db")
+    service_id = services_repo.ensure_service(conn, "orders-service", "/tmp/orders", "python")
+    abandoned = repository.start_index_run(conn, service_id, "claude")
+
+    assert repository.recover_unfinished_runs(conn, service_id) == 1
+    row = conn.execute("SELECT status, finished_at, notes FROM index_runs WHERE id = ?", (abandoned,)).fetchone()
+    assert row["status"] == "failed"
+    assert row["finished_at"] is not None
+    assert "superseded" in row["notes"]

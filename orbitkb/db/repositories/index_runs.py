@@ -37,6 +37,18 @@ def finish_index_run(
     conn.commit()
 
 
+def recover_unfinished_runs(conn: sqlite3.Connection, service_id: int) -> int:
+    """Close attempts abandoned by a terminated process before a fresh retry."""
+    cur = conn.execute(
+        """UPDATE index_runs SET finished_at = ?, status = 'failed',
+           notes = 'index process ended before completion; superseded by a new attempt'
+           WHERE service_id = ? AND finished_at IS NULL""",
+        (now(), service_id),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def recent_index_runs(conn: sqlite3.Connection, service_id: int | None = None, limit: int = 10) -> list[sqlite3.Row]:
     if service_id is not None:
         return conn.execute(
