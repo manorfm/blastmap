@@ -383,6 +383,24 @@ CREATE TABLE IF NOT EXISTS architecture_findings (
 CREATE INDEX IF NOT EXISTS idx_architecture_findings_run ON architecture_findings(run_id);
 CREATE INDEX IF NOT EXISTS idx_architecture_findings_kind ON architecture_findings(kind);
 
+-- Runtime observations are deliberately separate from static flow_edges. They hold
+-- normalized symbols and counters only: no trace/span IDs, attributes, payloads or
+-- source excerpts are retained.
+CREATE TABLE IF NOT EXISTS runtime_flow_observations (
+    id          INTEGER PRIMARY KEY,
+    service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    source      TEXT NOT NULL CHECK (source IN ('otel', 'broker')),
+    from_symbol TEXT NOT NULL,
+    to_symbol   TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('invokes', 'injects', 'validates', 'reads', 'writes', 'publishes', 'consumes')),
+    observed_count INTEGER NOT NULL CHECK (observed_count > 0),
+    first_seen  TEXT NOT NULL,
+    last_seen   TEXT NOT NULL,
+    UNIQUE(service_id, source, from_symbol, to_symbol, kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_flow_service ON runtime_flow_observations(service_id);
+
 -- Full-text search index, populated explicitly by repository.rebuild_search_index*
 -- (not kept in sync via triggers — every write path in this project already replaces
 -- rows in bulk per service, so an explicit rebuild after each service's writes is

@@ -90,6 +90,13 @@ def list_entrypoint_edges(conn: sqlite3.Connection, entrypoint_id: int) -> list[
     ).fetchall()
 
 
+def list_flow_edges(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    """All static/provider/runtime-indexed flow edges for one service."""
+    return conn.execute(
+        "SELECT from_symbol, to_symbol, kind FROM flow_edges WHERE service_id = ?", (service_id,)
+    ).fetchall()
+
+
 def get_entrypoint_contract(conn: sqlite3.Connection, entrypoint_id: int) -> dict | None:
     row = conn.execute(
         "SELECT contract_json FROM entrypoint_contracts WHERE entrypoint_id = ?", (entrypoint_id,)

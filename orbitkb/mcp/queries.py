@@ -18,6 +18,7 @@ from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import repositories as repositories_repo
+from orbitkb.db.repositories import runtime_evidence as runtime_evidence_repo
 from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import security_findings as security_findings_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
@@ -41,6 +42,7 @@ DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 500
 DEFAULT_FLOW_EDGE_LIMIT = 50
 MAX_FLOW_EDGE_LIMIT = 200
+_FLOW_KINDS = {"invokes", "injects", "validates", "reads", "writes", "publishes", "consumes"}
 _EPIC_TYPE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 logger = logging.getLogger(__name__)
 
@@ -305,6 +307,53 @@ def describe_entrypoint(
         ],
         "contract": flows_repo.get_entrypoint_contract(conn, entrypoint["id"]),
         "smells": find_entrypoint_smells(entrypoint, edges),
+    }
+
+
+def ingest_runtime_evidence(
+    conn: sqlite3.Connection, service: str, source: str, observations: list[dict], repository: str | None = None,
+) -> dict:
+    """Ingest normalized runtime edges, never trace IDs, attributes, payloads or source."""
+    row, error = _resolve_service(conn, service, repository)
+    if error:
+        return error
+    if source not in {"otel", "broker"}:
+        return {"error": "source must be 'otel' or 'broker'"}
+    accepted = rejected = 0
+    for item in observations:
+        if not _valid_runtime_observation(item):
+            rejected += 1
+            continue
+        runtime_evidence_repo.upsert_observation(conn, row["id"], source, item)
+        accepted += 1
+    return {"accepted": accepted, "rejected": rejected}
+
+
+def _valid_runtime_observation(item: object) -> bool:
+    return (
+        isinstance(item, dict) and set(item) == {"from", "to", "kind", "count"}
+        and isinstance(item["from"], str) and isinstance(item["to"], str)
+        and len(item["from"]) <= 256 and len(item["to"]) <= 256
+        and item["kind"] in _FLOW_KINDS and isinstance(item["count"], int) and item["count"] > 0
+    )
+
+
+def describe_runtime_divergence(conn: sqlite3.Connection, service: str, repository: str | None = None) -> dict:
+    """Compare runtime observations with static edges without conflating provenance."""
+    row, error = _resolve_service(conn, service, repository)
+    if error:
+        return error
+    observed = {(item["from_symbol"], item["to_symbol"], item["kind"]): item["observed_count"]
+                for item in runtime_evidence_repo.list_observations(conn, row["id"])}
+    static = {(item["from_symbol"], item["to_symbol"], item["kind"])
+              for item in flows_repo.list_flow_edges(conn, row["id"])}
+    return {
+        "service": row["name"], "repository": row["repository_name"],
+        "observed_only": [{"from": edge[0], "to": edge[1], "kind": edge[2], "count": observed[edge]}
+                          for edge in sorted(observed.keys() - static)],
+        "static_unobserved": [{"from": edge[0], "to": edge[1], "kind": edge[2]}
+                              for edge in sorted(static - observed.keys())],
+        "unknowns": ["A static edge not observed at runtime is not proof of dead code; coverage and sampling may be incomplete."],
     }
 
 

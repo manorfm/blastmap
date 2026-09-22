@@ -744,6 +744,15 @@ IDs only.
 The hard 1–5 cap remains fixed: metrics report `insufficient_history` until three
 feedback records exist and do not enable adaptive response sizing automatically.
 
+### Optional runtime evidence
+
+`ingest_runtime_evidence(service, source, observations)` accepts normalized `otel`
+or `broker` edges only: `{from, to, kind, count}`. Trace/span IDs, attributes,
+payloads and source excerpts are rejected and never stored. Runtime observations are
+kept separate from static flow facts. Use `describe_runtime_divergence` to identify
+observed-only and static-unobserved edges; a static edge not observed is never treated
+as proof of dead code because coverage and sampling may be incomplete.
+
 Accepts an optional `hint_services` to anchor the search when the agent already
 suspects specific services. If the task doesn't match anything indexed, it
 returns empty lists with a `note` (for humans) and an `unknowns` (structured, for

@@ -258,6 +258,25 @@ def _cmd_context_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_runtime_ingest(args: argparse.Namespace) -> int:
+    try:
+        observations = json.loads(args.observations)
+    except json.JSONDecodeError:
+        print("error: observations must be a JSON array", file=sys.stderr)
+        return 1
+    conn = open_db(args.db)
+    result = mcp_queries.ingest_runtime_evidence(conn, args.service, args.source, observations, args.repository)
+    print(json.dumps(result, indent=2))
+    return 1 if "error" in result else 0
+
+
+def _cmd_runtime_divergence(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    result = mcp_queries.describe_runtime_divergence(conn, args.service, args.repository)
+    print(json.dumps(result, indent=2))
+    return 1 if "error" in result else 0
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     result = verify_change_surface(conn, args.run_id, args.repository, args.since, record_feedback=args.record_feedback)
@@ -474,6 +493,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_context_verify.add_argument("--since", required=True, help="Git commit before the implementation changes")
     p_context_verify.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
     p_context_verify.set_defaults(func=_cmd_context_verify)
+
+    p_runtime_ingest = sub.add_parser("runtime-ingest", help="Ingest payload-free normalized runtime flow observations")
+    p_runtime_ingest.add_argument("service", help="Indexed service receiving the observations")
+    p_runtime_ingest.add_argument("source", choices=["otel", "broker"], help="Runtime observation source")
+    p_runtime_ingest.add_argument("observations", help="JSON array of {from,to,kind,count}; trace/payload fields are rejected")
+    p_runtime_ingest.add_argument("--repository", default=None, help="Repository required for duplicate service names")
+    p_runtime_ingest.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
+    p_runtime_ingest.set_defaults(func=_cmd_runtime_ingest)
+
+    p_runtime_divergence = sub.add_parser("runtime-divergence", help="Compare runtime observations with static flow facts")
+    p_runtime_divergence.add_argument("service", help="Indexed service to compare")
+    p_runtime_divergence.add_argument("--repository", default=None, help="Repository required for duplicate service names")
+    p_runtime_divergence.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
+    p_runtime_divergence.set_defaults(func=_cmd_runtime_divergence)
 
     p_verify = sub.add_parser(
         "verify", help="Compare a past find_change_surface run against what a repository's commits actually changed",

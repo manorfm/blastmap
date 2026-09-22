@@ -89,6 +89,15 @@ When Git is available, call `verify_context_budget(run_id, repository, since_com
 to calculate delivered-card precision, recall and omission rate against actual
 changed services. Its persisted verification uses service IDs, not task/source text.
 
+## Runtime evidence
+
+`ingest_runtime_evidence(service, source, observations, repository?)` accepts only
+`otel` or `broker` observations in the exact shape `{from, to, kind, count}`. It
+rejects trace IDs, attributes, payloads and source content, persisting normalized
+symbols and counters separately from static flows. `describe_runtime_divergence`
+returns observed-only and static-unobserved edges, explicitly stating that missing
+runtime observation is not evidence of dead code.
+
 ## Entrypoint response
 
 ```json

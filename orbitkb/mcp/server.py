@@ -121,6 +121,25 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.describe_entrypoint(conn, service, kind, method, name, max_edges, repository)
 
     @mcp.tool()
+    def ingest_runtime_evidence(
+        service: str, source: str, observations: list[dict], repository: str | None = None,
+    ) -> dict:
+        """Ingest normalized OpenTelemetry or broker flow observations. Each item is
+        exactly {from, to, kind, count}; trace IDs, attributes, payloads and source
+        excerpts are rejected and never persisted. Runtime evidence stays separate
+        from static analysis; use describe_runtime_divergence to compare them."""
+        with closing(_conn()) as conn:
+            return queries.ingest_runtime_evidence(conn, service, source, observations, repository)
+
+    @mcp.tool()
+    def describe_runtime_divergence(service: str, repository: str | None = None) -> dict:
+        """Compare normalized runtime observations with static flow facts. An
+        unobserved static edge is explicitly not treated as dead code because traces
+        may be sampled or lack coverage."""
+        with closing(_conn()) as conn:
+            return queries.describe_runtime_divergence(conn, service, repository)
+
+    @mcp.tool()
     def list_security_findings(service: str, repository: str | None = None) -> dict:
         """List deterministic security findings for one service. Values of secrets and
         source excerpts are never returned. Use this before planning a change that
