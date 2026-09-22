@@ -448,5 +448,6 @@ CREATE INDEX IF NOT EXISTS idx_services_repository ON services(repository_id);
 
 CREATE TABLE IF NOT EXISTS service_index_locks (
     lock_key    TEXT PRIMARY KEY,
-    acquired_at TEXT NOT NULL
+    acquired_at TEXT NOT NULL,
+    process_id  INTEGER
 );

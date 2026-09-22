@@ -3,17 +3,33 @@ service, used by `orbitkb status` to show indexing history and token/cost usage.
 from __future__ import annotations
 
 import sqlite3
+import os
 
 from ._util import now
 
 
 def acquire_service_lock(conn: sqlite3.Connection, lock_key: str) -> bool:
     try:
-        conn.execute("INSERT INTO service_index_locks (lock_key, acquired_at) VALUES (?, ?)", (lock_key, now()))
+        conn.execute("INSERT INTO service_index_locks (lock_key, acquired_at, process_id) VALUES (?, ?, ?)", (lock_key, now(), os.getpid()))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
+        row = conn.execute("SELECT process_id FROM service_index_locks WHERE lock_key = ?", (lock_key,)).fetchone()
+        if row and row["process_id"] and not _process_exists(row["process_id"]):
+            conn.execute("DELETE FROM service_index_locks WHERE lock_key = ?", (lock_key,))
+            conn.commit()
+            return acquire_service_lock(conn, lock_key)
         return False
+
+
+def _process_exists(process_id: int) -> bool:
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def release_service_lock(conn: sqlite3.Connection, lock_key: str) -> None:

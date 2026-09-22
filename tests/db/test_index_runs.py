@@ -97,3 +97,12 @@ def test_service_lock_is_exclusive_and_released(tmp_path: Path):
     assert repository.acquire_service_lock(conn, "repo:orders") is False
     repository.release_service_lock(conn, "repo:orders")
     assert repository.acquire_service_lock(conn, "repo:orders") is True
+
+
+def test_service_lock_recovers_a_dead_local_process(tmp_path: Path, monkeypatch):
+    conn = open_db(tmp_path / "dead-lock.db")
+    conn.execute("INSERT INTO service_index_locks (lock_key, acquired_at, process_id) VALUES ('repo:orders', 'now', 999999)")
+    conn.commit()
+    monkeypatch.setattr(repository, "_process_exists", lambda _: False)
+
+    assert repository.acquire_service_lock(conn, "repo:orders") is True
