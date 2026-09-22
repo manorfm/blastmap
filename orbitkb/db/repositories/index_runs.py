@@ -7,6 +7,20 @@ import sqlite3
 from ._util import now
 
 
+def acquire_service_lock(conn: sqlite3.Connection, lock_key: str) -> bool:
+    try:
+        conn.execute("INSERT INTO service_index_locks (lock_key, acquired_at) VALUES (?, ?)", (lock_key, now()))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def release_service_lock(conn: sqlite3.Connection, lock_key: str) -> None:
+    conn.execute("DELETE FROM service_index_locks WHERE lock_key = ?", (lock_key,))
+    conn.commit()
+
+
 def start_index_run(conn: sqlite3.Connection, service_id: int | None, backend: str) -> int:
     cur = conn.execute(
         "INSERT INTO index_runs (service_id, started_at, backend, status) VALUES (?, ?, ?, 'partial')",

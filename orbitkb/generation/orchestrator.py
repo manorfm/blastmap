@@ -506,7 +506,7 @@ UNIT_GENERATORS: tuple[UnitGenerator, ...] = (
 )
 
 
-def index_service(
+def _index_service_unlocked(
     conn: sqlite3.Connection,
     name: str,
     root: Path,
@@ -609,6 +609,25 @@ def index_service(
         files_changed=len(changed) + len(removed), llm_calls=llm_calls, status=status,
         input_tokens=total_usage.input_tokens, output_tokens=total_usage.output_tokens, cost_usd=total_usage.cost_usd,
     )
+
+
+def index_service(
+    conn: sqlite3.Connection, name: str, root: Path, detector: StackDetector, backend: LLMBackend,
+    force: bool = False, failures_root: Path | None = None, progress: ProgressReporter | None = None,
+    repository_id: int | None = None, embedding_backend: EmbeddingBackend | None = None,
+    depth_provider: DepthProvider | None = None,
+) -> IndexResult:
+    """Serialize one service identity while retaining independent-service parallelism."""
+    lock_key = f"{repository_id if repository_id is not None else 'standalone'}:{name}"
+    if not index_runs_repo.acquire_service_lock(conn, lock_key):
+        raise RuntimeError(f"index already in progress for service {name!r}")
+    try:
+        return _index_service_unlocked(
+            conn, name, root, detector, backend, force, failures_root, progress,
+            repository_id, embedding_backend, depth_provider,
+        )
+    finally:
+        index_runs_repo.release_service_lock(conn, lock_key)
 
 
 # ---------------------------------------------------------------------------

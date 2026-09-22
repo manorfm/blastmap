@@ -88,3 +88,12 @@ def test_recover_unfinished_runs_marks_abandoned_attempts_failed(tmp_path: Path)
     assert row["status"] == "failed"
     assert row["finished_at"] is not None
     assert "superseded" in row["notes"]
+
+
+def test_service_lock_is_exclusive_and_released(tmp_path: Path):
+    conn = open_db(tmp_path / "locks.db")
+
+    assert repository.acquire_service_lock(conn, "repo:orders") is True
+    assert repository.acquire_service_lock(conn, "repo:orders") is False
+    repository.release_service_lock(conn, "repo:orders")
+    assert repository.acquire_service_lock(conn, "repo:orders") is True
