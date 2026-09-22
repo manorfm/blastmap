@@ -220,7 +220,11 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         when a static write or publication is directly reachable from an HTTP safe
         method or GraphQL query. possible_aggregate_ownership_overlap reports distinct
         services declaring ownership of the same static table/document; its detail
-        preserves each declared owner without assuming a shared database. Each finding carries a plain-language reason,
+        preserves each declared owner without assuming a shared database.
+        possible_message_consumer_without_recovery_policy is a low-confidence signal
+        for a RabbitMQ consumer whose indexed contract proves no retry boundary,
+        retry delay or dead-letter route; it does not claim that external broker
+        configuration is missing. Each finding carries a plain-language reason,
         services, confidence, source evidence, explicit unknowns and conservative
         remediation, in risk
         language ('likely', 'worth checking') — never a confirmed

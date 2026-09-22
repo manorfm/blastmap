@@ -399,10 +399,75 @@ def find_read_entrypoint_side_effects(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> list[dict]:
+    """Flag RabbitMQ consumers without a source-proven recovery mechanism.
+
+    A missing local declaration is not proof that the broker lacks a policy. The
+    detector therefore only considers consumers whose static contract established
+    RabbitMQ, and reports the missing *source proof* with a deliberately low
+    confidence rather than asserting a production configuration defect.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """
+        SELECT e.service_id, e.name AS queue, e.symbol, e.file_path, e.start_line, e.end_line,
+               c.contract_json,
+               EXISTS(
+                   SELECT 1 FROM flow_boundaries b
+                   WHERE b.service_id = e.service_id AND b.source = e.symbol AND b.kind = 'retry'
+               ) AS has_retry_boundary
+        FROM entrypoints e
+        JOIN entrypoint_contracts c ON c.entrypoint_id = e.id
+        WHERE e.kind = 'message' AND e.method = 'CONSUME'
+        ORDER BY e.service_id, e.name, e.symbol
+        """
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        contract = json.loads(row["contract_json"])
+        if contract.get("transport") != "rabbitmq" or contract.get("direction") != "consumes":
+            continue
+        dead_letter = contract.get("dead_letter_routing_key")
+        retry_delay = contract.get("retry_delay_ms")
+        retry_boundary = bool(row["has_retry_boundary"])
+        if dead_letter is not None or retry_delay is not None or retry_boundary:
+            continue
+        findings.append(
+            {
+                "kind": "possible_message_consumer_without_recovery_policy", "severity": "warning",
+                "services": [names[row["service_id"]]],
+                "reason": (
+                    "A RabbitMQ consumer has no source-proven retry boundary, retry delay or dead-letter route; "
+                    "validate its recovery policy."
+                ),
+                "detail": {
+                    "consumer": {"queue": row["queue"], "symbol": row["symbol"]},
+                    "source_proven": {
+                        "dead_letter_routing_key": dead_letter,
+                        "retry_delay_ms": retry_delay,
+                        "retry_boundary": retry_boundary,
+                    },
+                    "confidence": 0.45,
+                    "evidence": [{
+                        "file": row["file_path"], "start_line": row["start_line"], "end_line": row["end_line"],
+                    }],
+                    "unknowns": [
+                        "Broker topology or retry policy may be declared outside the indexed source/configuration.",
+                    ],
+                    "remediation": [
+                        "Confirm a retry and dead-letter policy in broker configuration, then declare it near the consumer when practical.",
+                    ],
+                },
+            }
+        )
+    return findings
+
+
 _DETECTORS = (
     find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects,
+    find_message_consumers_without_recovery_policy,
 )
 
 

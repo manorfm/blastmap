@@ -98,6 +98,13 @@ to `1.0` and have empty remediation; hypotheses carry their specific uncertainty
 conservative review action. When names collide across repositories, `services` uses
 `repository/service` rather than an ambiguous bare name.
 
+A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
+retry delay or dead-letter route is returned as
+`possible_message_consumer_without_recovery_policy`. Its confidence is intentionally
+low: OrbitKB does not turn an absent local declaration into a claim about broker
+topology, DLQs or idempotency. The response identifies the consumer queue/symbol and
+asks the agent to validate any policy maintained outside the indexed source.
+
 When local resolution has multiple plausible implementations, OrbitKB preserves the
 observed call rather than choosing one. A resolved static edge therefore carries only
 an implementation justified by local type/injection evidence or a Node/TypeScript

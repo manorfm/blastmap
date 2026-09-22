@@ -25,6 +25,7 @@ from orbitkb.generation.architecture import (
     find_fan_imbalance,
     find_flow_hypotheses,
     find_aggregate_ownership_overlap,
+    find_message_consumers_without_recovery_policy,
     find_read_entrypoint_side_effects,
     find_shared_database,
     recompute_architecture_view,
@@ -336,6 +337,56 @@ def test_aggregate_ownership_overlap_preserves_each_declared_owner_and_evidence(
         {"file": "Order.java", "start_line": 8, "end_line": 15},
     ]
     assert finding["detail"]["confidence"] == 0.65
+    assert finding["detail"]["unknowns"]
+
+    recompute_architecture_view(conn)
+    response = queries.find_architecture_smells(conn)
+    exposed = next(item for item in response["findings"] if item["kind"] == finding["kind"])
+    assert exposed["remediation"] == finding["detail"]["remediation"]
+
+
+def test_message_consumer_without_source_proven_recovery_policy_is_a_hypothesis(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "billing", "/tmp/billing", "node-ts")
+    weak_evidence = Evidence("billing-consumer.ts", 12, 15)
+    protected_evidence = Evidence("ledger-consumer.ts", 20, 23)
+    weak_consumer = EntryPoint("message", "CONSUME", "billing.created", "message.consume:billing.created", weak_evidence)
+    protected_consumer = EntryPoint(
+        "message", "CONSUME", "ledger.created", "message.consume:ledger.created", protected_evidence,
+    )
+    flows_repo.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[weak_consumer, protected_consumer],
+            contracts={
+                weak_consumer.symbol: {
+                    "transport": "rabbitmq", "direction": "consumes", "queue": "billing.created",
+                },
+                protected_consumer.symbol: {
+                    "transport": "rabbitmq", "direction": "consumes", "queue": "ledger.created",
+                    "dead_letter_routing_key": "ledger.dlq",
+                },
+            },
+        ),
+    )
+
+    findings = find_message_consumers_without_recovery_policy(conn)
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["kind"] == "possible_message_consumer_without_recovery_policy"
+    assert finding["services"] == ["billing"]
+    assert finding["detail"]["consumer"] == {
+        "queue": "billing.created", "symbol": "message.consume:billing.created",
+    }
+    assert finding["detail"]["confidence"] == 0.45
+    assert finding["detail"]["evidence"] == [
+        {"file": "billing-consumer.ts", "start_line": 12, "end_line": 15},
+    ]
+    assert finding["detail"]["source_proven"] == {
+        "dead_letter_routing_key": None, "retry_boundary": False, "retry_delay_ms": None,
+    }
     assert finding["detail"]["unknowns"]
 
     recompute_architecture_view(conn)

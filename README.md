@@ -545,6 +545,11 @@ behind an HTTP safe method or GraphQL query. Each flow hypothesis includes
 `confidence`, source `evidence`, explicit `unknowns` and conservative `remediation`;
 it prompts validation, not a verdict. When a service name exists in more than one repository, findings use
 `repository/service` so cumulative knowledge cannot silently target the wrong code.
+For a RabbitMQ consumer whose indexed contract shows no local retry boundary, retry
+delay or dead-letter route, `possible_message_consumer_without_recovery_policy` is
+reported with deliberately low confidence. It never means a broker policy is absent:
+the finding explicitly asks the agent to inspect topology/configuration that may live
+outside the checkout, rather than inventing retry, DLQ or idempotency facts.
 Deliberately out of scope still: legacy/strangler-fig
 tagging and directional cycle severity (a cycle involving a legacy service is
 more serious than one between two peers) — see "Known limitations".
@@ -904,7 +909,8 @@ generated 100% from SQLite, with no LLM cost.
   `find_architecture_smells`): cycle (Tarjan/SCC), disproportionate
   fan-in/fan-out, shared database, duplicate external integration, aggregate ownership
   overlap and evidence-led flow hypotheses (BFF policy leakage, non-atomic publication,
-  side effects in read entrypoints) — recomputed on every `index`/`update`, no LLM, versioned in
+  side effects in read entrypoints, unproven RabbitMQ recovery policy) — recomputed on
+  every `index`/`update`, no LLM, versioned in
   `architecture_runs`/`architecture_findings` the same way `change_surface_runs`
   already is.
 - **Export to Markdown** (human-readable) and **Mermaid** (topology + ER), both
