@@ -1,4 +1,4 @@
-.PHONY: help install dev hooks test coverage lint sast sca security dast verify \
+.PHONY: help install dev hooks test coverage lint sast sca security dast verify benchmark-scale \
         build clean release release-patch release-minor release-major _release
 
 # Defaults to the project's own .venv when one exists, so `make verify`/
@@ -35,6 +35,7 @@ help:
 	@echo "  security        sast + sca together"
 	@echo "  dast            live MCP server adversarial-input test"
 	@echo "  verify          test, then lint + sast + sca + dast in parallel"
+	@echo "  benchmark-scale Measure static-analysis time and peak memory"
 	@echo "  build           Build sdist + wheel into dist/"
 	@echo "  clean           Remove build artifacts"
 	@echo "  release         Auto-computed bump (from commit history), verify, commit, tag, push"
@@ -86,6 +87,9 @@ dast:
 # effects. See the script for why this isn't the *authoritative* gate.
 verify:
 	@scripts/preflight.sh
+
+benchmark-scale:
+	$(PYTHON) scripts/run_scale_benchmark.py
 
 build: clean
 	$(PYTHON) -m build
