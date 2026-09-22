@@ -779,6 +779,14 @@ the agent) explaining why — without calling the LLM.
 | Runtime observations | Experimental | Normalized OTel/broker edges only; no traces, payloads or attributes. |
 | Shared multi-host SQLite | Unsupported | Use one host/process domain per database. |
 
+Run `make readiness-audit` before a production adoption decision. It verifies the
+deterministic static and change-surface candidate corpora, then returns
+`"status": "conditional"` rather than an unconditional approval. Its remaining
+conditions explicitly require target-environment container E2E, Git-grounded results
+from real repositories, a supported SQLite deployment model, and representative
+capacity profiling. The report contains checks and conditions only—never source,
+prompt or secret content.
+
 ### Recovery runbook
 
 1. Stop new indexing commands and run `orbitkb status` to identify the affected
