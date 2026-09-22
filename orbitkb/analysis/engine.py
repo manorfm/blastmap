@@ -19,6 +19,7 @@ import tree_sitter_kotlin
 import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
 
+from orbitkb.analysis.cloud_detection import detect_cloud_facts
 from orbitkb.analysis.depth import DepthProvider, NoopDepthProvider
 from orbitkb.analysis.models import (
     AnalysisResult,
@@ -1285,6 +1286,7 @@ class StaticAnalysisEngine:
         _enrich_rabbitmq_contracts(result.contracts, files)
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
+        result.cloud_facts.extend(detect_cloud_facts(files, root))
         result = BoundedFlowResolver().resolve(result)
         result.edges.extend(self._depth_provider.enrich(root, result))
         return result
