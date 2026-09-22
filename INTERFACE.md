@@ -35,7 +35,7 @@ treated as deletion.
 
 ## Agent workflow
 
-1. Call `get_change_context(task, repository?, max_services?)` for a compact first
+1. Call `get_change_context(task, repository?, max_services?, epic_type?)` for a compact first
    implementation briefing, or `find_change_surface(task, repository?)` when only
    impact inference is needed. Both require the repository whenever the KB reports
    duplicate service identities.
@@ -65,6 +65,29 @@ external integrations), compact `services` cards, matching `architecture_risks`,
 `unknowns`, `recommended_next_queries` and a `budget` object. Each card contains only
 interfaces, outbound dependencies, persistence and messages. Use its recommended
 detail tools rather than treating it as a full service dump.
+
+## Context-budget calibration
+
+Every `get_change_context` response has `telemetry: {recorded, run_id?}`. Its
+telemetry store contains only requested/returned budget, candidate rank and
+truncation, response bytes/token estimate, included/omitted service IDs, and
+recommended/executed tool and service IDs. It never retains task text, prompts,
+source, cards or tool arguments. A telemetry failure is non-blocking and is returned
+as `{"recorded": false}`.
+
+Call `record_change_context_feedback(run_id, outcome, note?, missing_services?)`
+after using a context; `outcome` is `sufficient`, `insufficient` or `excessive`.
+The optional note is stored only as a one-way digest and missing services as IDs.
+Call `record_context_query_execution(run_id, tool, service?)` after following a
+returned recommendation. `get_context_budget_metrics(epic_type?)` returns the budget
+distribution, truncation rate, sufficiency, mean response size, query follow-through,
+adequacy per epic type and a history-backed recommendation. `epic_type` is a
+non-sensitive lowercase category. The hard 1–5 cap remains until a future explicit,
+evidence-backed policy changes it.
+
+When Git is available, call `verify_context_budget(run_id, repository, since_commit)`
+to calculate delivered-card precision, recall and omission rate against actual
+changed services. Its persisted verification uses service IDs, not task/source text.
 
 ## Entrypoint response
 

@@ -300,6 +300,8 @@ orbitkb export mermaid --out docs/   # topology diagram + one ER diagram per ser
 orbitkb serve --backend claude   # MCP server (stdio); backend used by change-surface/context tools
 orbitkb analyze "Add Pix support to checkout" --backend claude   # runs find_change_surface directly, no MCP session needed
 orbitkb context "Add Pix support to checkout" --max-services 3  # compact planning briefing, no source reread
+orbitkb context-feedback 12 insufficient --missing-services fraud-service  # calibrates a prior context run
+orbitkb context-metrics  # prints privacy-safe budget and sufficiency aggregates
 orbitkb verify <run_id> --repository <name> --since <commit>   # checks a prediction against the real git diff
 ```
 
@@ -713,6 +715,31 @@ risks relevant to those cards, affected contracts, explicit unknowns and the det
 next queries. It never rereads source and does not replace `describe_entrypoint`,
 `describe_api` or `describe_service`; use those only for the selected detail. This
 keeps the initial planning context bounded while preserving a precise drill-down path.
+
+Every context response has `telemetry.run_id` when its non-blocking calibration write
+succeeds. After planning, call `record_change_context_feedback` with `sufficient`,
+`insufficient` or `excessive`, and record returned recommendations that were actually
+followed with `record_context_query_execution`. `get_context_budget_metrics` (or
+`orbitkb context-metrics`) reports the resulting aggregate evidence.
+
+### Context-budget telemetry and calibration
+
+Telemetry persists only requested/returned card budgets, candidate rank and
+truncation, response bytes and token estimate, service IDs included/omitted, and
+recommended or executed tool/service IDs. It never stores task text, prompts, source,
+compact-card content or tool arguments; a failed telemetry write leaves the context
+response intact with `telemetry.recorded: false`.
+
+The feedback note is accepted but retained only as a one-way digest, and missing
+services are persisted as IDs. Pass the non-sensitive `epic_type` category to
+`get_change_context` (or `--epic-type` in the CLI) to compare adequacy by work type.
+When Git history is available, `verify_context_budget(run_id, repository,
+since_commit)` measures the delivered-card precision, recall and omission rate
+against services actually changed; `orbitkb context-verify <run_id> --repository
+<name> --since <commit>` provides the same check. Its stored ground truth is service
+IDs only.
+The hard 1–5 cap remains fixed: metrics report `insufficient_history` until three
+feedback records exist and do not enable adaptive response sizing automatically.
 
 Accepts an optional `hint_services` to anchor the search when the agent already
 suspects specific services. If the task doesn't match anything indexed, it

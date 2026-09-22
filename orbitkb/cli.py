@@ -201,7 +201,50 @@ def _cmd_context(args: argparse.Namespace) -> int:
     result = mcp_queries.get_change_context(
         conn, backend, args.task, hint_services=args.hint_services,
         repository=args.repository, max_services=args.max_services,
+        epic_type=args.epic_type,
     )
+    if "error" in result:
+        print(f"error: {result['error']}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_context_feedback(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    result = mcp_queries.record_change_context_feedback(
+        conn, args.run_id, args.outcome, args.note, args.missing_services,
+    )
+    if "error" in result:
+        print(f"error: {result['error']}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_context_query(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    result = mcp_queries.record_context_query_execution(conn, args.run_id, args.tool, args.service)
+    if "error" in result:
+        print(f"error: {result['error']}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_context_metrics(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    result = mcp_queries.get_context_budget_metrics(conn, args.epic_type)
+    if "error" in result:
+        print(f"error: {result['error']}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_context_verify(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    result = mcp_queries.verify_context_budget(conn, args.run_id, args.repository, args.since)
     if "error" in result:
         print(f"error: {result['error']}", file=sys.stderr)
         return 1
@@ -384,8 +427,44 @@ def build_parser() -> argparse.ArgumentParser:
     p_context.add_argument("--hint-services", nargs="+", default=None, help="Anchor the impact search on these services")
     p_context.add_argument("--repository", default=None, help="Limit context to one repository; required when duplicate service names exist")
     p_context.add_argument("--max-services", type=int, default=3, help="Compact cards to return (1-5, default: 3)")
+    p_context.add_argument("--epic-type", default="unspecified", help="Non-sensitive category for budget calibration (default: unspecified)")
     add_backend_args(p_context)
     p_context.set_defaults(func=_cmd_context)
+
+    p_context_feedback = sub.add_parser(
+        "context-feedback", help="Record whether a compact context briefing was sufficient",
+    )
+    p_context_feedback.add_argument("run_id", type=int, help="telemetry.run_id from `orbitkb context`")
+    p_context_feedback.add_argument("outcome", choices=["sufficient", "insufficient", "excessive"], help="Whether the delivered context was sufficient, insufficient or excessive")
+    p_context_feedback.add_argument("--note", default=None, help="Optional note; retained only as a one-way digest")
+    p_context_feedback.add_argument("--missing-services", nargs="*", default=None, help="Services absent from an insufficient context")
+    p_context_feedback.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
+    p_context_feedback.set_defaults(func=_cmd_context_feedback)
+
+    p_context_query = sub.add_parser(
+        "context-query", help="Record an executed recommended follow-up query",
+    )
+    p_context_query.add_argument("run_id", type=int, help="telemetry.run_id from `orbitkb context`")
+    p_context_query.add_argument("tool", help="Recommended MCP tool that was executed")
+    p_context_query.add_argument("--service", default=None, help="Service supplied to the recommended tool, if any")
+    p_context_query.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
+    p_context_query.set_defaults(func=_cmd_context_query)
+
+    p_context_metrics = sub.add_parser(
+        "context-metrics", help="Show privacy-safe context-budget calibration metrics",
+    )
+    p_context_metrics.add_argument("--epic-type", default=None, help="Filter metrics to one non-sensitive epic category")
+    p_context_metrics.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
+    p_context_metrics.set_defaults(func=_cmd_context_metrics)
+
+    p_context_verify = sub.add_parser(
+        "context-verify", help="Compare delivered context cards with services changed in Git",
+    )
+    p_context_verify.add_argument("run_id", type=int, help="telemetry.run_id from `orbitkb context`")
+    p_context_verify.add_argument("--repository", required=True, help="Indexed repository name to verify")
+    p_context_verify.add_argument("--since", required=True, help="Git commit before the implementation changes")
+    p_context_verify.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
+    p_context_verify.set_defaults(func=_cmd_context_verify)
 
     p_verify = sub.add_parser(
         "verify", help="Compare a past find_change_surface run against what a repository's commits actually changed",

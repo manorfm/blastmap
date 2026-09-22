@@ -10,10 +10,12 @@ per repository, exactly like indexing itself is done one repository at a time.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
 from orbitkb.db.repositories import change_surface as change_surface_repo
+from orbitkb.db.repositories import context_telemetry as context_telemetry_repo
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.db.repositories import verification as verification_repo
@@ -93,4 +95,31 @@ def verify_change_surface(
         "precision": precision,
         "recall": recall,
         "verification_id": verification_id,
+    }
+
+
+def verify_context_budget(conn: sqlite3.Connection, context_run_id: int, repository_name: str, since_commit: str) -> dict:
+    """Compare only delivered context cards against a real Git change set."""
+    context_run = context_telemetry_repo.get_run(conn, context_run_id)
+    if context_run is None:
+        return {"error": f"unknown context run_id: {context_run_id}"}
+    repo_row = repositories_repo.get_repository_by_name(conn, repository_name)
+    if repo_row is None:
+        return {"error": f"unknown repository: {repository_name!r}"}
+    services = services_repo.list_services_for_repository(conn, repo_row["id"])
+    by_id = {row["id"]: row["name"] for row in services}
+    predicted_ids = set(json.loads(context_run["included_service_ids_json"])) & set(by_id)
+    actual_names = _actually_changed_services(Path(repo_row["root_path"]), since_commit, services)
+    actual_ids = {row["id"] for row in services if row["name"] in actual_names}
+    true_positives = predicted_ids & actual_ids
+    precision = len(true_positives) / len(predicted_ids) if predicted_ids else None
+    recall = len(true_positives) / len(actual_ids) if actual_ids else None
+    omission_rate = len(actual_ids - predicted_ids) / len(actual_ids) if actual_ids else None
+    verification_id = context_telemetry_repo.record_verification(
+        conn, context_run_id, repository_name, since_commit, precision, recall, omission_rate, sorted(actual_ids),
+    )
+    return {
+        "context_run_id": context_run_id, "repository": repository_name, "since_commit": since_commit,
+        "predicted": sorted(by_id[item] for item in predicted_ids), "actual": sorted(by_id[item] for item in actual_ids),
+        "precision": precision, "recall": recall, "omission_rate": omission_rate, "verification_id": verification_id,
     }

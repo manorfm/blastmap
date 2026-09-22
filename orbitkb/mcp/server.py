@@ -290,6 +290,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         hint_services: list[str] | None = None,
         repository: str | None = None,
         max_services: int = 3,
+        epic_type: str = "unspecified",
     ) -> dict:
         """Compact first briefing for an engineering epic. It runs the same bounded
         change-surface inference as find_change_surface, then adds at most
@@ -303,8 +304,50 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         a plan in one response without filling its context window with full services."""
         with closing(_conn()) as conn:
             return queries.get_change_context(
-                conn, resolved_backend, task, hint_services, repository, max_services,
+                conn, resolved_backend, task, hint_services, repository, max_services, epic_type,
             )
+
+    @mcp.tool()
+    def record_change_context_feedback(
+        run_id: int,
+        outcome: str,
+        note: str | None = None,
+        missing_services: list[str] | None = None,
+    ) -> dict:
+        """Record whether a get_change_context briefing was sufficient, insufficient
+        or excessive. run_id comes from its telemetry field. A supplied note is not
+        stored as text: OrbitKB retains only a one-way digest and service IDs, so do
+        not put source code or prompt content in it. missing_services is useful when
+        outcome is insufficient. This feedback calibrates budget policy; it never
+        changes the current 1-5 safety cap by itself."""
+        with closing(_conn()) as conn:
+            return queries.record_change_context_feedback(conn, run_id, outcome, note, missing_services)
+
+    @mcp.tool()
+    def record_context_query_execution(run_id: int, tool: str, service: str | None = None) -> dict:
+        """Record one recommended follow-up query after it was executed. This links
+        a get_change_context telemetry run to its progressive-disclosure path. Only
+        a recommended tool and optional service ID are accepted; no arguments,
+        prompt text or response content is retained."""
+        with closing(_conn()) as conn:
+            return queries.record_context_query_execution(conn, run_id, tool, service)
+
+    @mcp.tool()
+    def get_context_budget_metrics(epic_type: str | None = None) -> dict:
+        """Return privacy-safe context calibration aggregates: budget distribution,
+        truncation, sufficient/insufficient/excessive feedback, mean response size,
+        query follow-through and the current history-based recommendation. No task,
+        source, prompt or compact-card content is returned."""
+        with closing(_conn()) as conn:
+            return queries.get_context_budget_metrics(conn, epic_type)
+
+    @mcp.tool()
+    def verify_context_budget(run_id: int, repository: str, since_commit: str) -> dict:
+        """When Git history is available, compare delivered context cards with the
+        services actually changed since a commit. Returns precision, recall and
+        omission_rate, and retains service IDs rather than source or task content."""
+        with closing(_conn()) as conn:
+            return queries.verify_context_budget(conn, run_id, repository, since_commit)
 
     @mcp.tool()
     def record_change_surface_feedback(run_id: int, service: str, outcome: str) -> dict:

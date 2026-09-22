@@ -282,6 +282,62 @@ CREATE TABLE IF NOT EXISTS change_surface_verifications (
 
 CREATE INDEX IF NOT EXISTS idx_change_surface_verifications_run ON change_surface_verifications(run_id);
 
+-- Privacy-safe calibration data for get_change_context. These rows deliberately
+-- contain no task/prompt text, source/code excerpts or generated card text: only
+-- response measurements, service IDs and bounded tool metadata.
+CREATE TABLE IF NOT EXISTS context_budget_runs (
+    id                         INTEGER PRIMARY KEY,
+    change_surface_run_id      INTEGER REFERENCES change_surface_runs(id) ON DELETE CASCADE,
+    repository_id              INTEGER REFERENCES repositories(id) ON DELETE SET NULL,
+    epic_type                  TEXT NOT NULL,
+    requested_budget           INTEGER NOT NULL CHECK (requested_budget BETWEEN 1 AND 5),
+    returned_cards             INTEGER NOT NULL,
+    candidate_count            INTEGER NOT NULL,
+    truncated                  INTEGER NOT NULL CHECK (truncated IN (0, 1)),
+    response_bytes             INTEGER NOT NULL,
+    estimated_tokens           INTEGER NOT NULL,
+    included_service_ids_json  TEXT NOT NULL,
+    omitted_service_ids_json   TEXT NOT NULL,
+    candidate_ranking_json     TEXT NOT NULL,
+    recommended_queries_json   TEXT NOT NULL,
+    created_at                 TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS context_budget_feedback (
+    id                       INTEGER PRIMARY KEY,
+    context_run_id           INTEGER NOT NULL REFERENCES context_budget_runs(id) ON DELETE CASCADE,
+    outcome                  TEXT NOT NULL CHECK (outcome IN ('sufficient', 'insufficient', 'excessive')),
+    note_digest              TEXT,
+    missing_service_ids_json TEXT NOT NULL,
+    recorded_at              TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS context_budget_query_executions (
+    id             INTEGER PRIMARY KEY,
+    context_run_id INTEGER NOT NULL REFERENCES context_budget_runs(id) ON DELETE CASCADE,
+    tool           TEXT NOT NULL,
+    service_id     INTEGER REFERENCES services(id) ON DELETE SET NULL,
+    executed_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_context_budget_runs_surface ON context_budget_runs(change_surface_run_id);
+CREATE INDEX IF NOT EXISTS idx_context_budget_feedback_run ON context_budget_feedback(context_run_id);
+CREATE INDEX IF NOT EXISTS idx_context_budget_executions_run ON context_budget_query_executions(context_run_id);
+
+CREATE TABLE IF NOT EXISTS context_budget_verifications (
+    id                       INTEGER PRIMARY KEY,
+    context_run_id           INTEGER NOT NULL REFERENCES context_budget_runs(id) ON DELETE CASCADE,
+    repository               TEXT NOT NULL,
+    since_commit             TEXT NOT NULL,
+    precision                REAL,
+    recall                   REAL,
+    omission_rate            REAL,
+    actual_service_ids_json  TEXT NOT NULL,
+    verified_at              TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_context_budget_verifications_run ON context_budget_verifications(context_run_id);
+
 CREATE TABLE IF NOT EXISTS index_runs (
     id            INTEGER PRIMARY KEY,
     service_id    INTEGER REFERENCES services(id) ON DELETE SET NULL,

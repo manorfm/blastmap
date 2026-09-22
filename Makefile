@@ -19,7 +19,8 @@ endif
 
 DB_DEFAULT := $(HOME)/.orbitkb/orbitkb.db
 ANALYSIS_TESTS := tests/test_static_analysis.py tests/test_self_index_e2e.py tests/test_depth_provider.py
-NON_ANALYSIS_TEST_ARGS := tests/ --ignore=tests/test_static_analysis.py --ignore=tests/test_self_index_e2e.py --ignore=tests/test_depth_provider.py
+NON_MCP_TEST_ARGS := tests/ --ignore=tests/test_static_analysis.py --ignore=tests/test_self_index_e2e.py --ignore=tests/test_depth_provider.py --ignore-glob=tests/test_mcp_*.py --ignore=tests/test_dast_adversarial_inputs.py
+MCP_TESTS := $(shell find tests -name 'test_mcp_*.py' -type f | sort)
 
 help:
 	@echo "orbitkb — available targets:"
@@ -53,7 +54,9 @@ hooks:
 	@echo "Git hooks installed (core.hooksPath=scripts/githooks)."
 
 test:
-	$(PYTHON) -m pytest $(NON_ANALYSIS_TEST_ARGS)
+	$(PYTHON) -m pytest $(NON_MCP_TEST_ARGS)
+	$(PYTHON) -m pytest $(MCP_TESTS)
+	$(PYTHON) -m pytest tests/test_dast_adversarial_inputs.py
 	$(PYTHON) -m pytest $(ANALYSIS_TESTS)
 
 coverage:

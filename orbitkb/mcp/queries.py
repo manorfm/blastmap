@@ -3,6 +3,8 @@ db.repositories.* modules (and, for find_change_surface, over generation.change_
 from __future__ import annotations
 
 import json
+import logging
+import re
 import sqlite3
 from collections import deque
 
@@ -11,6 +13,7 @@ from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import architecture as architecture_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
 from orbitkb.db.repositories import components as components_repo
+from orbitkb.db.repositories import context_telemetry as context_telemetry_repo
 from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
@@ -27,6 +30,7 @@ from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.provenance import infer_provenance
 from orbitkb.generation.verification import (
     verify_change_surface as _verify_change_surface,
+    verify_context_budget as _verify_context_budget,
 )
 
 # Progressive-disclosure budget for list-shaped MCP responses (describe_service's own
@@ -37,6 +41,8 @@ DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 500
 DEFAULT_FLOW_EDGE_LIMIT = 50
 MAX_FLOW_EDGE_LIMIT = 200
+_EPIC_TYPE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+logger = logging.getLogger(__name__)
 
 
 def _validate_pagination(limit: int, offset: int) -> str | None:
@@ -572,6 +578,7 @@ def get_change_context(
     hint_services: list[str] | None = None,
     repository: str | None = None,
     max_services: int = 3,
+    epic_type: str = "unspecified",
 ) -> dict:
     """Return a bounded epic briefing from one change-surface inference plus facts.
 
@@ -580,6 +587,8 @@ def get_change_context(
     """
     if not 1 <= max_services <= MAX_CONTEXT_SERVICES:
         return {"error": f"max_services must be between 1 and {MAX_CONTEXT_SERVICES} (got {max_services})"}
+    if not _EPIC_TYPE.fullmatch(epic_type):
+        return {"error": "epic_type must be a lowercase identifier (letters, numbers, _ or -, max 64 chars)"}
     repository_id = None
     if repository is not None:
         repo = repositories_repo.get_repository_by_name(conn, repository)
@@ -595,7 +604,125 @@ def get_change_context(
     )
     if repository is not None:
         context["scope"] = {"repository": repository}
+    _record_context_telemetry(conn, context, surface, repository_id, epic_type)
     return context
+
+
+def _record_context_telemetry(
+    conn: sqlite3.Connection, context: dict, surface: dict, repository_id: int | None, epic_type: str,
+) -> None:
+    """Record calibration metadata after delivery data is ready, never blocking it.
+
+    Task text, cards, code and recommendation reasons deliberately stay out of the
+    telemetry tables. Only service IDs and bounded tool identifiers are retained.
+    """
+    candidates: list[dict] = []
+    seen_names: set[str] = set()
+    for role in ("primary", "secondary"):
+        for finding in surface.get(role, []):
+            name = finding["service"]
+            if name in seen_names:
+                continue
+            seen_names.add(name)
+            row = services_repo.get_service_by_name(conn, name, repository_id)
+            if row is not None:
+                candidates.append({"service_id": row["id"], "role": role, "rank": len(candidates) + 1})
+    included = [
+        row["id"]
+        for card in context["services"]
+        if (row := services_repo.get_service_by_name(conn, card["service"], repository_id)) is not None
+    ]
+    omitted = [candidate["service_id"] for candidate in candidates if candidate["service_id"] not in included]
+    recommendations = []
+    for rank, item in enumerate(context["recommended_next_queries"], start=1):
+        arguments = item.get("arguments", {})
+        service_id = None
+        if service := arguments.get("service"):
+            row = services_repo.get_service_by_name(conn, service, repository_id)
+            service_id = row["id"] if row is not None else None
+        recommendations.append({"tool": item["tool"], "service_id": service_id, "rank": rank})
+    base_bytes = len(json.dumps(context, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    metadata = {
+        "change_surface_run_id": surface.get("run_id"), "repository_id": repository_id, "epic_type": epic_type,
+        "requested_budget": context["budget"]["max_services"], "returned_cards": context["budget"]["returned_services"],
+        "candidate_count": len(candidates), "truncated": context["budget"]["truncated"],
+        "response_bytes": base_bytes, "estimated_tokens": (base_bytes + 3) // 4,
+        "included_service_ids": included, "omitted_service_ids": omitted,
+        "candidate_ranking": candidates, "recommended_queries": recommendations,
+    }
+    try:
+        run_id = context_telemetry_repo.record_run(conn, metadata)
+        context["telemetry"] = {"recorded": True, "run_id": run_id}
+        response_bytes = len(json.dumps(context, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        context_telemetry_repo.update_response_measurements(conn, run_id, response_bytes, (response_bytes + 3) // 4)
+    except Exception:  # telemetry must never turn an otherwise valid context into an error
+        logger.warning("context telemetry recording failed")
+        context["telemetry"] = {"recorded": False}
+
+
+def record_change_context_feedback(
+    conn: sqlite3.Connection,
+    run_id: int,
+    outcome: str,
+    note: str | None = None,
+    missing_services: list[str] | None = None,
+) -> dict:
+    """Record whether a compact briefing was sufficient without retaining its note."""
+    if outcome not in ("sufficient", "insufficient", "excessive"):
+        return {"error": "outcome must be 'sufficient', 'insufficient' or 'excessive'"}
+    run = context_telemetry_repo.get_run(conn, run_id)
+    if run is None:
+        return {"error": f"unknown context run_id: {run_id}"}
+    missing_ids: list[int] = []
+    for service in missing_services or []:
+        row = services_repo.get_service_by_name(conn, service, run["repository_id"])
+        if row is None:
+            return {"error": f"unknown missing service: {service}"}
+        missing_ids.append(row["id"])
+    context_telemetry_repo.record_feedback(conn, run_id, outcome, note, missing_ids)
+    return {"ok": True, "note_recorded": note is not None}
+
+
+def record_context_query_execution(
+    conn: sqlite3.Connection, run_id: int, tool: str, service: str | None = None,
+) -> dict:
+    """Associate an executed follow-up tool call with a context briefing."""
+    run = context_telemetry_repo.get_run(conn, run_id)
+    if run is None:
+        return {"error": f"unknown context run_id: {run_id}"}
+    service_id = None
+    if service is not None:
+        row = services_repo.get_service_by_name(conn, service, run["repository_id"])
+        if row is None:
+            return {"error": f"unknown service: {service}"}
+        service_id = row["id"]
+    recommendations = json.loads(run["recommended_queries_json"])
+    if not any(item["tool"] == tool and item.get("service_id") == service_id for item in recommendations):
+        return {"error": "tool/service was not recommended for this context run"}
+    context_telemetry_repo.record_query_execution(conn, run_id, tool, service_id)
+    return {"ok": True}
+
+
+def get_context_budget_metrics(conn: sqlite3.Connection, epic_type: str | None = None) -> dict:
+    """Return aggregate calibration data; no tasks, code, prompt or card text is exposed."""
+    if epic_type is not None and not _EPIC_TYPE.fullmatch(epic_type):
+        return {"error": "epic_type must be a lowercase identifier (letters, numbers, _ or -, max 64 chars)"}
+    metrics = context_telemetry_repo.aggregate(conn, epic_type)
+    feedback_total = sum(metrics["sufficiency"].values())
+    metrics["recommendation"] = (
+        {"status": "insufficient_history", "minimum_feedback": 3, "feedback_count": feedback_total}
+        if feedback_total < 3 else
+        {"status": "keep_fixed_cap", "max_services": MAX_CONTEXT_SERVICES,
+         "reason": "adaptive selection is deferred until budget-specific history is evaluated"}
+    )
+    if epic_type is not None:
+        metrics["epic_type"] = epic_type
+    return metrics
+
+
+def verify_context_budget(conn: sqlite3.Connection, run_id: int, repository: str, since_commit: str) -> dict:
+    """Use Git ground truth to measure context-card precision, recall and omission."""
+    return _verify_context_budget(conn, run_id, repository, since_commit)
 
 
 def record_change_surface_feedback(conn: sqlite3.Connection, run_id: int, service: str, outcome: str) -> dict:
