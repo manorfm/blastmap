@@ -106,6 +106,14 @@ one local process per `(repository, service)` at a time; a second attempt fails 
 Only a lock whose recorded local PID no longer exists is recovered automatically.
 Shared, multi-host SQLite locking is outside the supported operating model.
 
+## Support boundaries
+
+Static facts for Go, Java/Spring, Kotlin/Spring and Node/TypeScript/GraphQL are
+supported only where source evidence is deterministic. Dynamic wiring, runtime
+observations and external depth enrichment remain explicitly bounded or
+experimental. The server returns unknowns rather than elevating heuristics to facts;
+compact change context remains capped at five cards.
+
 ## Entrypoint response
 
 ```json

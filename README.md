@@ -768,6 +768,30 @@ suspects specific services. If the task doesn't match anything indexed, it
 returns empty lists with a `note` (for humans) and an `unknowns` (structured, for
 the agent) explaining why — without calling the LLM.
 
+## Production support matrix
+
+| Capability | Status | Operational boundary |
+| --- | --- | --- |
+| Go, Java/Spring, Kotlin/Spring, Node/TypeScript and GraphQL entrypoints | Supported subset | Only facts with static evidence are returned. |
+| REST, GraphQL, RabbitMQ, Postgres and MongoDB contracts | Supported subset | Unresolved dynamic wiring remains an explicit unknown. |
+| Change context, telemetry and Git verification | Supported | Context remains capped at 1–5 cards. |
+| External depth provider | Optional | Bounded payload, timeout, cache and local circuit breaker. |
+| Runtime observations | Experimental | Normalized OTel/broker edges only; no traces, payloads or attributes. |
+| Shared multi-host SQLite | Unsupported | Use one host/process domain per database. |
+
+### Recovery runbook
+
+1. Stop new indexing commands and run `orbitkb status` to identify the affected
+   repository/service.
+2. Create a consistent copy with `orbitkb backup --out /safe/orbitkb-backup.db --db
+   /path/orbitkb.db` before attempting repair.
+3. Re-run `index` or `update`; abandoned local runs and stale local-process locks
+   are recovered automatically, while a concurrent live index fails fast.
+4. If the database itself is damaged, stop the process, run `orbitkb restore
+   /safe/orbitkb-backup.db --db /path/orbitkb.db`, then reindex affected services.
+5. Keep SQLite on one host/process domain. For shared or distributed operation, use
+   a storage and coordination design that provides distributed locking.
+
 ### Semantic retrieval fallback
 
 `find_change_surface`/`search`'s primary retrieval is always FTS5 keyword
