@@ -1033,3 +1033,18 @@ class LocalAuthorizer implements OrderAuthorizer {
         edge.source == "OrdersController.create" and edge.target == "DefaultAuthorizer.authorize"
         for edge in result.edges
     )
+
+
+def test_spring_scheduled_job_exposes_only_proven_schedule_policy(tmp_path: Path):
+    (tmp_path / "ReconciliationJob.java").write_text(
+        '''class ReconciliationJob {
+  @Scheduled(cron = "0 */5 * * * *")
+  void reconcile() { retry(); ledger.sync(); }
+}
+''', encoding="utf-8",
+    )
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    job = result.entrypoints[0]
+    assert (job.kind, job.method, job.name, job.symbol) == ("job", "SCHEDULED", "reconcile", "ReconciliationJob.reconcile")
+    assert result.contracts[job.symbol] == {"schedule": "0 */5 * * * *", "concurrency": "unknown", "idempotency": "unknown"}
