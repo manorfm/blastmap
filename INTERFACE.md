@@ -98,6 +98,14 @@ symbols and counters separately from static flows. `describe_runtime_divergence`
 returns observed-only and static-unobserved edges, explicitly stating that missing
 runtime observation is not evidence of dead code.
 
+## Operational limits
+
+`backup --out <path> --db <path>` and `restore <backup> --db <path>` are explicit
+CLI-only recovery operations using SQLite's consistent backup API. Indexing permits
+one local process per `(repository, service)` at a time; a second attempt fails fast.
+Only a lock whose recorded local PID no longer exists is recovered automatically.
+Shared, multi-host SQLite locking is outside the supported operating model.
+
 ## Entrypoint response
 
 ```json

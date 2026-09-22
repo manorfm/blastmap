@@ -753,6 +753,16 @@ kept separate from static flow facts. Use `describe_runtime_divergence` to ident
 observed-only and static-unobserved edges; a static edge not observed is never treated
 as proof of dead code because coverage and sampling may be incomplete.
 
+## Operational recovery
+
+Use `orbitkb backup --out /safe/orbitkb-backup.db --db /path/orbitkb.db` before a
+destructive maintenance window. Restore only by explicit command:
+`orbitkb restore /safe/orbitkb-backup.db --db /path/orbitkb.db`. Both commands use
+SQLite's backup API rather than copying a live database file. Indexing is serialized
+per `(repository, service)` identity; a second attempt fails fast, while a lock left
+by a terminated local process is recovered on its next attempt. The current lock is
+local-process aware, so shared multi-host SQLite deployments are not supported.
+
 Accepts an optional `hint_services` to anchor the search when the agent already
 suspects specific services. If the task doesn't match anything indexed, it
 returns empty lists with a `note` (for humans) and an `unknowns` (structured, for
