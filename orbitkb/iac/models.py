@@ -19,3 +19,8 @@ class IacResource:
     file_path: str
     start_line: int
     end_line: int
+    # Set only by orbitkb.iac.scanner, never by an individual format parser: the
+    # indexed service whose root structurally contains file_path, when exactly
+    # one candidate matches. None means "belongs to the repository, ownership
+    # not resolvable" — never a guess between multiple candidates.
+    matched_service_name: str | None = None

@@ -6,9 +6,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
-from orbitkb.analysis.engine import StaticAnalysisEngine
 from orbitkb.analysis.depth import DepthProvider, NoopDepthProvider
+from orbitkb.analysis.engine import StaticAnalysisEngine
 from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import cloud_iac as cloud_iac_repo
 from orbitkb.db.repositories import components as components_repo
 from orbitkb.db.repositories import embeddings as embeddings_repo
 from orbitkb.db.repositories import flows as flows_repo
@@ -21,7 +22,12 @@ from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import security_findings as security_findings_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
-from orbitkb.discovery.base import CodeExcerpt, EndpointHint, ServiceHints, StackDetector
+from orbitkb.discovery.base import (
+    CodeExcerpt,
+    EndpointHint,
+    ServiceHints,
+    StackDetector,
+)
 from orbitkb.discovery.hashing import file_hash, git_head_commit
 from orbitkb.discovery.registry import detector_by_id
 from orbitkb.discovery.scan_helpers import SKIP_DIRS, collect_config_excerpts
@@ -30,6 +36,7 @@ from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.backend_base import LLMBackend, LLMUsage
 from orbitkb.generation.embeddings import EmbeddingBackend
 from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, load_schema
+from orbitkb.iac.scanner import scan_repository
 from orbitkb.security.findings import find_security_findings
 from orbitkb.security.redaction import redact_sensitive_values
 
@@ -687,4 +694,10 @@ def index_path(
         service_calls_repo.reconcile_service_call_targets(conn)
         search_repo.rebuild_search_index(conn)
         recompute_architecture_view(conn)
+
+    # Scanned once per repository, after every candidate service has a real row
+    # (and therefore a real service_id to attribute a matched resource to) —
+    # IaC commonly lives outside any single service's own root, so this can't
+    # be folded into index_service's per-service pass.
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, scan_repository(resolved_path, candidates))
     return results

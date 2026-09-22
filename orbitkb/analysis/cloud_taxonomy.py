@@ -38,6 +38,15 @@ IAC_RESOURCE_TYPE_TABLE: dict[str, tuple[str, str, str]] = {
     "azurerm_storage_blob": ("azure", "object_storage", "blob_storage"),
 }
 
+# service_name -> resource_type for AWS, derived from IAC_RESOURCE_TYPE_TABLE so
+# this stays one source of truth instead of a hand-typed duplicate (used by
+# orbitkb/iac/compose.py to interpret LocalStack's own SERVICES env var).
+AWS_SERVICE_RESOURCE_TYPE: dict[str, str] = {
+    service_name: resource_type
+    for provider, resource_type, service_name in IAC_RESOURCE_TYPE_TABLE.values()
+    if provider == "aws"
+}
+
 # Which literal attribute(s) on a declaration may hold a resolvable physical name,
 # per IaC resource type. Used only when the parsed attribute value is a plain
 # literal string; an interpolated expression stays unresolved (see
