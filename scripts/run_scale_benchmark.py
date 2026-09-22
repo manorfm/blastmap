@@ -1,36 +1,28 @@
 #!/usr/bin/env python3
-"""Measure deterministic static-analysis scale on a generated corpus."""
+"""Print a reproducible local static-analysis scale profile as JSON."""
 from __future__ import annotations
 
 import argparse
 import json
-import tempfile
-import time
-import tracemalloc
+import sys
 from pathlib import Path
 
-from orbitkb.analysis.engine import StaticAnalysisEngine
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from benchmark.scale import run_scale_profile
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Benchmark static analysis on generated Go handlers.")
-    parser.add_argument("--files", type=int, default=500, help="Generated files (default: 500)")
+    parser = argparse.ArgumentParser(description="Profile static analysis on generated Go handlers.")
+    parser.add_argument("--files", type=int, nargs="+", default=[100, 500, 1000], help="Generated file counts")
+    parser.add_argument("--repeat", type=int, default=3, help="Runs per file count (default: 3)")
     args = parser.parse_args()
-    if args.files < 1:
-        parser.error("--files must be positive")
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        for index in range(args.files):
-            (root / f"handler_{index}.go").write_text(
-                f"package main\nfunc handle{index}() {{ service.Process({index}) }}\n", encoding="utf-8"
-            )
-        tracemalloc.start()
-        started = time.perf_counter()
-        result = StaticAnalysisEngine().analyze(root, "go")
-        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-        _, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-    print(json.dumps({"files": args.files, "edges": len(result.edges), "elapsed_ms": elapsed_ms, "peak_memory_bytes": peak}))
+    try:
+        profile = run_scale_profile(tuple(args.files), args.repeat)
+    except ValueError as error:
+        parser.error(str(error))
+    print(json.dumps(profile.as_dict(), sort_keys=True))
     return 0
 
 

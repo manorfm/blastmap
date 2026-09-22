@@ -18,6 +18,8 @@ export PATH := $(abspath .venv/bin):$(PATH)
 endif
 
 DB_DEFAULT := $(HOME)/.orbitkb/orbitkb.db
+SCALE_FILES ?= 100 500 1000
+SCALE_REPEAT ?= 3
 ANALYSIS_TESTS := tests/test_static_analysis.py tests/test_self_index_e2e.py tests/test_depth_provider.py
 NON_MCP_TEST_ARGS := tests/ --ignore=tests/test_static_analysis.py --ignore=tests/test_self_index_e2e.py --ignore=tests/test_depth_provider.py --ignore-glob=tests/test_mcp_*.py --ignore=tests/test_dast_adversarial_inputs.py
 MCP_TESTS := $(shell find tests -name 'test_mcp_*.py' -type f | sort)
@@ -35,7 +37,7 @@ help:
 	@echo "  security        sast + sca together"
 	@echo "  dast            live MCP server adversarial-input test"
 	@echo "  verify          test, then lint + sast + sca + dast in parallel"
-	@echo "  benchmark-scale Measure static-analysis time and peak memory"
+	@echo "  benchmark-scale Profile static-analysis time and peak memory"
 	@echo "  evaluate-static Run cross-stack golden facts with time/memory report"
 	@echo "  evaluate-change-surface Run deterministic change-surface candidate goldens"
 	@echo "  integration-containers Run opt-in RabbitMQ/Postgres/MongoDB container E2E"
@@ -92,7 +94,7 @@ verify:
 	@scripts/preflight.sh
 
 benchmark-scale:
-	$(PYTHON) scripts/run_scale_benchmark.py
+	$(PYTHON) scripts/run_scale_benchmark.py --files $(SCALE_FILES) --repeat $(SCALE_REPEAT)
 
 evaluate-static:
 	$(PYTHON) scripts/run_static_evaluation.py

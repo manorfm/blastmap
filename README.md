@@ -792,6 +792,24 @@ the agent) explaining why — without calling the LLM.
 5. Keep SQLite on one host/process domain. For shared or distributed operation, use
    a storage and coordination design that provides distributed locking.
 
+### Capacity baseline and indexing limits
+
+Run `make benchmark-scale` to generate a local JSON profile for 100, 500 and 1,000
+generated Go handler files, with three samples per size. Use `make benchmark-scale
+SCALE_FILES="5000" SCALE_REPEAT=5` to establish a comparable baseline for a
+particular workstation or CI runner.
+The report contains median elapsed time and maximum traced Python memory; compare
+only repeated runs on the same environment, not a number copied from another machine
+as a production SLO.
+
+Indexing already uses file hashes to skip unchanged LLM-derived endpoint, component,
+persistence, messaging and overview units. It does **not** yet cache ASTs or symbols:
+each index/update re-runs deterministic static analysis for the service before those
+LLM units are considered. Indexing remains serialized per `(repository, service)` and
+the root traversal is intentionally sequential. Profile the actual service first; add
+an AST cache or parallel traversal only when measurements show that static analysis,
+rather than generation, is the material bottleneck.
+
 ### Semantic retrieval fallback
 
 `find_change_surface`/`search`'s primary retrieval is always FTS5 keyword
