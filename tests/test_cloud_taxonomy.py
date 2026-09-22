@@ -43,11 +43,13 @@ def test_iac_name_attributes_only_cover_mapped_resource_types():
     assert IAC_NAME_ATTRIBUTES["aws_sqs_queue"] == ("name",)
 
 
-def test_is_unresolved_literal_flags_interpolated_expressions_only():
+def test_is_unresolved_literal_flags_any_interpolation_even_partial():
     assert is_unresolved_literal("${var.env}") is True
     assert is_unresolved_literal("${aws_sqs_queue.orders.name}") is True
     assert is_unresolved_literal("orders-queue") is False
-    assert is_unresolved_literal("orders-${var.env}") is False  # not a *whole* interpolation
+    # A partial template ("alerts-${var.env}") is still not a real, evaluated
+    # name — never present un-evaluated HCL syntax as a resolved fact.
+    assert is_unresolved_literal("orders-${var.env}") is True
 
 
 def test_aws_sdk_js_v3_commands_map_to_operation_kind_and_canonical_name():

@@ -127,16 +127,18 @@ AZURE_BLOB_METHOD_TABLE: dict[str, tuple[str, str]] = {
     "delete": ("write", "Delete"), "deleteBlob": ("write", "Delete"), "delete_blob": ("write", "Delete"),
 }
 
-_INTERPOLATION_RE = re.compile(r"^\$\{.*\}$")
+_INTERPOLATION_RE = re.compile(r"\$\{.*\}")
 
 
 def is_unresolved_literal(value: str) -> bool:
-    """True only when the *whole* value is a Terraform interpolation
-    (`"${var.env}"`) rather than a literal name — a partially interpolated value
-    like `"orders-${var.env}"` still has a real static prefix worth keeping, so it
-    is deliberately not flagged here; the caller stores the raw value either way
-    and only the fully-dynamic case is treated as unresolved."""
-    return bool(_INTERPOLATION_RE.fullmatch(value.strip()))
+    """True whenever the value contains a Terraform interpolation (`${...}`)
+    anywhere — HCL2's own syntax marker for "this is a template, not a literal",
+    not a heuristic guess. A partially interpolated value like
+    `"orders-${var.env}"` is still a template whose real name depends on runtime
+    configuration, so it is treated as unresolved the same as a value that is
+    nothing but an interpolation — storing the raw, un-evaluated text as if it
+    were the resource's real name would misrepresent a template as a fact."""
+    return bool(_INTERPOLATION_RE.search(value))
 
 
 def otel_messaging_system(provider: str, service_name: str) -> str | None:
