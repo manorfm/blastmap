@@ -1028,10 +1028,13 @@ that is not listed above."), but this has never been adversarially tested.
 Configuration evidence follows a stricter rule: `.env` is never read, and values
 whose configuration key names passwords, secrets, tokens, credentials or API keys
 are redacted before a supported configuration file can enter an LLM prompt.
-The same redaction applies to every source excerpt supplied to generation. During
-indexing, OrbitKB records only safe security findings for a Git-tracked `.env` or a
-secret-like literal in source; `list_security_findings` returns file, line and
-remediation guidance, never a value or source excerpt.
+The same redaction applies to every source excerpt supplied to generation, including
+the service entrypoint. The generation boundary also redacts structured text before
+it can be persisted, embedded or returned through MCP. Failed generation logs retain
+the redacted prompt and error type only, never a backend error body. During indexing,
+OrbitKB records only safe security findings for a Git-tracked `.env` or a secret-like
+literal in source; `list_security_findings` returns file, line and remediation
+guidance, never a value or source excerpt.
 
 ## Known limitations
 

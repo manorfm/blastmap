@@ -19,9 +19,11 @@ class ScriptedBackend:
     def __init__(self, outcomes):
         self._outcomes = list(outcomes)
         self.calls = 0
+        self.prompts: list[str] = []
 
     def generate(self, prompt: str, schema: dict, cwd: Path) -> GenerationOutcome:
         self.calls += 1
+        self.prompts.append(prompt)
         item = self._outcomes.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -81,3 +83,23 @@ def test_exhausted_retries_returns_none_and_writes_failure_file(tmp_path: Path):
     assert result is None
     assert failures_dir.exists()
     assert list(failures_dir.glob("my-label-*.txt"))
+
+
+def test_generation_boundary_redacts_prompt_output_and_failure_log(tmp_path: Path):
+    secret = "production-secret-value"
+    backend = ScriptedBackend([
+        GenerationOutcome(structured={"summary": f"token={secret}"}),
+    ])
+
+    result = generate_with_retry(
+        backend, f"API_TOKEN={secret}", SCHEMA, tmp_path, tmp_path / "failures", "label"
+    )
+
+    assert secret not in backend.prompts[0]
+    assert result is not None
+    assert secret not in result.structured["summary"]
+
+    failing = ScriptedBackend([GenerationError(secret), GenerationError(secret)])
+    failures_dir = tmp_path / "failure-logs"
+    generate_with_retry(failing, f"API_TOKEN={secret}", SCHEMA, tmp_path, failures_dir, "label")
+    assert secret not in next(failures_dir.iterdir()).read_text(encoding="utf-8")

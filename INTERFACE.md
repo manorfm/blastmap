@@ -51,6 +51,11 @@ treated as deletion.
    configuration or an external integration; it returns locations and remediation,
    never source excerpts or secret values.
 
+Generation and MCP storage are secret-safe boundaries: source/configuration evidence
+is redacted before generation, generated structured text is redacted before it is
+stored or exposed, and diagnostic failure files contain only a redacted prompt plus
+an error type.
+
 ## Compact change context
 
 `get_change_context` runs one `find_change_surface` inference and composes at most

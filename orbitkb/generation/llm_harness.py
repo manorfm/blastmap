@@ -16,6 +16,7 @@ from string import Template
 import jsonschema
 
 from orbitkb.generation.backend_base import GenerationError, GenerationOutcome, LLMBackend, LLMUsage
+from orbitkb.security.redaction import redact_sensitive_values, redact_structured_values
 
 logger = logging.getLogger(__name__)
 
@@ -39,18 +40,19 @@ def generate_with_retry(
     backend: LLMBackend, prompt: str, schema: dict, cwd: Path, failures_dir: Path, label: str
 ) -> GenerationOutcome | None:
     last_error: Exception | None = None
-    current_prompt = prompt
+    safe_prompt = redact_sensitive_values(prompt)
+    current_prompt = safe_prompt
     total_usage = LLMUsage()
     for _attempt in range(2):
         try:
             outcome = backend.generate(current_prompt, schema, cwd)
             total_usage = total_usage + outcome.usage  # a retried call is still a billed call
             jsonschema.validate(outcome.structured, schema)
-            return GenerationOutcome(structured=outcome.structured, usage=total_usage)
+            return GenerationOutcome(structured=redact_structured_values(outcome.structured), usage=total_usage)
         except (GenerationError, jsonschema.ValidationError) as exc:
             last_error = exc
             current_prompt = (
-                f"{prompt}\n\nYour previous response was invalid: {exc}. "
+                f"{safe_prompt}\n\nYour previous response did not meet generation requirements. "
                 "Return ONLY valid JSON matching the schema, no prose, no markdown fences."
             )
 
@@ -61,9 +63,11 @@ def generate_with_retry(
     fail_file = failures_dir / f"{safe_label}-{int(time.time())}.txt"
     try:
         failures_dir.mkdir(parents=True, exist_ok=True)
-        fail_file.write_text(f"Prompt:\n{prompt}\n\nLast error:\n{last_error}", encoding="utf-8")
+        fail_file.write_text(
+            f"Prompt:\n{safe_prompt}\n\nLast error type:\n{type(last_error).__name__}", encoding="utf-8"
+        )
     except OSError as write_error:
-        logger.warning("generation failed for %s: %s (failure log unavailable: %s)", label, last_error, write_error)
+        logger.warning("generation failed for %s; failure log unavailable: %s", label, write_error)
     else:
-        logger.warning("generation failed for %s: %s (see %s)", label, last_error, fail_file)
+        logger.warning("generation failed for %s (see %s)", label, fail_file)
     return None

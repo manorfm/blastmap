@@ -137,7 +137,7 @@ def _render_service_overview_prompt(
     reflects what the endpoints/classes actually turned out to do, not a guess made
     before any of them were analyzed."""
     entry_file = hints.entry_excerpt.file_path if hints.entry_excerpt else "(none found)"
-    entry_excerpt = hints.entry_excerpt.text if hints.entry_excerpt else "(no entrypoint file detected)"
+    entry_excerpt = redact_sensitive_values(hints.entry_excerpt.text) if hints.entry_excerpt else "(no entrypoint file detected)"
     component_summaries = "\n".join(f"- {c['name']} ({c['file_path']}): {c['summary']}" for c in components) or (
         "(no classes/controllers detected — this service's routing is likely function-based, "
         "or it exposes no HTTP endpoints at all)"
@@ -148,7 +148,7 @@ def _render_service_overview_prompt(
         folder_tree=_folder_tree(root),
         entry_file=entry_file,
         entry_excerpt=entry_excerpt,
-        component_summaries=component_summaries,
+        component_summaries=redact_sensitive_values(component_summaries),
     )
 
 

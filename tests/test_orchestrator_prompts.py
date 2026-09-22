@@ -7,7 +7,7 @@ from orbitkb.discovery.base import (
     OutboundCallHint,
     ServiceHints,
 )
-from orbitkb.generation.orchestrator import _render_api_detail_prompt
+from orbitkb.generation.orchestrator import _render_api_detail_prompt, _render_service_overview_prompt
 
 
 def _excerpt(file_path: str) -> CodeExcerpt:
@@ -50,3 +50,15 @@ def test_api_detail_prompt_includes_calls_found_in_extra_excerpts_too():
     prompt = _render_api_detail_prompt("orders-service", "python", endpoint, hints)
 
     assert "payments-service" in prompt
+
+
+def test_service_overview_prompt_redacts_entrypoint_evidence(tmp_path):
+    secret = "production-secret-value"
+    hints = ServiceHints(entry_excerpt=CodeExcerpt(
+        file_path="main.py", start_line=1, end_line=2, text=f"API_TOKEN = {secret}\nrun()",
+    ))
+
+    prompt = _render_service_overview_prompt("orders", "python", tmp_path, hints, [])
+
+    assert secret not in prompt
+    assert "[REDACTED]" in prompt
