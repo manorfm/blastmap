@@ -82,6 +82,23 @@ class PersistenceFact:
     evidence: Evidence
 
 
+@dataclass(frozen=True)
+class CloudFact:
+    """A cloud SDK operation proven by locally-declared type or import — see
+    orbitkb/analysis/cloud_taxonomy.py for the vendor-sourced vocabulary this
+    draws from. `target_name` is the literal queue/bucket/topic name only when
+    the call site names it; `None` means unresolved, never a guess."""
+
+    provider: str
+    resource_type: str
+    service_name: str
+    operation: str
+    operation_kind: str
+    sdk: str
+    target_name: str | None
+    evidence: Evidence
+
+
 @dataclass
 class AnalysisResult:
     entrypoints: list[EntryPoint] = field(default_factory=list)
@@ -92,6 +109,7 @@ class AnalysisResult:
     message_contracts: list[MessageContract] = field(default_factory=list)
     boundaries: list[FlowBoundary] = field(default_factory=list)
     persistence_facts: list[PersistenceFact] = field(default_factory=list)
+    cloud_facts: list[CloudFact] = field(default_factory=list)
 
     def extend(self, other: AnalysisResult) -> None:
         self.entrypoints.extend(other.entrypoints)
@@ -102,3 +120,4 @@ class AnalysisResult:
         self.message_contracts.extend(other.message_contracts)
         self.boundaries.extend(other.boundaries)
         self.persistence_facts.extend(other.persistence_facts)
+        self.cloud_facts.extend(other.cloud_facts)

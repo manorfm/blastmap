@@ -133,6 +133,57 @@ CREATE TABLE IF NOT EXISTS static_message_contracts (
     updated_at    TEXT NOT NULL
 );
 
+-- Deterministic, AST-derived cloud SDK operations (AWS SQS/SNS/S3/EventBridge,
+-- Azure Blob Storage), proven the same way GORM/JPA/Mongoose calls already are:
+-- a locally-declared client type or a named SDK import, matched against the
+-- vendor-sourced tables in orbitkb/analysis/cloud_taxonomy.py — never a keyword
+-- guess. Rewritten wholesale by flows_repo.replace_analysis on every scan, never
+-- hand-edited. `target_name` is the literal queue/bucket/topic name only when the
+-- call site names it; NULL means unresolved, never a guess.
+CREATE TABLE IF NOT EXISTS static_cloud_facts (
+    id             INTEGER PRIMARY KEY,
+    service_id     INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    provider       TEXT NOT NULL CHECK (provider IN ('aws', 'azure')),
+    resource_type  TEXT NOT NULL CHECK (resource_type IN ('queue', 'pubsub', 'event_bus', 'object_storage')),
+    service_name   TEXT NOT NULL,
+    operation      TEXT NOT NULL,
+    operation_kind TEXT NOT NULL CHECK (operation_kind IN ('publish', 'consume', 'read', 'write', 'admin')),
+    sdk            TEXT NOT NULL,
+    target_name    TEXT,
+    file_path      TEXT NOT NULL,
+    start_line     INTEGER NOT NULL,
+    end_line       INTEGER NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_static_cloud_facts_service ON static_cloud_facts(service_id);
+
+-- Structurally-parsed IaC declarations (Terraform via python-hcl2, CloudFormation
+-- via cfn-flip, plain Kubernetes manifests via PyYAML — real parsers, never
+-- regex/keyword heuristics). Repository-scoped, not service-scoped: IaC commonly
+-- lives outside any single service's own root (infra/, terraform/, deploy/).
+-- service_id is only ever set when the declaring file provably falls under
+-- exactly one indexed service's root; NULL means "belongs to this repository,
+-- ownership not resolvable", never a guess. `physical_name` is NULL whenever the
+-- source attribute is an interpolated expression rather than a literal.
+CREATE TABLE IF NOT EXISTS cloud_iac_resources (
+    id                  INTEGER PRIMARY KEY,
+    repository_id       INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    service_id          INTEGER REFERENCES services(id) ON DELETE SET NULL,
+    provider            TEXT NOT NULL CHECK (provider IN ('aws', 'azure')),
+    resource_type       TEXT NOT NULL CHECK (resource_type IN ('queue', 'pubsub', 'event_bus', 'object_storage')),
+    iac_resource_type   TEXT NOT NULL,
+    logical_name        TEXT NOT NULL,
+    physical_name       TEXT,
+    source_format       TEXT NOT NULL CHECK (source_format IN ('terraform', 'cloudformation', 'kubernetes', 'compose_hint')),
+    confidence          TEXT NOT NULL CHECK (confidence IN ('high', 'low')) DEFAULT 'high',
+    file_path           TEXT NOT NULL,
+    start_line          INTEGER NOT NULL,
+    end_line            INTEGER NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_iac_resources_repository ON cloud_iac_resources(repository_id);
+CREATE INDEX IF NOT EXISTS idx_cloud_iac_resources_service ON cloud_iac_resources(service_id);
+
 -- One row per class/controller/module cluster of endpoints within a service, synthesized
 -- from the already-generated `apis` summaries of the endpoints it groups (never raw code
 -- read again) — the layer between a single endpoint and the whole service. `file_path` is
