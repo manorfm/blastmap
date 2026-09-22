@@ -1249,7 +1249,20 @@ to Go-stack discovery")` pointed at `orbitkb-core` as `primary` with 0.9
 confidence and the right reason — the scanner itself is what would need to
 change.
 
-### Benchmark: retrieval recall (CI) vs. real precision/recall (manual)
+### Static golden evaluation and retrieval benchmark
+
+`make evaluate-static` runs a small, hand-authored cross-stack golden corpus and
+prints JSON with per-case and aggregate precision/recall, elapsed time and peak
+memory. It currently covers a Go HTTP write flow, a Java/Spring controller flow, a
+Kotlin/Spring scheduled job, and a Node/TypeScript GraphQL mutation publishing to
+RabbitMQ. Facts are scored only where the fixture makes the expected static evidence
+unambiguous: entrypoints, selected call/persistence edges, message contracts and the
+scheduled-job contract. A result of 1.0 means the analyzer reproduced this bounded
+corpus exactly; it is a deterministic regression signal, not a claim about arbitrary
+codebases or an LLM's architectural judgment. Add a case only with manually reviewed
+source and expected facts.
+
+`benchmark/` also maintains a separate retrieval benchmark:
 
 `benchmark/` measures whether `find_change_surface` actually finds the right
 services — not just whether the mechanism doesn't break. It's deliberately split
