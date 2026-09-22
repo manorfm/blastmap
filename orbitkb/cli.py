@@ -10,6 +10,7 @@ from orbitkb.analysis.depth import DepthMode, resolve_depth_provider
 from orbitkb.cli_progress import RichProgressReporter
 from orbitkb.config import resolve_backend
 from orbitkb.db.connection import DEFAULT_DB_PATH, open_db
+from orbitkb.db.backup import backup_database, restore_database
 from orbitkb.db.repositories import index_runs as index_runs_repo
 from orbitkb.db.repositories import indexed_files as indexed_files_repo
 from orbitkb.db.repositories import repositories as repositories_repo
@@ -185,6 +186,22 @@ def _cmd_export(args: argparse.Namespace) -> int:
     else:
         written = export_markdown(conn, Path(args.out), service_filter=args.service)
     print(f"wrote {len(written)} files under {args.out}")
+    return 0
+
+
+def _cmd_backup(args: argparse.Namespace) -> int:
+    backup_database(args.db, args.out)
+    print(f"backed up {args.db} to {args.out}")
+    return 0
+
+
+def _cmd_restore(args: argparse.Namespace) -> int:
+    try:
+        restore_database(args.source, args.db)
+    except FileNotFoundError:
+        print(f"error: backup not found: {args.source}", file=sys.stderr)
+        return 1
+    print(f"restored {args.db} from {args.source}")
     return 0
 
 
@@ -425,6 +442,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.add_argument("--service", default=None, help="Export only this service instead of every indexed one")
     p_export.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
     p_export.set_defaults(func=_cmd_export)
+
+    p_backup = sub.add_parser("backup", help="Create a consistent SQLite knowledge-base backup")
+    p_backup.add_argument("--out", type=Path, required=True, help="Destination SQLite backup path")
+    p_backup.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"Source database path (default: {DEFAULT_DB_PATH})")
+    p_backup.set_defaults(func=_cmd_backup)
+
+    p_restore = sub.add_parser("restore", help="Restore a SQLite knowledge-base backup into --db")
+    p_restore.add_argument("source", type=Path, help="SQLite backup file to restore")
+    p_restore.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"Destination database path (default: {DEFAULT_DB_PATH})")
+    p_restore.set_defaults(func=_cmd_restore)
 
     p_analyze = sub.add_parser(
         "analyze", help="Run find_change_surface for a task and print the result as JSON",
