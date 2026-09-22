@@ -154,6 +154,46 @@ async def test_cli_to_mcp_preserves_a_static_rabbitmq_publication_contract(tmp_p
 
 
 @pytest.mark.anyio
+async def test_cumulative_repositories_keep_duplicate_identities_and_context_telemetry_scoped(tmp_path: Path, fake_backends):
+    """Real CLI -> one cumulative SQLite DB -> MCP, including an empty briefing.
+
+    The empty task intentionally avoids a real headless LLM while still exercising
+    the public get_change_context telemetry path. The two same-named services prove
+    that repository scope is preserved end to end rather than only in unit queries.
+    """
+    checkout = tmp_path / "checkout"
+    fulfillment = tmp_path / "fulfillment"
+    checkout.mkdir()
+    fulfillment.mkdir()
+    (checkout / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
+    (fulfillment / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
+    db_path = tmp_path / "cumulative.db"
+
+    for root, repository in ((checkout, "checkout-repo"), (fulfillment, "fulfillment-repo")):
+        assert cli._cmd_index(_parse([
+            "index", str(root), "--db", str(db_path), "--service", "orders", "--stack", "go",
+            "--repository-name", repository,
+        ])) == 0
+
+    async with stdio_client(server_params(db_path)) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        repositories = content_json(await session.call_tool("list_repositories", {}))
+        described = content_json(await session.call_tool("describe_service", {
+            "service": "orders", "repository": "fulfillment-repo",
+        }))
+        context = content_json(await session.call_tool("get_change_context", {
+            "task": "unmatched calibration task", "repository": "checkout-repo", "epic_type": "feature",
+        }))
+        metrics = content_json(await session.call_tool("get_context_budget_metrics", {"epic_type": "feature"}))
+
+    assert {item["name"] for item in repositories["repositories"]} == {"checkout-repo", "fulfillment-repo"}
+    assert described["repository"] == "fulfillment-repo"
+    assert context["scope"] == {"repository": "checkout-repo"}
+    assert context["telemetry"]["recorded"] is True
+    assert metrics["runs"] == 1
+
+
+@pytest.mark.anyio
 async def test_cli_to_mcp_preserves_a_literal_spring_amqp_publication(tmp_path: Path, fake_backends):
     root = tmp_path / "publisher"
     root.mkdir()
