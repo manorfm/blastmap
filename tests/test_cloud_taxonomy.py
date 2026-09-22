@@ -41,6 +41,8 @@ def test_iac_name_attributes_only_cover_mapped_resource_types():
     assert set(IAC_NAME_ATTRIBUTES) <= set(IAC_RESOURCE_TYPE_TABLE)
     assert IAC_NAME_ATTRIBUTES["aws_s3_bucket"] == ("bucket",)
     assert IAC_NAME_ATTRIBUTES["aws_sqs_queue"] == ("name",)
+    assert IAC_NAME_ATTRIBUTES["AWS::SQS::Queue"] == ("QueueName",)
+    assert IAC_NAME_ATTRIBUTES["AWS::S3::Bucket"] == ("BucketName",)
 
 
 def test_is_unresolved_literal_flags_any_interpolation_even_partial():

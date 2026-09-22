@@ -43,6 +43,7 @@ IAC_RESOURCE_TYPE_TABLE: dict[str, tuple[str, str, str]] = {
 # literal string; an interpolated expression stays unresolved (see
 # is_unresolved_literal) rather than guessed.
 IAC_NAME_ATTRIBUTES: dict[str, tuple[str, ...]] = {
+    # Terraform resource type -> attribute(s)
     "aws_sqs_queue": ("name",),
     "aws_sns_topic": ("name",),
     "aws_s3_bucket": ("bucket",),
@@ -51,6 +52,12 @@ IAC_NAME_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "azurerm_storage_account": ("name",),
     "azurerm_storage_container": ("name",),
     "azurerm_storage_blob": ("name",),
+    # CloudFormation `Type` -> Properties key(s)
+    "AWS::SQS::Queue": ("QueueName",),
+    "AWS::SNS::Topic": ("TopicName",),
+    "AWS::S3::Bucket": ("BucketName",),
+    "AWS::Events::EventBus": ("Name",),
+    "AWS::Events::Rule": ("Name",),
 }
 
 # operation_kind is one of: 'publish' | 'consume' | 'read' | 'write' | 'admin'.
