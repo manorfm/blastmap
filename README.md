@@ -297,8 +297,9 @@ orbitkb list
 orbitkb status [service]
 orbitkb export md --out docs/
 orbitkb export mermaid --out docs/   # topology diagram + one ER diagram per service
-orbitkb serve --backend claude   # MCP server (stdio); backend only used by find_change_surface
+orbitkb serve --backend claude   # MCP server (stdio); backend used by change-surface/context tools
 orbitkb analyze "Add Pix support to checkout" --backend claude   # runs find_change_surface directly, no MCP session needed
+orbitkb context "Add Pix support to checkout" --max-services 3  # compact planning briefing, no source reread
 orbitkb verify <run_id> --repository <name> --since <commit>   # checks a prediction against the real git diff
 ```
 
@@ -702,6 +703,16 @@ inference**, not a fact:
   Historical precedent: has a similarly-worded task actually panned out before?
 - **`run_cost_usd`**: this call's own LLM cost, when the backend's CLI exposed
   it — `null` (never fabricated as `0`) when it didn't.
+
+**`get_change_context("Add Pix support to checkout")`** (or `orbitkb context`) is
+the compact alternative when an agent needs enough context to draft its first plan in
+one call. It performs the same single change-surface synthesis, then returns at most
+`max_services` service cards (default 3; hard maximum 5) with interfaces, outbound
+dependencies, persistence and messages. It includes already-indexed architecture
+risks relevant to those cards, affected contracts, explicit unknowns and the detailed
+next queries. It never rereads source and does not replace `describe_entrypoint`,
+`describe_api` or `describe_service`; use those only for the selected detail. This
+keeps the initial planning context bounded while preserving a precise drill-down path.
 
 Accepts an optional `hint_services` to anchor the search when the agent already
 suspects specific services. If the task doesn't match anything indexed, it

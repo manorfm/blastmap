@@ -108,6 +108,16 @@ def test_list_command_prints_indexed_services(tmp_path: Path, capsys):
     assert "payments-service" in out
 
 
+def test_context_command_returns_a_bounded_empty_briefing_without_a_match(tmp_path: Path, capsys):
+    db_path = tmp_path / "test.db"
+    open_db(db_path)
+
+    exit_code = cli._cmd_context(_parse(["context", "unrelated xyz", "--db", str(db_path)]))
+
+    assert exit_code == 0
+    assert '"services": []' in capsys.readouterr().out
+
+
 def test_list_command_handles_empty_database(tmp_path: Path, capsys):
     db_path = tmp_path / "test.db"
     open_db(db_path)

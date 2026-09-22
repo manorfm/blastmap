@@ -35,8 +35,10 @@ treated as deletion.
 
 ## Agent workflow
 
-1. Call `find_change_surface(task, repository?)` for an epic; provide the repository
-   whenever the KB reports duplicate service identities.
+1. Call `get_change_context(task, repository?, max_services?)` for a compact first
+   implementation briefing, or `find_change_surface(task, repository?)` when only
+   impact inference is needed. Both require the repository whenever the KB reports
+   duplicate service identities.
 2. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
 3. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
@@ -48,6 +50,16 @@ treated as deletion.
 6. Call `list_security_findings(service)` before changing credentials,
    configuration or an external integration; it returns locations and remediation,
    never source excerpts or secret values.
+
+## Compact change context
+
+`get_change_context` runs one `find_change_surface` inference and composes at most
+five service cards from already-indexed facts; it never reads source. The response
+contains `impact` (primary/secondary findings, cross-service flow, contracts/data and
+external integrations), compact `services` cards, matching `architecture_risks`,
+`unknowns`, `recommended_next_queries` and a `budget` object. Each card contains only
+interfaces, outbound dependencies, persistence and messages. Use its recommended
+detail tools rather than treating it as a full service dump.
 
 ## Entrypoint response
 

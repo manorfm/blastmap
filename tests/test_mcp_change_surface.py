@@ -49,3 +49,18 @@ async def test_find_change_surface_is_reachable_over_stdio(tmp_path: Path):
             assert result["secondary"] == []
             assert result["no_change_hint"] == []
             assert "note" in result
+
+
+@pytest.mark.anyio
+async def test_get_change_context_is_reachable_over_stdio(tmp_path: Path):
+    db_path = tmp_path / "empty.db"
+    open_db(db_path).close()
+
+    params = server_params(db_path)
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            result = content_json(await session.call_tool("get_change_context", {"task": "unrelated xyz"}))
+            assert result["services"] == []
+            assert "note" in result

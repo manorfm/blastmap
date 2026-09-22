@@ -22,6 +22,7 @@ from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation import change_surface
 from orbitkb.generation.architecture import diff_architecture_runs
 from orbitkb.generation.backend_base import LLMBackend
+from orbitkb.generation.change_context import MAX_CONTEXT_SERVICES, build_change_context
 from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.provenance import infer_provenance
 from orbitkb.generation.verification import (
@@ -562,6 +563,39 @@ def find_change_surface(
     if repository is not None:
         response["scope"] = {"repository": repository}
     return response
+
+
+def get_change_context(
+    conn: sqlite3.Connection,
+    backend: LLMBackend,
+    task: str,
+    hint_services: list[str] | None = None,
+    repository: str | None = None,
+    max_services: int = 3,
+) -> dict:
+    """Return a bounded epic briefing from one change-surface inference plus facts.
+
+    No source file is read here. The lower-level tools remain the detailed follow-up
+    path; this response only selects their highest-value context for the first plan.
+    """
+    if not 1 <= max_services <= MAX_CONTEXT_SERVICES:
+        return {"error": f"max_services must be between 1 and {MAX_CONTEXT_SERVICES} (got {max_services})"}
+    repository_id = None
+    if repository is not None:
+        repo = repositories_repo.get_repository_by_name(conn, repository)
+        if repo is None:
+            return {"error": f"unknown repository: {repository}"}
+        repository_id = repo["id"]
+    surface = find_change_surface(conn, backend, task, hint_services, repository)
+    if "error" in surface:
+        return surface
+    architecture = find_architecture_smells(conn)
+    context = build_change_context(
+        conn, task, surface, architecture["findings"], max_services, repository_id,
+    )
+    if repository is not None:
+        context["scope"] = {"repository": repository}
+    return context
 
 
 def record_change_surface_feedback(conn: sqlite3.Connection, run_id: int, service: str, outcome: str) -> dict:

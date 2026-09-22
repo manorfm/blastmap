@@ -195,6 +195,20 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_context(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    backend = resolve_backend(args.backend, args.model, args.claude_bare, args.codex_api_key)
+    result = mcp_queries.get_change_context(
+        conn, backend, args.task, hint_services=args.hint_services,
+        repository=args.repository, max_services=args.max_services,
+    )
+    if "error" in result:
+        print(f"error: {result['error']}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     conn = open_db(args.db)
     result = verify_change_surface(conn, args.run_id, args.repository, args.since, record_feedback=args.record_feedback)
@@ -356,6 +370,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_analyze.add_argument("--repository", default=None, help="Limit analysis to one repository; required when duplicate service names exist")
     add_backend_args(p_analyze)
     p_analyze.set_defaults(func=_cmd_analyze)
+
+    p_context = sub.add_parser(
+        "context", help="Build a compact, bounded implementation briefing for a task/epic",
+        epilog=(
+            "examples:\n"
+            "  orbitkb context \"Add support for Pix in checkout\"\n"
+            "  orbitkb context \"Add support for Pix in checkout\" --max-services 2 --repository billing\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_context.add_argument("task", help="Free-text engineering task/epic to brief before planning")
+    p_context.add_argument("--hint-services", nargs="+", default=None, help="Anchor the impact search on these services")
+    p_context.add_argument("--repository", default=None, help="Limit context to one repository; required when duplicate service names exist")
+    p_context.add_argument("--max-services", type=int, default=3, help="Compact cards to return (1-5, default: 3)")
+    add_backend_args(p_context)
+    p_context.set_defaults(func=_cmd_context)
 
     p_verify = sub.add_parser(
         "verify", help="Compare a past find_change_surface run against what a repository's commits actually changed",

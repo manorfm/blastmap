@@ -15,7 +15,7 @@ from orbitkb.mcp import queries
 
 def build_server(db_path: Path | None = None, backend: LLMBackend | None = None) -> MCPServer:
     mcp = MCPServer("orbitkb")
-    # Only find_change_surface uses a backend; the other 16 tools are pure SQLite
+    # Only find_change_surface/get_change_context use a backend; the other tools are pure SQLite
     # reads and never touch it. Resolved once here rather than per-call since
     # constructing a backend is cheap (no subprocess runs until .generate() is called).
     resolved_backend = backend or resolve_backend(None)
@@ -285,6 +285,28 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.find_change_surface(conn, resolved_backend, task, hint_services, repository)
 
     @mcp.tool()
+    def get_change_context(
+        task: str,
+        hint_services: list[str] | None = None,
+        repository: str | None = None,
+        max_services: int = 3,
+    ) -> dict:
+        """Compact first briefing for an engineering epic. It runs the same bounded
+        change-surface inference as find_change_surface, then adds at most
+        max_services (1-5, default 3) compact service cards: interfaces, outbound
+        dependencies, persistence and messages. It also carries already-indexed
+        architecture risks, contracts at risk, explicit unknowns and next queries.
+        No source file is read and no lower-level tool is replaced: use the returned
+        recommended_next_queries or describe_entrypoint/describe_api for detail.
+        Pass repository when service names are duplicated; it scopes both inference
+        and every compact card. Call this when an agent needs enough context to draft
+        a plan in one response without filling its context window with full services."""
+        with closing(_conn()) as conn:
+            return queries.get_change_context(
+                conn, resolved_backend, task, hint_services, repository, max_services,
+            )
+
+    @mcp.tool()
     def record_change_surface_feedback(run_id: int, service: str, outcome: str) -> dict:
         """Report whether a find_change_surface finding was actually right: call this
         AFTER you've acted on a change surface result, once you know whether a given
@@ -315,7 +337,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
 def main() -> None:
     parser = argparse.ArgumentParser(prog="orbitkb serve")
     parser.add_argument("--db", type=Path, default=None)
-    parser.add_argument("--backend", choices=["claude", "codex"], default=None, help="Used only by find_change_surface")
+    parser.add_argument("--backend", choices=["claude", "codex"], default=None, help="Used by find_change_surface and get_change_context")
     parser.add_argument("--model", default=None)
     parser.add_argument("--claude-bare", action="store_true")
     parser.add_argument("--codex-api-key", action="store_true")
