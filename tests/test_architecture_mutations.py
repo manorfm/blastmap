@@ -1,0 +1,151 @@
+"""Fact-mutation regression checks for deterministic architecture-smell rules.
+
+Each test creates the minimum evidence that should trigger a finding, then changes
+one fact that invalidates that evidence. This guards rule boundaries without
+pretending that a source-only heuristic proves a runtime architecture verdict.
+"""
+from pathlib import Path
+
+from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
+from orbitkb.db.connection import open_db
+from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import flows as flows_repo
+from orbitkb.db.repositories import persistence as persistence_repo
+from orbitkb.db.repositories import service_calls as service_calls_repo
+from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation.architecture import (
+    find_cycles,
+    find_fan_imbalance,
+    find_message_consumers_without_recovery_policy,
+    find_read_entrypoint_side_effects,
+    find_shared_database,
+)
+
+EVIDENCE = [{"file": "main.py", "start_line": 1, "end_line": 5}]
+STATIC_EVIDENCE = Evidence("handler.ts", 4, 6)
+
+
+def test_cycle_finding_disappears_when_one_return_edge_is_removed(tmp_path: Path):
+    conn = open_db(tmp_path / "cycle.db")
+    left = services_repo.ensure_service(conn, "left", "/tmp/left", "go")
+    right = services_repo.ensure_service(conn, "right", "/tmp/right", "go")
+    left_api = apis_repo.upsert_api(conn, left, "POST", "/left", "s", "d", [], EVIDENCE)
+    right_api = apis_repo.upsert_api(conn, right, "POST", "/right", "s", "d", [], EVIDENCE)
+    _replace_calls(conn, left, left_api, ["right"])
+    _replace_calls(conn, right, right_api, ["left"])
+
+    assert _kinds(find_cycles(conn)) == {"cycle"}
+
+    _replace_calls(conn, right, right_api, [])
+    assert find_cycles(conn) == []
+
+
+def test_fan_out_finding_disappears_below_the_configured_boundary(tmp_path: Path):
+    conn = open_db(tmp_path / "fan-out.db")
+    source = services_repo.ensure_service(conn, "gateway", "/tmp/gateway", "go")
+    for index in range(4):
+        services_repo.ensure_service(conn, f"target-{index}", f"/tmp/target-{index}", "go")
+    api = apis_repo.upsert_api(conn, source, "POST", "/work", "s", "d", [], EVIDENCE)
+    _replace_calls(conn, source, api, [f"target-{index}" for index in range(4)])
+
+    assert _kinds(find_fan_imbalance(conn)) == {"fan_out"}
+
+    _replace_calls(conn, source, api, [f"target-{index}" for index in range(3)])
+    assert find_fan_imbalance(conn) == []
+
+
+def test_shared_database_finding_disappears_when_storage_engines_differ(tmp_path: Path):
+    conn = open_db(tmp_path / "storage.db")
+    orders = services_repo.ensure_service(conn, "orders", "/tmp/orders", "go")
+    reporting = services_repo.ensure_service(conn, "reporting", "/tmp/reporting", "node-ts")
+    persistence_repo.replace_persistence_entities(
+        conn, orders, [{"name": "orders", "kind": "sql_table", "engine": "postgres", "schema_json": []}], EVIDENCE,
+    )
+    persistence_repo.replace_persistence_entities(
+        conn, reporting, [{"name": "orders", "kind": "sql_table", "engine": "postgres", "schema_json": []}], EVIDENCE,
+    )
+
+    assert _kinds(find_shared_database(conn)) == {"shared_database"}
+
+    persistence_repo.replace_persistence_entities(
+        conn, reporting, [{"name": "orders", "kind": "document", "engine": "mongodb", "schema_json": []}], EVIDENCE,
+    )
+    assert find_shared_database(conn) == []
+
+
+def test_read_side_effect_finding_disappears_when_transport_becomes_a_command(tmp_path: Path):
+    conn = open_db(tmp_path / "read-side-effect.db")
+    service = services_repo.ensure_service(conn, "catalog", "/tmp/catalog", "node-ts")
+    entrypoint = EntryPoint("http", "GET", "/catalog/refresh", "Catalog.refresh", STATIC_EVIDENCE)
+    _replace_static_flow(conn, service, entrypoint)
+
+    assert _kinds(find_read_entrypoint_side_effects(conn)) == {"possible_read_entrypoint_side_effect"}
+
+    _replace_static_flow(conn, service, EntryPoint("http", "POST", "/catalog/refresh", "Catalog.refresh", STATIC_EVIDENCE))
+    assert find_read_entrypoint_side_effects(conn) == []
+
+
+def test_message_recovery_finding_disappears_when_a_dead_letter_route_is_proven(tmp_path: Path):
+    conn = open_db(tmp_path / "consumer.db")
+    service = services_repo.ensure_service(conn, "billing", "/tmp/billing", "node-ts")
+    consumer = EntryPoint("message", "CONSUME", "billing.created", "message.consume:billing.created", STATIC_EVIDENCE)
+    _replace_consumer_contract(conn, service, consumer, {})
+
+    assert _kinds(find_message_consumers_without_recovery_policy(conn)) == {
+        "possible_message_consumer_without_recovery_policy",
+    }
+
+    _replace_consumer_contract(conn, service, consumer, {"dead_letter_routing_key": "billing.dlq"})
+    assert find_message_consumers_without_recovery_policy(conn) == []
+
+
+def _replace_calls(conn, service_id: int, api_id: int, targets: list[str]) -> None:
+    service_calls_repo.replace_calls_for_api(
+        conn,
+        service_id,
+        api_id,
+        [
+            {
+                "to_service_name": target,
+                "call_kind": "http",
+                "reason": "test relation",
+                "data_needed": [],
+                "purpose_kind": "other",
+                "confidence": 0.9,
+                "target_kind": "internal",
+            }
+            for target in targets
+        ],
+        EVIDENCE,
+    )
+    service_calls_repo.reconcile_service_call_targets(conn)
+
+
+def _replace_static_flow(conn, service_id: int, entrypoint: EntryPoint) -> None:
+    flows_repo.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(entrypoints=[entrypoint], edges=[FlowEdge(entrypoint.symbol, "repository.save", "writes", STATIC_EVIDENCE)]),
+    )
+
+
+def _replace_consumer_contract(conn, service_id: int, consumer: EntryPoint, recovery: dict) -> None:
+    flows_repo.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[consumer],
+            contracts={
+                consumer.symbol: {
+                    "transport": "rabbitmq",
+                    "direction": "consumes",
+                    "queue": consumer.name,
+                    **recovery,
+                },
+            },
+        ),
+    )
+
+
+def _kinds(findings: list[dict]) -> set[str]:
+    return {finding["kind"] for finding in findings}

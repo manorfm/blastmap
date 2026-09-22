@@ -1275,6 +1275,16 @@ application, validates every driver version, or establishes production latency. 
 Docker is unavailable after explicit opt-in, the test reports a skip rather than
 silently replacing the live services with mocks.
 
+### Architecture-rule fact mutations
+
+`tests/test_architecture_mutations.py` mutates one indexed fact at a time and runs
+with the default test suite. It proves the boundary of five deterministic findings:
+cycle, fan-out, shared database, read-entrypoint side effect, and a RabbitMQ consumer
+without source-proven recovery. Each case first requires the finding, then removes
+the one fact that supports it and requires the finding to disappear. These are
+fact-mutation checks for heuristic boundaries, not an automated claim that every
+possible implementation mutation has been killed.
+
 `make evaluate-change-surface` evaluates the separate deterministic candidate-
 retrieval stage for `find_change_surface`. It is deliberately distinct from LLM
 synthesis, because feeding a fake backend a desired answer and asserting that the
