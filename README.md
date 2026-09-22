@@ -1262,6 +1262,19 @@ corpus exactly; it is a deterministic regression signal, not a claim about arbit
 codebases or an LLM's architectural judgment. Add a case only with manually reviewed
 source and expected facts.
 
+### Container integration E2E
+
+`make integration-containers` starts an ephemeral Docker Compose stack with
+RabbitMQ, Postgres and MongoDB. It performs one native broker/database operation
+against each live service, then checks that representative Spring source projects
+the corresponding write/publish contracts. The test is intentionally opt-in locally
+because it creates containers (`ORBITKB_CONTAINER_E2E=1`); CI runs it on Linux.
+
+This is an infrastructure smoke E2E, not a claim that OrbitKB runs a user's
+application, validates every driver version, or establishes production latency. If
+Docker is unavailable after explicit opt-in, the test reports a skip rather than
+silently replacing the live services with mocks.
+
 `make evaluate-change-surface` evaluates the separate deterministic candidate-
 retrieval stage for `find_change_surface`. It is deliberately distinct from LLM
 synthesis, because feeding a fake backend a desired answer and asserting that the

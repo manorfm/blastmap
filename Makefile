@@ -1,4 +1,4 @@
-.PHONY: help install dev hooks test coverage lint sast sca security dast verify benchmark-scale evaluate-static evaluate-change-surface \
+.PHONY: help install dev hooks test coverage lint sast sca security dast verify benchmark-scale evaluate-static evaluate-change-surface integration-containers \
         build clean release release-patch release-minor release-major _release
 
 # Defaults to the project's own .venv when one exists, so `make verify`/
@@ -38,6 +38,7 @@ help:
 	@echo "  benchmark-scale Measure static-analysis time and peak memory"
 	@echo "  evaluate-static Run cross-stack golden facts with time/memory report"
 	@echo "  evaluate-change-surface Run deterministic change-surface candidate goldens"
+	@echo "  integration-containers Run opt-in RabbitMQ/Postgres/MongoDB container E2E"
 	@echo "  build           Build sdist + wheel into dist/"
 	@echo "  clean           Remove build artifacts"
 	@echo "  release         Auto-computed bump (from commit history), verify, commit, tag, push"
@@ -98,6 +99,9 @@ evaluate-static:
 
 evaluate-change-surface:
 	$(PYTHON) scripts/run_benchmark_report.py
+
+integration-containers:
+	ORBITKB_CONTAINER_E2E=1 $(PYTHON) -m pytest tests/test_container_integrations.py -v
 
 build: clean
 	$(PYTHON) -m build
