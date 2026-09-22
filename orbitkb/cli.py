@@ -34,7 +34,8 @@ def _cmd_index(args: argparse.Namespace) -> int:
     try:
         depth_provider = resolve_depth_provider(
             DepthMode(args.depth_mode), args.depth_command, tuple(args.depth_arg), args.depth_tool,
-            args.depth_timeout, args.depth_max_edges,
+            args.depth_timeout, args.depth_max_edges, args.depth_cache_entries,
+            args.depth_circuit_failures, args.depth_circuit_cooldown,
         )
         with RichProgressReporter() as progress:
             results = index_path(
@@ -50,6 +51,8 @@ def _cmd_index(args: argparse.Namespace) -> int:
             f"{r.service_name}: status={r.status} files_changed={r.files_changed} llm_calls={r.llm_calls} "
             f"cost_usd={r.cost_usd}"
         )
+    if args.depth_mode != DepthMode.OFF.value:
+        print(f"depth_provider_metrics={json.dumps(depth_provider.metrics(), sort_keys=True)}")
     return 0 if all(r.status == "ok" for r in results) else 1
 
 
@@ -78,7 +81,8 @@ def _cmd_update(args: argparse.Namespace) -> int:
     try:
         depth_provider = resolve_depth_provider(
             DepthMode(args.depth_mode), args.depth_command, tuple(args.depth_arg), args.depth_tool,
-            args.depth_timeout, args.depth_max_edges,
+            args.depth_timeout, args.depth_max_edges, args.depth_cache_entries,
+            args.depth_circuit_failures, args.depth_circuit_cooldown,
         )
         with RichProgressReporter() as progress:
             result = index_service(
@@ -92,6 +96,8 @@ def _cmd_update(args: argparse.Namespace) -> int:
         f"{result.service_name}: status={result.status} files_changed={result.files_changed} "
         f"llm_calls={result.llm_calls} cost_usd={result.cost_usd}"
     )
+    if args.depth_mode != DepthMode.OFF.value:
+        print(f"depth_provider_metrics={json.dumps(depth_provider.metrics(), sort_keys=True)}")
     return 0 if result.status == "ok" else 1
 
 
@@ -323,6 +329,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--depth-tool", default="trace_entrypoint", help="MCP tool returning the documented bounded edge payload.")
         p.add_argument("--depth-timeout", type=float, default=15.0, help="Maximum seconds for the external MCP session (default: 15).")
         p.add_argument("--depth-max-edges", type=int, default=100, help="Maximum enriched edges per indexed service (default: 100).")
+        p.add_argument("--depth-cache-entries", type=int, default=128, help="Maximum bounded enrichment results cached per index process (default: 128).")
+        p.add_argument("--depth-circuit-failures", type=int, default=3, help="Failures before optional enrichment opens its circuit (default: 3).")
+        p.add_argument("--depth-circuit-cooldown", type=float, default=30.0, help="Seconds before an open enrichment circuit may retry (default: 30).")
 
     p_index = sub.add_parser(
         "index", help="Index a monorepo root or a single service repo",

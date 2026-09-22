@@ -273,4 +273,7 @@ The tool must return structured JSON (or a JSON text content item):
 
 Unknown kinds and malformed edges are dropped. In `augment` mode a provider error
 leaves the native AST result intact; in `require` mode indexing fails. The CLI also
-enforces a session timeout and a maximum number of enriched edges per service.
+enforces a session timeout and a maximum number of enriched edges per service. It
+validates every edge, caches only bounded parsed results for the current indexing
+process, and opens a circuit after repeated provider failures. Its metrics expose
+counts and latency only, never provider payload or source content.

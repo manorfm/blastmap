@@ -192,8 +192,11 @@ orbitkb index /repo/orders --depth-mode augment \
 provider is unavailable; `require` fails the index explicitly. The provider gets
 one repository path and one selected entrypoint symbol at a time, and may return
 only documented flow edges. `--depth-timeout` bounds the full MCP session and
-`--depth-max-edges` bounds added context per service. It cannot inject an opaque
-whole-repository graph.
+`--depth-max-edges` bounds added context per service. `--depth-cache-entries`
+caps in-process reuse, while the circuit opens after
+`--depth-circuit-failures` and waits `--depth-circuit-cooldown` before retrying.
+The CLI prints aggregate calls, cache hits, failures and latency only — never source
+or provider payload. It cannot inject an opaque whole-repository graph.
 
 See [INTERFACE.md](INTERFACE.md) for the MCP edge contract and response formats.
 

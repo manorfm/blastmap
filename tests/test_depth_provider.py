@@ -2,6 +2,7 @@ from pathlib import Path
 
 from orbitkb.analysis.depth import (
     DepthMode,
+    McpDepthProvider,
     NoopDepthProvider,
     _parse_edges,
     resolve_depth_provider,
@@ -81,3 +82,38 @@ def test_depth_provider_rejects_an_invalid_execution_budget():
         assert "--depth-max-edges" in str(error)
     else:
         raise AssertionError("invalid depth budget must be rejected")
+
+
+def test_augment_provider_caches_a_bounded_enrichment_without_recording_payload(tmp_path, monkeypatch):
+    provider = McpDepthProvider("depth", (), "trace", DepthMode.AUGMENT)
+    analysis = AnalysisResult(entrypoints=[])
+    calls = 0
+
+    async def enrich(root, value):
+        nonlocal calls
+        calls += 1
+        return [FlowEdge("a", "b", "invokes", Evidence("a.go", 1, 1), origin="codegraph")]
+
+    monkeypatch.setattr(provider, "_enrich", enrich)
+
+    assert provider.enrich(tmp_path, analysis)
+    assert provider.enrich(tmp_path, analysis)
+    assert calls == 1
+    assert provider.metrics()["cache_hits"] == 1
+    assert "a.go" not in str(provider.metrics())
+
+
+def test_augment_provider_opens_its_circuit_after_repeated_failures(tmp_path, monkeypatch):
+    provider = McpDepthProvider("depth", (), "trace", DepthMode.AUGMENT, circuit_failure_threshold=2)
+
+    async def failing(root, analysis):
+        raise RuntimeError("provider payload must not be logged")
+
+    monkeypatch.setattr(provider, "_enrich", failing)
+    analysis = AnalysisResult(entrypoints=[])
+
+    assert provider.enrich(tmp_path, analysis) == []
+    assert provider.enrich(tmp_path, analysis) == []
+    assert provider.enrich(tmp_path, analysis) == []
+    assert provider.metrics()["circuit_open"] is True
+    assert provider.metrics()["failures"] == 2
