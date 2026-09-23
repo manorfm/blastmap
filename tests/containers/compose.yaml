@@ -30,3 +30,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  localstack:
+    image: localstack/localstack:3
+    environment:
+      SERVICES: sqs,sns,s3,events
+      # LocalStack accepts any credentials, but the AWS CLI still refuses to run
+      # without something configured — dummy values, never real credentials.
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4566/_localstack/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
