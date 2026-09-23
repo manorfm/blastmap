@@ -1,7 +1,9 @@
 from pathlib import Path
 
+from orbitkb.analysis.models import AnalysisResult, CloudFact, Evidence
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
@@ -50,6 +52,19 @@ def test_generate_topology_diagram_includes_services_and_edges(tmp_path: Path):
     assert "notification-service" in diagram
     assert "Stripe API" in diagram
     assert "order_created" in diagram
+
+
+def test_generate_topology_diagram_includes_cloud_nodes(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    orders_id, _payments_id, _notif_id = _seed_topology(conn)
+    flows_repo.replace_analysis(conn, orders_id, AnalysisResult(cloud_facts=[
+        CloudFact("aws", "queue", "sqs", "SendMessage", "publish", "aws-sdk-js-v3", "orders-queue", Evidence("a.ts", 1, 1)),
+    ]))
+
+    diagram = generate_topology_diagram(conn)
+
+    assert "sqs" in diagram
+    assert "orders-queue" in diagram
 
 
 def test_generate_topology_diagram_highlights_cycle_services(tmp_path: Path):

@@ -149,6 +149,19 @@ def list_static_cloud_facts(conn: sqlite3.Connection, service_id: int) -> list[s
     ).fetchall()
 
 
+def list_all_static_cloud_facts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every service's cloud fact in the whole system — the topology diagram's
+    cloud edge set (export/mermaid.py), same posture as service_calls'
+    list_external_edges."""
+    return conn.execute(
+        """SELECT DISTINCT s.name AS from_name, scf.provider, scf.resource_type,
+                  scf.service_name, scf.target_name
+           FROM static_cloud_facts scf
+           JOIN services s ON s.id = scf.service_id
+           ORDER BY from_name, scf.service_name"""
+    ).fetchall()
+
+
 def list_reachable_edges(conn: sqlite3.Connection, service_id: int, symbol: str, max_edges: int = 100) -> list[sqlite3.Row]:
     """Breadth-first bounded traversal from one entrypoint's resolved symbol."""
     pending = [symbol]

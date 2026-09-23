@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
@@ -40,6 +41,7 @@ def export_markdown(conn: sqlite3.Connection, out_dir: Path, service_filter: str
         apis = apis_repo.list_apis(conn, svc["id"])
         persistence = persistence_repo.list_persistence(conn, svc["id"])
         messages = messages_repo.list_messages(conn, svc["id"])
+        cloud_facts = flows_repo.list_static_cloud_facts(conn, svc["id"])
 
         lines = [
             f"# {svc['name']}",
@@ -68,6 +70,16 @@ def export_markdown(conn: sqlite3.Connection, out_dir: Path, service_filter: str
         lines += ["", "## Mensageria"]
         if messages:
             lines += [f"- **{m['channel']}** ({m['direction']}): {m['description'] or ''}" for m in messages]
+        else:
+            lines.append("- (nada detectado)")
+
+        lines += ["", "## Nuvem"]
+        if cloud_facts:
+            lines += [
+                f"- **{f['provider']}:{f['service_name']}** {f['operation']} "
+                f"({f['target_name'] or 'destino não resolvido'})"
+                for f in cloud_facts
+            ]
         else:
             lines.append("- (nada detectado)")
 

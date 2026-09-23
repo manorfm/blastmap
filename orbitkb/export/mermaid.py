@@ -11,6 +11,7 @@ import sqlite3
 from pathlib import Path
 
 from orbitkb.db.repositories import architecture as architecture_repo
+from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
@@ -69,6 +70,16 @@ def generate_topology_diagram(conn: sqlite3.Connection) -> str:
         target_id = external_node(edge["to_service_name"])
         label = edge["resource_type"] or "external"
         lines.append(f"  {from_id} -.->|{label}| {target_id}")
+
+    for fact in flows_repo.list_all_static_cloud_facts(conn):
+        from_id = service_ids.get(fact["from_name"])
+        if from_id is None:
+            continue
+        cloud_name = f"{fact['provider']}:{fact['service_name']}" + (
+            f" {fact['target_name']}" if fact["target_name"] else ""
+        )
+        target_id = external_node(cloud_name)
+        lines.append(f"  {from_id} -.->|{fact['resource_type']}| {target_id}")
 
     for link in messages_repo.list_all_message_links(conn):
         publisher_id = service_ids.get(link["publisher"])

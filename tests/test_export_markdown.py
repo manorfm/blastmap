@@ -1,7 +1,9 @@
 from pathlib import Path
 
+from orbitkb.analysis.models import AnalysisResult, CloudFact, Evidence
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
@@ -54,6 +56,22 @@ def test_export_markdown_writes_service_index_and_api_detail(tmp_path: Path):
     api_text = api_files[0].read_text(encoding="utf-8")
     assert "order_id" in api_text
     assert "authorization" in api_text
+
+
+def test_export_markdown_includes_a_cloud_section(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    orders_id = _seed(conn)
+    flows_repo.replace_analysis(conn, orders_id, AnalysisResult(cloud_facts=[
+        CloudFact("aws", "queue", "sqs", "SendMessage", "publish", "aws-sdk-js-v3", "orders-queue", Evidence("a.ts", 1, 1)),
+    ]))
+    out_dir = tmp_path / "docs"
+
+    export_markdown(conn, out_dir)
+
+    index_text = (out_dir / "orders-service" / "index.md").read_text(encoding="utf-8")
+    assert "## Nuvem" in index_text
+    assert "sqs" in index_text
+    assert "orders-queue" in index_text
 
 
 def test_export_markdown_service_filter_only_writes_matching_service(tmp_path: Path):
