@@ -6,7 +6,13 @@ pretending that a source-only heuristic proves a runtime architecture verdict.
 """
 from pathlib import Path
 
-from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowEdge
+from orbitkb.analysis.models import (
+    AnalysisResult,
+    EntryPoint,
+    ErrorContract,
+    Evidence,
+    FlowEdge,
+)
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import flows as flows_repo
@@ -17,6 +23,7 @@ from orbitkb.generation.architecture import (
     find_cycles,
     find_fan_imbalance,
     find_message_consumers_without_recovery_policy,
+    find_overbroad_exception_handlers,
     find_read_entrypoint_side_effects,
     find_shared_database,
 )
@@ -97,6 +104,28 @@ def test_message_recovery_finding_disappears_when_a_dead_letter_route_is_proven(
 
     _replace_consumer_contract(conn, service, consumer, {"dead_letter_routing_key": "billing.dlq"})
     assert find_message_consumers_without_recovery_policy(conn) == []
+
+
+def test_overbroad_exception_handler_disappears_when_the_mapping_becomes_specific(tmp_path: Path):
+    conn = open_db(tmp_path / "error-handler.db")
+    service = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
+    broad = ErrorContract(
+        source="ApiExceptionHandler.handle", role="maps", error_kind="unexpected",
+        internal_type="Exception", protocol="http", transport_code="500", public_code=None,
+        exposes_internal_detail=False, retryability="unknown", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[broad]))
+
+    assert _kinds(find_overbroad_exception_handlers(conn)) == {"possible_overbroad_exception_handler"}
+
+    specific = ErrorContract(
+        source="ApiExceptionHandler.handle", role="maps", error_kind="conflict",
+        internal_type="InsufficientStockException", protocol="http", transport_code="409", public_code=None,
+        exposes_internal_detail=False, retryability="not_retryable", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[specific]))
+
+    assert find_overbroad_exception_handlers(conn) == []
 
 
 def _replace_calls(conn, service_id: int, api_id: int, targets: list[str]) -> None:

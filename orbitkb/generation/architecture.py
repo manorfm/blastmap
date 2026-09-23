@@ -19,6 +19,7 @@ from orbitkb.db.repositories import architecture as architecture_repo
 # handful of legitimate dependencies doesn't trigger noise.
 FAN_THRESHOLD = 4
 READ_ENTRYPOINT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+BROAD_EXCEPTION_TYPES = frozenset({"exception", "throwable", "error", "runtimeexception"})
 
 
 def _internal_edges(conn: sqlite3.Connection) -> list[tuple[int, int]]:
@@ -399,6 +400,51 @@ def find_read_entrypoint_side_effects(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_overbroad_exception_handlers(conn: sqlite3.Connection) -> list[dict]:
+    """Flag source-proven generic exception mappings without judging runtime behavior.
+
+    A generic mapping can be a legitimate final fallback. It is still worth making
+    visible because it may collapse domain/client errors into a single transport
+    response. The detector intentionally requires an indexed ``maps`` contract;
+    a bare ``catch (Exception)`` is not enough evidence on its own.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT service_id, source, internal_type, protocol, transport_code,
+                  file_path, start_line, end_line
+           FROM static_error_contracts
+           WHERE role = 'maps' AND internal_type IS NOT NULL
+           ORDER BY service_id, source, file_path, start_line""",
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        exception_type = row["internal_type"].rsplit(".", 1)[-1].casefold()
+        if exception_type not in BROAD_EXCEPTION_TYPES:
+            continue
+        findings.append({
+            "kind": "possible_overbroad_exception_handler", "severity": "info",
+            "services": [names[row["service_id"]]],
+            "reason": (
+                f"{row['source']} maps broad exception type '{row['internal_type']}' to "
+                f"{row['protocol']} {row['transport_code'] or 'unknown'}; validate that "
+                "domain and client errors retain their intended semantics."
+            ),
+            "detail": {
+                "handler": row["source"], "internal_type": row["internal_type"],
+                "transport": {"protocol": row["protocol"], "code": row["transport_code"]},
+                "confidence": 0.75,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": [
+                    "Static analysis cannot establish whether this handler delegates to more specific mappings or is an intentional final fallback.",
+                ],
+                "remediation": [
+                    "Keep a safe generic fallback, but add explicit mappings for expected validation, authorization, not-found and conflict errors.",
+                ],
+            },
+        })
+    return findings
+
+
 def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> list[dict]:
     """Flag RabbitMQ consumers without a source-proven recovery mechanism.
 
@@ -772,6 +818,7 @@ _DETECTORS = (
     find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects,
+    find_overbroad_exception_handlers,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
     find_cloud_dead_letter_queue_missing, find_public_object_storage,
