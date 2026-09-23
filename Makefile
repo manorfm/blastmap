@@ -40,7 +40,7 @@ help:
 	@echo "  benchmark-scale Profile static-analysis time and peak memory"
 	@echo "  evaluate-static Run cross-stack golden facts with time/memory report"
 	@echo "  evaluate-change-surface Run deterministic change-surface candidate goldens"
-	@echo "  integration-containers Run opt-in RabbitMQ/Postgres/MongoDB container E2E"
+	@echo "  integration-containers Run opt-in RabbitMQ/Postgres/MongoDB/LocalStack container E2E"
 	@echo "  readiness-audit Report deterministic evidence and production conditions"
 	@echo "  build           Build sdist + wheel into dist/"
 	@echo "  clean           Remove build artifacts"
@@ -104,7 +104,7 @@ evaluate-change-surface:
 	$(PYTHON) scripts/run_benchmark_report.py
 
 integration-containers:
-	ORBITKB_CONTAINER_E2E=1 $(PYTHON) -m pytest tests/test_container_integrations.py -v
+	ORBITKB_CONTAINER_E2E=1 $(PYTHON) -m pytest tests/test_container_integrations.py tests/test_container_cloud_integrations.py -v
 
 readiness-audit:
 	$(PYTHON) scripts/run_readiness_audit.py

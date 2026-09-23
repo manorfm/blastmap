@@ -84,8 +84,16 @@ def cloud_edge_kind_and_fact(
     `source` is the containing function, the same way GORM/Mongoose calls do.
     """
     receiver, separator, method = target.rpartition(".")
-    if not separator or receiver not in declarations:
+    if not separator:
         return None, None
+    if receiver not in declarations:
+        # A receiver-qualified access (Go's `h.sqsClient` through a method
+        # receiver, or `this.sqsClient` in JVM/Node) -- the declared client's
+        # own bare identifier is still the call's last dotted segment; the
+        # qualifying receiver in front of it isn't itself part of the proof.
+        receiver = receiver.rsplit(".", 1)[-1]
+        if receiver not in declarations:
+            return None, None
     provider, service_name, resource_type, sdk, method_table = declarations[receiver]
     operation = method_table.get(method)
     if operation is None:

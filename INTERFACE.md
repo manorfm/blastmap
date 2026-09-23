@@ -110,12 +110,17 @@ Shared, multi-host SQLite locking is outside the supported operating model.
 ## Support boundaries
 
 Static facts for Go, Java/Spring, Kotlin/Spring and Node/TypeScript/GraphQL are
-supported only where source evidence is deterministic. Cloud/IaC facts (AWS
-SQS/SNS/S3/EventBridge, Azure Blob Storage, Terraform/CloudFormation/Kubernetes)
-follow the same posture but have no `FlowEdge` counterpart yet — see "Cloud and IaC
-dependencies". Dynamic wiring, runtime observations and external depth enrichment
-remain explicitly bounded or experimental. The server returns unknowns rather than
-elevating heuristics to facts; compact change context remains capped at five cards.
+supported only where source evidence is deterministic. Cloud/IaC facts (AWS,
+Azure and GCP call sites plus Terraform/CloudFormation/Kubernetes declarations)
+follow the same posture and, for Go/Java/Kotlin/Node/TypeScript, also produce a
+real `FlowEdge` visible in `trace_flow`/`describe_entrypoint` — see "Cloud and IaC
+dependencies" for the one language exception (Python) and the one documented
+approximation (Azure Service Bus queue-vs-topic). Kafka producers/consumers
+follow the same messaging pipeline RabbitMQ already uses (Go/Java/Kotlin/Node;
+Python producer only). Dynamic wiring, runtime observations and external depth
+enrichment remain explicitly bounded or experimental. The server returns
+unknowns rather than elevating heuristics to facts; compact change context
+remains capped at five cards.
 
 ## Entrypoint response
 
@@ -230,6 +235,14 @@ prove the queue, exchange and routing key as literals; multiple bindings are kep
 For Go, this requires a literal `QueueBind` call on a receiver locally declared as
 `*amqp.Channel`.
 
+Kafka contracts use the same `transport`/`direction`/`queue`/`payload` shape
+(`transport: "kafka"`), with `queue` holding the topic name and no `bindings`/
+`dead_letter_routing_key`/`retry_delay_ms` (Kafka has no RabbitMQ-style exchange/
+routing-key/redelivery concepts). `KafkaTemplate.send(topic, payload)` and
+`send(topic, key, payload)` are both recognized; Node's `producer.send({topic,
+messages})` is matched by that literal object shape, not by the `.send` method
+name alone (too generic — many unrelated APIs share it).
+
 `describe_entrypoint` returns `boundaries` alongside `flow`: branch, async, retry,
 error or transaction markers whose source symbol is reachable under the selected
 edge budget. They report syntactic evidence only, never runtime reachability.
@@ -304,12 +317,27 @@ independently paginated lists, never merged into one inferred claim:
 
 `static_facts` is deterministic evidence from source code: a locally-declared SDK
 client type or a named SDK import actually constructed, resolved against a
-vendor-sourced operation table — never a keyword guess. Supported: AWS SQS, SNS, S3
-and EventBridge (Go, Java, Kotlin, Node/TypeScript, Python) and Azure Blob Storage
-(Go, Java, Kotlin, Node/TypeScript). `target_name` is the literal resource name only
-when the call site names it as a plain string; an interpolated or otherwise dynamic
-value is `null`, never guessed. It has no `FlowEdge` counterpart yet, so it does not
-appear in `trace_flow` or `describe_entrypoint`'s flow.
+vendor-sourced operation table — never a keyword guess. Supported: AWS SQS, SNS,
+S3, EventBridge and Kinesis (Go, Java, Kotlin, Node/TypeScript, Python), Azure
+Blob Storage, Service Bus and Event Hub (Go, Java, Kotlin, Node/TypeScript — Go
+covers Blob and Pub/Sub-style factory chains, not Service Bus/Event Hub), and GCP
+Pub/Sub (Java, Go, Node/TypeScript). Python is AWS-only (`boto3`); GCS is IaC-only,
+not yet wired into code detection (its real API chains two factory levels —
+`bucket(name).blob(name).upload(...)` — beyond the one-level mechanism the other
+factory-chained SDKs use). `target_name` is the literal resource name only when the
+call site names it as a plain string; an interpolated or otherwise dynamic value is
+`null`, never guessed. For every language except Python, the same call also produces
+a real `FlowEdge` (`publishes`/`consumes`/`reads`/`writes`/`invokes`, from the
+containing function's own symbol), so it appears in `trace_flow`/
+`describe_entrypoint`'s flow, not just here.
+
+**Azure Service Bus's one documented approximation:** its SDK client type
+(`ServiceBusSenderClient`/`ServiceBusReceiverClient`) is identical for both queues
+and topics — only the entity name passed at runtime distinguishes them, which isn't
+statically provable — so every Service Bus code fact's `resource_type` defaults to
+`'queue'`. A topic operation is mis-tagged as a queue by this default. IaC-side
+detection does not have this limitation: Terraform declares
+`azurerm_servicebus_queue`/`_topic` as distinct resource types.
 
 `iac_resources` is structurally parsed Terraform (`python-hcl2`), CloudFormation
 (`cfn-flip`/JSON) and plain Kubernetes manifests in the same repository — real
@@ -320,11 +348,9 @@ up in one service's `describe_cloud_dependencies` at all) is set only when the
 declaring file structurally falls under exactly one indexed service's root;
 otherwise it stays repository-scoped and is visible only via
 `find_architecture_smells`' cloud findings, not this tool. Unrendered Helm chart
-templates are detected and skipped, never mis-parsed as plain YAML. GCP
-(Pub/Sub, GCS) and expanded Azure (Service Bus, Event Hub, Event Grid) and AWS
-Kinesis are declared in the taxonomy and recognized in Terraform/CloudFormation,
-but not yet wired into code-level detection (in progress); Dockerfile is out
-of scope.
+templates are detected and skipped, never mis-parsed as plain YAML. GCP (Pub/Sub,
+GCS), expanded Azure (Service Bus, Event Hub, Event Grid) and AWS Kinesis are all
+recognized in Terraform/CloudFormation. Dockerfile is out of scope.
 
 `attributes` is a small, curated set of literal attributes tracked per resource
 type — presence-only for ones whose value can't be resolved as a literal in
@@ -332,13 +358,40 @@ practice (`redrive_policy` is almost always a `jsonencode(...)` call), literal
 value for ones where the value itself matters (`acl`, `container_access_type`).
 Never a default-filled guess: an attribute absent from the declaration, or whose
 value depends on an interpolated expression, is simply absent from this object.
+S3 bucket encryption/versioning is the one case correlated across two Terraform
+declarations rather than read from one: AWS provider v4+ split both out of
+`aws_s3_bucket` into their own resources (`aws_s3_bucket_versioning`,
+`aws_s3_bucket_server_side_encryption_configuration`), referencing the bucket by
+`bucket = aws_s3_bucket.foo.id` instead of declaring it inline — the parser
+resolves that reference and folds the result into the bucket's own `attributes`
+as `versioning_configured`/`encryption_configured`. CloudFormation needs no such
+correlation; it declares both inline on the bucket itself.
 
-`find_architecture_smells` adds three cloud-derived findings computed from the same
+`find_architecture_smells` adds seven cloud-derived findings computed from the same
 facts, no extra cost: `cloud_dependency_without_iac` (code names a cloud resource no
 Terraform/CloudFormation in the repository declares), `cloud_iac_resource_unused`
-(the inverse), and `shared_cloud_resource` (two services whose code names the same
+(the inverse), `shared_cloud_resource` (two services whose code names the same
 queue/topic/bucket — coupling through shared infrastructure, the cloud analog of
-`shared_database`).
+`shared_database`), `possible_missing_dead_letter_queue` (an SQS queue with no
+source-proven redrive policy), `possible_public_object_storage` (a literal public
+ACL — `severity: critical`), `possible_unencrypted_cloud_resource` and
+`possible_missing_bucket_versioning` (S3/SQS only — GCS and Azure Storage encrypt
+by default, so an absent declaration isn't informative there). The last four carry
+the same "worth checking, not a verdict" posture as the RabbitMQ recovery-policy
+finding: a missing declaration in the indexed IaC is not proof the setting is
+truly absent.
+
+Kafka is not part of `describe_cloud_dependencies` — it follows the same messaging
+pipeline RabbitMQ already uses (`MessageContract`/`EntryPoint`, exposed through
+`describe_messages`/`describe_entrypoint`), not `static_cloud_facts`. Supported:
+`KafkaTemplate`/`@KafkaListener` (Java, Kotlin), `kafkajs` (Node/TypeScript —
+producer via its object-literal `{topic, messages}` shape, consumer only when
+exactly one `.subscribe({topic})` pairs unambiguously with one `.run({eachMessage})`
+in the file), `segmentio/kafka-go` (Go — a `*kafka.Reader` bound to a literal topic
+and read from within the same function becomes that function's own entrypoint,
+since kafka-go has no RabbitMQ-style callback consumer). Python gets a producer
+`FlowEdge` for free from the existing generic call classifier, no dedicated
+`MessageContract`; there is no Python Kafka consumer support.
 
 ## External depth-provider contract
 

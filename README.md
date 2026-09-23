@@ -141,12 +141,12 @@ The supported deterministic subset is intentionally focused:
 
 | Area | Current coverage | Boundary |
 | --- | --- | --- |
-| Go | HTTP handlers, calls, GORM and `database/sql`, RabbitMQ | Dynamic routing and types remain unknown. |
-| Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, scheduled jobs | Only unambiguous local wiring is resolved. |
-| Node and TypeScript | GraphQL, Mongoose, Prisma, RabbitMQ | Dynamic imports and runtime composition remain unknown. |
+| Go | HTTP handlers, calls, GORM and `database/sql`, RabbitMQ, Kafka (`segmentio/kafka-go`) | Dynamic routing and types remain unknown. |
+| Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs | Only unambiguous local wiring is resolved. |
+| Node and TypeScript | GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
 | GraphQL | Operations, local schema contracts, input/output shapes | Remote composition, directives and federation behavior are not inferred. |
-| Persistence and messaging | Postgres/Mongo evidence, RabbitMQ bindings and contracts | Only literal, source-proven configuration is exposed. |
-| Cloud/infra | AWS SQS/SNS/S3/EventBridge and Azure Blob Storage call sites (Go, Java, Kotlin, Node/TS, Python), plus Terraform/CloudFormation/plain Kubernetes declarations, parsed with real grammars (`python-hcl2`, `cfn-flip`) — never keyword matching | GCP, Dockerfile, and unrendered Helm templates are not resolved; a cloud fact does not appear in `trace_flow`/`describe_entrypoint`, only in `describe_cloud_dependencies`. |
+| Persistence and messaging | Postgres/Mongo evidence, RabbitMQ bindings and contracts, Kafka producer/consumer contracts | Only literal, source-proven configuration is exposed; Kafka consumer detection is Go/JVM/Node only, no Python. |
+| Cloud/infra | AWS (SQS, SNS, S3, EventBridge, Kinesis), Azure (Blob Storage, Service Bus, Event Hub) and GCP (Pub/Sub) call sites (Go, Java, Kotlin, Node/TS; Python is AWS-only via `boto3`), plus Terraform/CloudFormation/plain Kubernetes declarations, parsed with real grammars (`python-hcl2`, `cfn-flip`) — never keyword matching. A cloud call also produces a `FlowEdge`, visible in `trace_flow`/`describe_entrypoint`, for every language except Python. | GCS, Dockerfile, and unrendered Helm templates are not resolved; Azure Service Bus code facts can't distinguish queue from topic (defaults to queue — see `describe_cloud_dependencies`). |
 | Runtime evidence | Normalized OTel or broker edges | Experimental; payloads, trace IDs and attributes are rejected. |
 
 An optional external depth provider can enrich a selected flow when native resolution
@@ -260,10 +260,12 @@ make integration-containers
 make readiness-audit
 ```
 
-`make integration-containers` starts ephemeral RabbitMQ, Postgres and MongoDB
-containers, runs native operations against each, and checks representative static
-contracts. It is opt-in locally and runs in CI. It is an infrastructure smoke E2E,
-not a benchmark of a user's application or driver compatibility.
+`make integration-containers` starts ephemeral RabbitMQ, Postgres, MongoDB and
+LocalStack containers, runs native operations against each (a real SQS
+create-queue/send-message/receive-message round-trip for LocalStack), and checks
+representative static contracts. It is opt-in locally and runs in CI. It is an
+infrastructure smoke E2E, not a benchmark of a user's application or driver
+compatibility.
 
 `make benchmark-scale` reports median analysis time and peak traced Python memory for
 generated Go handler corpora. For a comparable local baseline, change its inputs:
@@ -277,10 +279,12 @@ analysis still scans the service on each index/update, so profile a real reposit
 before adding cache or parallelism.
 
 Architecture rules have fact-mutation tests for cycles, fan-out, shared storage,
-read-entrypoint side effects, RabbitMQ recovery-policy hypotheses, and cloud
-dependencies undeclared in IaC (or declared but unreferenced in code). Static and
-change-surface evaluations are deterministic regression checks; they do not claim to
-measure an LLM's judgment on arbitrary codebases.
+read-entrypoint side effects, RabbitMQ recovery-policy hypotheses, cloud
+dependencies undeclared in IaC (or declared but unreferenced in code), and cloud
+security/misconfiguration smells (missing dead-letter queue, public object
+storage, missing encryption or bucket versioning). Static and change-surface
+evaluations are deterministic regression checks; they do not claim to measure an
+LLM's judgment on arbitrary codebases.
 
 ## Further reading
 

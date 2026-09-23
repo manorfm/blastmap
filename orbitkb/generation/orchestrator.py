@@ -693,11 +693,17 @@ def index_path(
     if removed_service_ids:
         service_calls_repo.reconcile_service_call_targets(conn)
         search_repo.rebuild_search_index(conn)
-        recompute_architecture_view(conn)
 
     # Scanned once per repository, after every candidate service has a real row
     # (and therefore a real service_id to attribute a matched resource to) —
     # IaC commonly lives outside any single service's own root, so this can't
     # be folded into index_service's per-service pass.
     cloud_iac_repo.replace_iac_resources(conn, repository_id, scan_repository(resolved_path, candidates))
+    # index_service's own recompute_architecture_view call (above, per service)
+    # necessarily runs *before* this repository's IaC scan on a fresh index —
+    # cloud_iac_resources findings computed there would be stale by exactly one
+    # index cycle otherwise. Recomputing once more, unconditionally, here
+    # guarantees every finding reflects both this run's code facts and this
+    # run's IaC facts by the time index_path returns.
+    recompute_architecture_view(conn)
     return results

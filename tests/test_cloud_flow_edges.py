@@ -28,6 +28,35 @@ def test_go_sqs_call_produces_both_a_cloud_fact_and_a_flow_edge(tmp_path: Path):
     assert cloud_edges[0].target == "client.SendMessage"
 
 
+def test_go_sqs_call_through_a_struct_field_via_its_method_receiver_is_detected(tmp_path: Path):
+    """Found via WP16's real manual index/MCP verification: a client stored
+    as a struct field (the idiomatic Go dependency-injection shape) is
+    accessed through its method receiver (`h.sqsClient.SendMessage(...)`),
+    not bare -- go_client_declarations' key is still the bare field name
+    ("sqsClient"), so the receiver-qualified call site didn't match at all
+    before cloud_edge_kind_and_fact's fallback to the last dotted segment."""
+    (tmp_path / "publisher.go").write_text(
+        "package publisher\n\n"
+        'import "github.com/aws/aws-sdk-go-v2/service/sqs"\n\n'
+        "type OrderHandler struct {\n"
+        "\tsqsClient *sqs.Client\n"
+        "}\n\n"
+        "func (h *OrderHandler) CreateOrder(body string) error {\n"
+        "\t_, err := h.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{})\n"
+        "\treturn err\n"
+        "}\n"
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert len(result.cloud_facts) == 1
+    assert result.cloud_facts[0].service_name == "sqs"
+    cloud_edges = [e for e in result.edges if e.target == "h.sqsClient.SendMessage"]
+    assert len(cloud_edges) == 1
+    assert cloud_edges[0].source == "OrderHandler.CreateOrder"
+    assert cloud_edges[0].kind == "publishes"
+
+
 def test_go_sqs_calls_in_two_different_functions_do_not_cross_leak(tmp_path: Path):
     (tmp_path / "publisher.go").write_text(
         "package publisher\n\n"
