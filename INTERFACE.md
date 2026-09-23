@@ -179,7 +179,14 @@ route. Each call includes `resolved_target`: `endpoint_indexed` with an entrypoi
 `service_indexed` without a matching route, `not_indexed`, or `ambiguous` with
 repository candidates. A unique target in the caller's repository is preferred over
 same-named external-repository candidates. Dynamic URLs and placeholder configuration
-are omitted. The optional `smells` list contains explicit hypotheses, never a
+are omitted. The `resilience_policies` list is likewise bounded to reachable symbols.
+It includes only literal Java/Kotlin Spring limits: `@Retryable(maxAttempts = N)`,
+Reactor `.retry(N)`, and Reactor
+`.timeout(Duration.ofMillis|Seconds|Minutes(N))` on an injected `WebClient` chain.
+Each item reports its source, mechanism, numeric `value`, `unit`, and evidence.
+It describes declared source limits, never a runtime retry or timeout guarantee;
+dynamic values, property-backed policies, `retryWhen`, and external client
+configuration are omitted. The optional `smells` list contains explicit hypotheses, never a
 conclusive architecture classification; for example, a GraphQL mutation that directly
 writes state is flagged
 optional `smells` list contains explicit hypotheses, never a conclusive architecture

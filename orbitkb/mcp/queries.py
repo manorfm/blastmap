@@ -324,6 +324,7 @@ def describe_entrypoint(
     edges = bounded_edges[:effective_max_edges]
     flow_symbols = {entrypoint["symbol"]} | {edge["from_symbol"] for edge in edges} | {edge["to_symbol"] for edge in edges}
     static_service_calls = flows_repo.list_static_service_calls_for_sources(conn, row["id"], flow_symbols)
+    resilience_policies = flows_repo.list_static_resilience_policies_for_sources(conn, row["id"], flow_symbols)
     target_cache: dict[tuple[object, ...], dict] = {}
     return {
         "service": row["name"], "repository": row["repository_name"],
@@ -381,6 +382,17 @@ def describe_entrypoint(
                 "resolved_target": _resolve_static_service_call_target(conn, row, item, target_cache),
             }
             for item in static_service_calls
+        ],
+        "resilience_policies": [
+            {
+                "source": item["source"], "kind": item["kind"],
+                "mechanism": item["mechanism"], "value": item["value"],
+                "unit": item["unit"], "evidence": {
+                    "file": item["file_path"], "start_line": item["start_line"],
+                    "end_line": item["end_line"],
+                },
+            }
+            for item in resilience_policies
         ],
         "contract": flows_repo.get_entrypoint_contract(conn, entrypoint["id"]),
         "smells": find_entrypoint_smells(entrypoint, edges),

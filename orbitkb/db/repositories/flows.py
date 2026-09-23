@@ -174,12 +174,32 @@ def list_static_service_calls(conn: sqlite3.Connection, service_id: int) -> list
 
 
 def list_static_resilience_policies(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return _list_static_resilience_policies(conn, service_id)
+
+
+def list_static_resilience_policies_for_sources(
+    conn: sqlite3.Connection, service_id: int, sources: set[str],
+) -> list[sqlite3.Row]:
+    if not sources:
+        return []
+    return _list_static_resilience_policies(conn, service_id, sources)
+
+
+def _list_static_resilience_policies(
+    conn: sqlite3.Connection, service_id: int, sources: set[str] | None = None,
+) -> list[sqlite3.Row]:
+    source_filter = ""
+    params: list[object] = [service_id]
+    if sources:
+        placeholders = ", ".join("?" for _ in sources)
+        source_filter = f" AND source IN ({placeholders})"  # nosec B608 - placeholders are generated from set cardinality.
+        params.extend(sorted(sources))
     return conn.execute(
         """SELECT source, kind, mechanism, value, unit, file_path, start_line, end_line
            FROM static_resilience_policies
-           WHERE service_id = ?
+           WHERE service_id = ?""" + source_filter + """
            ORDER BY source, kind, mechanism, value, file_path, start_line""",
-        (service_id,),
+        params,
     ).fetchall()
 
 

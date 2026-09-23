@@ -138,6 +138,13 @@ requires an explicit verb or literal `.method(HttpMethod.X)` followed by
 source; placeholder configuration, dynamic URLs, IPs, localhost and external domains
 remain unknown.
 
+The same response includes `resilience_policies` for source-proven limits on its
+reachable Spring symbols: `@Retryable(maxAttempts = N)`, Reactor
+`.retry(N)`, and Reactor `.timeout(Duration.ofMillis|Seconds|Minutes(N))` on
+an injected `WebClient` chain. These are declared limits, not proof that a call
+will be retried or time out at runtime. Dynamic values, property-backed policies,
+`retryWhen`, and client configuration outside the method remain unknown.
+
 Each returned static service call also carries `resolved_target`: it links to the
 indexed remote endpoint when the target is unique (or uniquely belongs to the caller's
 repository), reports an indexed service when only the route is absent, and reports
@@ -176,7 +183,7 @@ The supported deterministic subset is intentionally focused:
 | Area | Current coverage | Boundary |
 | --- | --- | --- |
 | Go | HTTP handlers, calls, GORM and `database/sql`, RabbitMQ, Kafka (`segmentio/kafka-go`) | Dynamic routing and types remain unknown. |
-| Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs; Feign and injected `RestTemplate`/`WebClient` calls with literal internal service/route mappings | Only unambiguous local wiring is resolved; dynamic URLs, IPs, localhost and external domains are not inferred as services. |
+| Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs; Feign and injected `RestTemplate`/`WebClient` calls with literal internal service/route mappings; explicit method-level retry/timeout limits | Only unambiguous local wiring and literal limits are resolved; dynamic URLs, policies and values, IPs, localhost and external domains are not inferred. |
 | Node and TypeScript | GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
 | GraphQL | Operations, local schema contracts, input/output shapes | Remote composition, directives and federation behavior are not inferred. |
 | Persistence and messaging | Postgres/Mongo evidence, RabbitMQ bindings and contracts, Kafka producer/consumer contracts | Only literal, source-proven configuration is exposed; Kafka consumer detection is Go/JVM/Node only, no Python. |

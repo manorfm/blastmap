@@ -5,6 +5,7 @@ from orbitkb.analysis.models import (
     Evidence,
     FlowBoundary,
     FlowEdge,
+    ResiliencePolicy,
     StaticServiceCall,
 )
 from orbitkb.db.connection import open_db
@@ -162,6 +163,38 @@ def test_describe_entrypoint_includes_only_reachable_static_service_calls(tmp_pa
                 "evidence": {"file": "CheckoutService.java", "start_line": 12, "end_line": 15},
             },
         },
+    }]
+
+
+def test_describe_entrypoint_includes_only_reachable_resilience_policies(tmp_path):
+    conn = open_db(tmp_path / "resilience-policies.db")
+    service_id = services.ensure_service(conn, "checkout", "/repos/checkout", "jvm-spring")
+    evidence = Evidence("CheckoutService.java", 12, 15)
+    flows.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "CheckoutController.create", evidence)],
+            edges=[FlowEdge("CheckoutController.create", "CheckoutService.checkout", "invokes", evidence)],
+            resilience_policies=[
+                ResiliencePolicy(
+                    source="CheckoutService.checkout", kind="timeout", mechanism="reactor",
+                    value=2_000, unit="milliseconds", evidence=evidence,
+                ),
+                ResiliencePolicy(
+                    source="ReconciliationJob.reconcile", kind="retry", mechanism="spring_annotation",
+                    value=3, unit="attempts", evidence=evidence,
+                ),
+            ],
+        ),
+    )
+
+    detail = queries.describe_entrypoint(conn, "checkout", "http", "post", "/orders")
+
+    assert detail["resilience_policies"] == [{
+        "source": "CheckoutService.checkout", "kind": "timeout", "mechanism": "reactor",
+        "value": 2_000, "unit": "milliseconds",
+        "evidence": {"file": "CheckoutService.java", "start_line": 12, "end_line": 15},
     }]
 
 
