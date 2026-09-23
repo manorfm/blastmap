@@ -33,6 +33,7 @@ from orbitkb.generation.architecture import (
     find_retries_on_potentially_non_idempotent_http_calls,
     find_shared_database,
     find_static_http_calls_without_resilience_policy,
+    find_timeouts_without_local_fallback,
     find_unmapped_downstream_errors,
     recompute_architecture_view,
 )
@@ -354,6 +355,52 @@ def test_retry_on_downstream_client_error_disappears_without_a_retry_policy(tmp_
     )
 
     assert find_retries_on_downstream_client_errors(conn) == []
+
+
+def test_timeout_fallback_finding_disappears_when_the_source_handles_timeout(tmp_path: Path):
+    conn = open_db(tmp_path / "timeout-fallback.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    call = StaticServiceCall(
+        source="CheckoutService.reserve", target_service="inventory", protocol="http",
+        target_method="POST", target_path="/reservations", evidence=STATIC_EVIDENCE,
+    )
+    timeout = ResiliencePolicy(
+        source="CheckoutService.reserve", kind="timeout", mechanism="reactor",
+        value=2_000, unit="milliseconds", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, checkout, AnalysisResult(static_service_calls=[call], resilience_policies=[timeout]),
+    )
+
+    findings = find_timeouts_without_local_fallback(conn)
+
+    assert _kinds(findings) == {"possible_timeout_without_local_fallback"}
+    assert findings[0]["detail"]["timeout_policies"] == [{
+        "mechanism": "reactor", "value": 2_000, "unit": "milliseconds",
+    }]
+    assert findings[0]["detail"]["target"] == {
+        "service": "inventory", "method": "POST", "path": "/reservations",
+    }
+    run_id = recompute_architecture_view(conn)
+    assert {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    } == {"possible_timeout_without_local_fallback"}
+
+    handled_timeout = ErrorContract(
+        source="CheckoutService.reserve", role="handles", error_kind="timeout",
+        internal_type="TimeoutException", protocol="internal", transport_code=None,
+        public_code=None, exposes_internal_detail=False, retryability="unknown",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(
+            static_service_calls=[call], resilience_policies=[timeout], error_contracts=[handled_timeout],
+        ),
+    )
+
+    assert find_timeouts_without_local_fallback(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

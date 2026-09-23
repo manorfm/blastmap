@@ -177,6 +177,12 @@ from that endpoint; otherwise it uses the target service's contracts with lower
 confidence. It does not claim a retry predicate accepts the 4xx: rate limits and other
 documented transient client responses may be legitimate exceptions.
 
+For a literal timeout on a source-proven internal HTTP call, OrbitKB can also flag the
+absence of a typed local timeout fallback in that same symbol. This is deliberately
+narrow: controller/gateway handlers and client-factory behavior may still provide a
+valid response. The signal asks an agent to verify a safe fallback or controlled error
+translation close to the client boundary.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,

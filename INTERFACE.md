@@ -245,6 +245,12 @@ or falls back to target-service contracts at lower confidence. It does not claim
 runtime retry predicate accepts that response; rate limits and other documented
 transient 4xx contracts can be intentional exceptions.
 
+`possible_timeout_without_local_fallback` combines a literal timeout policy and a
+source-proven internal HTTP call when the same source symbol has no typed local timeout
+handler. Only a typed `catch`, Reactor `onErrorResume`, or `onErrorReturn` is evidence
+of local handling. It does not claim that controllers, gateways, client factories or
+global handlers do not provide a fallback outside that symbol.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally

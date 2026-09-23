@@ -626,13 +626,21 @@ def find_retries_on_potentially_non_idempotent_http_calls(conn: sqlite3.Connecti
 
 def _retry_policies_by_source(conn: sqlite3.Connection) -> dict[tuple[int, str], list[sqlite3.Row]]:
     """Group literal retry declarations by their local source symbol."""
+    return _resilience_policies_by_source(conn, "retry")
+
+
+def _resilience_policies_by_source(
+    conn: sqlite3.Connection, kind: str,
+) -> dict[tuple[int, str], list[sqlite3.Row]]:
+    """Group one kind of literal resilience declaration by source symbol."""
     policies_by_source: dict[tuple[int, str], list[sqlite3.Row]] = defaultdict(list)
     for policy in conn.execute(
         """SELECT service_id, source, mechanism, value, unit,
                   file_path, start_line, end_line
            FROM static_resilience_policies
-           WHERE kind = 'retry'
+           WHERE kind = ?
            ORDER BY service_id, source, mechanism, value, unit, file_path, start_line""",
+        (kind,),
     ).fetchall():
         policies_by_source[(policy["service_id"], policy["source"])].append(policy)
     return policies_by_source
@@ -727,6 +735,73 @@ def find_retries_on_downstream_client_errors(conn: sqlite3.Connection) -> list[d
                     ],
                 },
             })
+    return findings
+
+
+def find_timeouts_without_local_fallback(conn: sqlite3.Connection) -> list[dict]:
+    """Surface timeout-protected HTTP calls lacking an explicit local timeout handler.
+
+    This does not assert that the timeout is unhandled globally. It only records the
+    absence of a source-proven typed timeout fallback at the client boundary itself.
+    """
+    names = _service_names(conn)
+    calls = conn.execute(
+        """SELECT service_id, source, target_service, target_method, target_path,
+                  file_path, start_line, end_line
+           FROM static_service_calls
+           WHERE protocol = 'http'
+           ORDER BY service_id, source, target_service, target_method, target_path,
+                    file_path, start_line""",
+    ).fetchall()
+    timeout_policies = _resilience_policies_by_source(conn, "timeout")
+    handled_sources = {
+        (row["service_id"], row["source"])
+        for row in conn.execute(
+            """SELECT service_id, source
+               FROM static_error_contracts
+               WHERE role = 'handles' AND error_kind = 'timeout'""",
+        ).fetchall()
+    }
+    findings: list[dict] = []
+    for call in calls:
+        source_key = (call["service_id"], call["source"])
+        policies = timeout_policies.get(source_key)
+        if not policies or source_key in handled_sources:
+            continue
+        caller = names[call["service_id"]]
+        findings.append({
+            "kind": "possible_timeout_without_local_fallback", "severity": "info",
+            "services": [caller],
+            "reason": (
+                f"{call['source']} declares a timeout for internal call "
+                f"{call['target_service']} {call['target_method'] or 'HTTP'} "
+                f"{call['target_path'] or '/'} without a source-proven local timeout fallback."
+            ),
+            "detail": {
+                "caller": {"service": caller, "symbol": call["source"]},
+                "target": {
+                    "service": call["target_service"], "method": call["target_method"],
+                    "path": call["target_path"],
+                },
+                "timeout_policies": [
+                    {"mechanism": policy["mechanism"], "value": policy["value"], "unit": policy["unit"]}
+                    for policy in policies
+                ],
+                "confidence": 0.55,
+                "evidence": [
+                    _edge_evidence(call),
+                    *[_edge_evidence(policy) for policy in policies],
+                ],
+                "unknowns": [
+                    "A controller, gateway, client factory or global handler may handle this timeout outside the indexed source symbol.",
+                    "Only typed catch and typed Reactor fallback declarations are recognized as local timeout handling.",
+                ],
+                "remediation": [
+                    "Review the client boundary and add or document an intentional timeout fallback or controlled error translation.",
+                    "Keep any fallback safe for partial downstream execution and preserve a clear timeout contract for callers.",
+                ],
+            },
+        })
     return findings
 
 
@@ -1317,6 +1392,7 @@ _DETECTORS = (
     find_static_http_calls_without_resilience_policy,
     find_retries_on_potentially_non_idempotent_http_calls,
     find_retries_on_downstream_client_errors,
+    find_timeouts_without_local_fallback,
     find_unmapped_downstream_errors,
     find_overbroad_exception_handlers,
     find_message_consumers_without_recovery_policy,
