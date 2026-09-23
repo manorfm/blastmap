@@ -7,23 +7,23 @@ from orbitkb.analysis.cloud_taxonomy import (
     AWS_SDK_JS_V3_COMMANDS,
     AWS_SDK_JS_V3_MODULE_SERVICE,
     AWS_SDK_METHOD_TABLE,
+    AWS_SERVICE_RESOURCE_TYPE,
     AZURE_BLOB_CLIENT_TYPES,
     AZURE_BLOB_JAVA_FQN,
     AZURE_BLOB_METHOD_TABLE,
+    AZURE_EVENTHUB_METHOD_TABLE,
+    AZURE_SERVICEBUS_METHOD_TABLE,
     BOTO3_SERVICE_LITERALS,
     CLOUD_PROVIDERS,
     CLOUD_RESOURCE_TYPES,
+    GCP_PUBSUB_METHOD_TABLE,
+    GCS_METHOD_TABLE,
     GO_CLOUD_IMPORT_PATHS,
     IAC_NAME_ATTRIBUTES,
     IAC_RESOURCE_TYPE_TABLE,
     is_unresolved_literal,
     otel_messaging_system,
 )
-
-
-def test_cloud_providers_and_resource_types_are_the_v1_scope():
-    assert CLOUD_PROVIDERS == {"aws", "azure"}
-    assert CLOUD_RESOURCE_TYPES == {"queue", "pubsub", "event_bus", "object_storage"}
 
 
 def test_iac_resource_type_table_maps_terraform_and_cloudformation_literals():
@@ -132,3 +132,72 @@ def test_azure_blob_java_fqn_covers_every_client_type():
 def test_go_cloud_import_paths_resolve_provider_and_service():
     assert GO_CLOUD_IMPORT_PATHS["github.com/aws/aws-sdk-go-v2/service/sqs"] == ("aws", "sqs")
     assert GO_CLOUD_IMPORT_PATHS["github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"] == ("azure", "blob_storage")
+
+
+def test_v2_providers_and_resource_types_add_gcp_and_stream():
+    assert CLOUD_PROVIDERS == {"aws", "azure", "gcp"}
+    assert CLOUD_RESOURCE_TYPES == {"queue", "pubsub", "event_bus", "object_storage", "stream"}
+
+
+def test_iac_resource_type_table_covers_gcp():
+    assert IAC_RESOURCE_TYPE_TABLE["google_pubsub_topic"] == ("gcp", "pubsub", "pubsub")
+    assert IAC_RESOURCE_TYPE_TABLE["google_storage_bucket"] == ("gcp", "object_storage", "gcs")
+
+
+def test_iac_resource_type_table_covers_azure_messaging():
+    assert IAC_RESOURCE_TYPE_TABLE["azurerm_servicebus_queue"] == ("azure", "queue", "service_bus")
+    assert IAC_RESOURCE_TYPE_TABLE["azurerm_servicebus_topic"] == ("azure", "pubsub", "service_bus")
+    assert IAC_RESOURCE_TYPE_TABLE["azurerm_eventhub"] == ("azure", "stream", "event_hub")
+    assert IAC_RESOURCE_TYPE_TABLE["azurerm_eventgrid_topic"] == ("azure", "event_bus", "event_grid")
+
+
+def test_iac_resource_type_table_covers_aws_kinesis():
+    assert IAC_RESOURCE_TYPE_TABLE["aws_kinesis_stream"] == ("aws", "stream", "kinesis")
+    assert IAC_RESOURCE_TYPE_TABLE["AWS::Kinesis::Stream"] == ("aws", "stream", "kinesis")
+
+
+def test_iac_name_attributes_cover_every_v2_resource_type():
+    v2_types = {
+        "google_pubsub_topic", "google_storage_bucket", "azurerm_servicebus_queue",
+        "azurerm_servicebus_topic", "azurerm_eventhub", "azurerm_eventgrid_topic",
+        "aws_kinesis_stream", "AWS::Kinesis::Stream",
+    }
+    assert v2_types <= set(IAC_NAME_ATTRIBUTES)
+
+
+def test_aws_service_resource_type_includes_kinesis_derived_from_iac_table():
+    assert AWS_SERVICE_RESOURCE_TYPE["kinesis"] == "stream"
+
+
+def test_kinesis_is_wired_into_the_aws_sdk_command_and_method_tables():
+    assert AWS_SDK_JS_V3_COMMANDS["PutRecordCommand"] == ("publish", "PutRecord")
+    assert AWS_SDK_JS_V3_MODULE_SERVICE["client-kinesis"] == "kinesis"
+    assert AWS_SDK_METHOD_TABLE["putRecord"] == ("publish", "PutRecord")
+    assert AWS_SDK_METHOD_TABLE["put_record"] == ("publish", "PutRecord")
+    assert AWS_SDK_GO_V2_METHODS["PutRecord"] == ("publish", "PutRecord")
+
+
+def test_kinesis_java_types_and_fqn():
+    assert AWS_SDK_JAVA_V2_TYPES["KinesisClient"] == "kinesis"
+    assert AWS_SDK_JAVA_V2_FQN["KinesisClient"] == "software.amazon.awssdk.services.kinesis.KinesisClient"
+    assert AWS_SDK_JAVA_V1_TYPES["AmazonKinesisClient"] == "kinesis"
+    assert AWS_SDK_JAVA_V1_FQN["AmazonKinesisClient"] == "com.amazonaws.services.kinesis.AmazonKinesisClient"
+
+
+def test_kinesis_go_import_path_is_verifiable():
+    assert GO_CLOUD_IMPORT_PATHS["github.com/aws/aws-sdk-go-v2/service/kinesis"] == ("aws", "kinesis")
+
+
+def test_gcp_pubsub_and_gcs_method_tables_exist_for_direct_call_languages():
+    # Node's chained factory pattern (client.topic('x').publish(...)) isn't a
+    # direct client->method call and is a WP13 design question, not covered
+    # by this table alone — see plan.md's WP13 notes.
+    assert GCP_PUBSUB_METHOD_TABLE["publish"] == ("publish", "Publish")
+    assert GCS_METHOD_TABLE["upload_from_string"] == ("write", "Upload")
+    assert GCS_METHOD_TABLE["download_as_bytes"] == ("read", "Download")
+
+
+def test_azure_servicebus_and_eventhub_method_tables_exist():
+    assert AZURE_SERVICEBUS_METHOD_TABLE["sendMessages"] == ("publish", "SendMessages")
+    assert AZURE_SERVICEBUS_METHOD_TABLE["receiveMessages"] == ("consume", "ReceiveMessages")
+    assert AZURE_EVENTHUB_METHOD_TABLE["sendBatch"] == ("publish", "SendBatch")

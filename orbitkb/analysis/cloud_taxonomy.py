@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import re
 
-CLOUD_PROVIDERS = frozenset({"aws", "azure"})
-CLOUD_RESOURCE_TYPES = frozenset({"queue", "pubsub", "event_bus", "object_storage"})
+CLOUD_PROVIDERS = frozenset({"aws", "azure", "gcp"})
+# "stream" (Kinesis, Event Hub) is partitioned/replayable append-only log
+# semantics — distinct from "event_bus" (EventBridge/Event Grid discrete event
+# routing) even though both are sometimes casually called "eventing".
+CLOUD_RESOURCE_TYPES = frozenset({"queue", "pubsub", "event_bus", "object_storage", "stream"})
 
 # Literal Terraform resource type / CloudFormation `Type` string, exactly as it
 # appears in source, -> (provider, resource_type, service_name). Sourced directly
@@ -36,6 +39,14 @@ IAC_RESOURCE_TYPE_TABLE: dict[str, tuple[str, str, str]] = {
     "azurerm_storage_account": ("azure", "object_storage", "blob_storage"),
     "azurerm_storage_container": ("azure", "object_storage", "blob_storage"),
     "azurerm_storage_blob": ("azure", "object_storage", "blob_storage"),
+    "azurerm_servicebus_queue": ("azure", "queue", "service_bus"),
+    "azurerm_servicebus_topic": ("azure", "pubsub", "service_bus"),
+    "azurerm_eventhub": ("azure", "stream", "event_hub"),
+    "azurerm_eventgrid_topic": ("azure", "event_bus", "event_grid"),
+    "aws_kinesis_stream": ("aws", "stream", "kinesis"),
+    "AWS::Kinesis::Stream": ("aws", "stream", "kinesis"),
+    "google_pubsub_topic": ("gcp", "pubsub", "pubsub"),
+    "google_storage_bucket": ("gcp", "object_storage", "gcs"),
 }
 
 # service_name -> resource_type for AWS, derived from IAC_RESOURCE_TYPE_TABLE so
@@ -67,6 +78,14 @@ IAC_NAME_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "AWS::S3::Bucket": ("BucketName",),
     "AWS::Events::EventBus": ("Name",),
     "AWS::Events::Rule": ("Name",),
+    "azurerm_servicebus_queue": ("name",),
+    "azurerm_servicebus_topic": ("name",),
+    "azurerm_eventhub": ("name",),
+    "azurerm_eventgrid_topic": ("name",),
+    "aws_kinesis_stream": ("name",),
+    "AWS::Kinesis::Stream": ("Name",),
+    "google_pubsub_topic": ("name",),
+    "google_storage_bucket": ("name",),
 }
 
 # operation_kind is one of: 'publish' | 'consume' | 'read' | 'write' | 'admin'.
@@ -86,6 +105,8 @@ AWS_SDK_JS_V3_COMMANDS: dict[str, tuple[str, str]] = {
     "DeleteObjectCommand": ("write", "DeleteObject"),
     "ListObjectsV2Command": ("read", "ListObjectsV2"),
     "PutEventsCommand": ("publish", "PutEvents"),
+    "PutRecordCommand": ("publish", "PutRecord"),
+    "GetRecordsCommand": ("consume", "GetRecords"),
 }
 
 # `@aws-sdk/client-<x>` module basename -> service_name, AWS's own package-naming
@@ -95,6 +116,7 @@ AWS_SDK_JS_V3_MODULE_SERVICE: dict[str, str] = {
     "client-sns": "sns",
     "client-s3": "s3",
     "client-eventbridge": "eventbridge",
+    "client-kinesis": "kinesis",
 }
 
 # AWS SDK for Go v2 method name -> (operation_kind, canonical operation). Go's
@@ -121,6 +143,8 @@ AWS_SDK_METHOD_TABLE: dict[str, tuple[str, str]] = {
     "deleteObject": ("write", "DeleteObject"), "delete_object": ("write", "DeleteObject"),
     "listObjectsV2": ("read", "ListObjectsV2"), "list_objects_v2": ("read", "ListObjectsV2"),
     "putEvents": ("publish", "PutEvents"), "put_events": ("publish", "PutEvents"),
+    "putRecord": ("publish", "PutRecord"), "put_record": ("publish", "PutRecord"),
+    "getRecords": ("consume", "GetRecords"), "get_records": ("consume", "GetRecords"),
 }
 
 # Declared client type name -> service_name, one table per still-widely-used Java
@@ -130,12 +154,14 @@ AWS_SDK_JAVA_V1_TYPES: dict[str, str] = {
     "AmazonSNS": "sns", "AmazonSNSClient": "sns",
     "AmazonS3": "s3", "AmazonS3Client": "s3",
     "AmazonCloudWatchEvents": "eventbridge", "AmazonCloudWatchEventsClient": "eventbridge",
+    "AmazonKinesis": "kinesis", "AmazonKinesisClient": "kinesis",
 }
 AWS_SDK_JAVA_V2_TYPES: dict[str, str] = {
     "SqsClient": "sqs",
     "SnsClient": "sns",
     "S3Client": "s3",
     "EventBridgeClient": "eventbridge",
+    "KinesisClient": "kinesis",
 }
 
 # Declared type name -> the exact fully-qualified name its import must resolve
@@ -152,12 +178,15 @@ AWS_SDK_JAVA_V1_FQN: dict[str, str] = {
     "AmazonS3Client": "com.amazonaws.services.s3.AmazonS3Client",
     "AmazonCloudWatchEvents": "com.amazonaws.services.cloudwatchevents.AmazonCloudWatchEvents",
     "AmazonCloudWatchEventsClient": "com.amazonaws.services.cloudwatchevents.AmazonCloudWatchEventsClient",
+    "AmazonKinesis": "com.amazonaws.services.kinesis.AmazonKinesis",
+    "AmazonKinesisClient": "com.amazonaws.services.kinesis.AmazonKinesisClient",
 }
 AWS_SDK_JAVA_V2_FQN: dict[str, str] = {
     "SqsClient": "software.amazon.awssdk.services.sqs.SqsClient",
     "SnsClient": "software.amazon.awssdk.services.sns.SnsClient",
     "S3Client": "software.amazon.awssdk.services.s3.S3Client",
     "EventBridgeClient": "software.amazon.awssdk.services.eventbridge.EventBridgeClient",
+    "KinesisClient": "software.amazon.awssdk.services.kinesis.KinesisClient",
 }
 
 # The literal string boto3.client(<literal>)/boto3.resource(<literal>) is called
@@ -190,7 +219,32 @@ GO_CLOUD_IMPORT_PATHS: dict[str, tuple[str, str]] = {
     "github.com/aws/aws-sdk-go-v2/service/sns": ("aws", "sns"),
     "github.com/aws/aws-sdk-go-v2/service/s3": ("aws", "s3"),
     "github.com/aws/aws-sdk-go-v2/service/eventbridge": ("aws", "eventbridge"),
+    "github.com/aws/aws-sdk-go-v2/service/kinesis": ("aws", "kinesis"),
     "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob": ("azure", "blob_storage"),
+}
+
+# Operation vocabulary for SDKs whose idiomatic usage is a *direct* call on a
+# declared client (Python's PublisherClient.publish, Java's Publisher.publish,
+# Go's *pubsub.Topic once the topic reference itself is known). Node's client
+# instead returns topic/sender/producer references through a chained factory
+# call (`client.topic('x').publish(...)`, `serviceBusClient.createSender('q')
+# .sendMessages(...)`) that this table alone does not resolve — a real
+# detection-mechanism question left open for WP13, not a data gap here (see
+# plan.md's WP13 notes).
+GCP_PUBSUB_METHOD_TABLE: dict[str, tuple[str, str]] = {
+    "publish": ("publish", "Publish"), "Publish": ("publish", "Publish"),
+}
+GCS_METHOD_TABLE: dict[str, tuple[str, str]] = {
+    "upload_from_string": ("write", "Upload"), "upload_from_filename": ("write", "Upload"),
+    "download_as_bytes": ("read", "Download"), "download_to_filename": ("read", "Download"),
+    "delete": ("write", "Delete"),
+}
+AZURE_SERVICEBUS_METHOD_TABLE: dict[str, tuple[str, str]] = {
+    "sendMessages": ("publish", "SendMessages"), "send_messages": ("publish", "SendMessages"),
+    "receiveMessages": ("consume", "ReceiveMessages"), "receive_messages": ("consume", "ReceiveMessages"),
+}
+AZURE_EVENTHUB_METHOD_TABLE: dict[str, tuple[str, str]] = {
+    "sendBatch": ("publish", "SendBatch"), "send_batch": ("publish", "SendBatch"),
 }
 
 _INTERPOLATION_RE = re.compile(r"\$\{.*\}")
