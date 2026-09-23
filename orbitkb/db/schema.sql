@@ -243,6 +243,30 @@ CREATE INDEX IF NOT EXISTS idx_entrypoints_service ON entrypoints(service_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_service ON flow_edges(service_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_entrypoint ON flow_edges(entrypoint_id);
 
+-- Static error facts are deliberately metadata-only: no exception message,
+-- response body or stack trace is persisted. A role records whether the source
+-- symbol raises, handles or maps the error, allowing later deterministic smell
+-- rules to distinguish a producer from a translation boundary.
+CREATE TABLE IF NOT EXISTS static_error_contracts (
+    id                      INTEGER PRIMARY KEY,
+    service_id              INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    source                  TEXT NOT NULL,
+    role                    TEXT NOT NULL CHECK (role IN ('raises', 'handles', 'maps')),
+    error_kind              TEXT NOT NULL,
+    internal_type           TEXT,
+    protocol                TEXT NOT NULL CHECK (protocol IN ('http', 'grpc', 'graphql', 'internal')),
+    transport_code          TEXT,
+    public_code             TEXT,
+    exposes_internal_detail INTEGER NOT NULL CHECK (exposes_internal_detail IN (0, 1)),
+    retryability            TEXT NOT NULL CHECK (retryability IN ('retryable', 'not_retryable', 'unknown')),
+    file_path               TEXT NOT NULL,
+    start_line              INTEGER NOT NULL,
+    end_line                INTEGER NOT NULL,
+    updated_at              TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_static_error_contracts_service ON static_error_contracts(service_id);
+CREATE INDEX IF NOT EXISTS idx_static_error_contracts_source ON static_error_contracts(service_id, source);
+
 CREATE TABLE IF NOT EXISTS flow_boundaries (
     id          INTEGER PRIMARY KEY,
     service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

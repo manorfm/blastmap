@@ -75,6 +75,26 @@ class FlowBoundary:
 
 
 @dataclass(frozen=True)
+class ErrorContract:
+    """A source-proven error raised, handled or mapped by one local symbol.
+
+    This carries metadata only: exception messages, payloads and stack traces are
+    deliberately excluded from the static knowledge model.
+    """
+
+    source: str
+    role: str
+    error_kind: str
+    internal_type: str | None
+    protocol: str
+    transport_code: str | None
+    public_code: str | None
+    exposes_internal_detail: bool
+    retryability: str
+    evidence: Evidence
+
+
+@dataclass(frozen=True)
 class PersistenceFact:
     name: str
     kind: str
@@ -108,6 +128,7 @@ class AnalysisResult:
     injections: list[Injection] = field(default_factory=list)
     message_contracts: list[MessageContract] = field(default_factory=list)
     boundaries: list[FlowBoundary] = field(default_factory=list)
+    error_contracts: list[ErrorContract] = field(default_factory=list)
     persistence_facts: list[PersistenceFact] = field(default_factory=list)
     cloud_facts: list[CloudFact] = field(default_factory=list)
 
@@ -119,5 +140,6 @@ class AnalysisResult:
         self.injections.extend(other.injections)
         self.message_contracts.extend(other.message_contracts)
         self.boundaries.extend(other.boundaries)
+        self.error_contracts.extend(other.error_contracts)
         self.persistence_facts.extend(other.persistence_facts)
         self.cloud_facts.extend(other.cloud_facts)

@@ -12,6 +12,7 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
     """Atomically replace one service's static analysis after a source scan."""
     conn.execute("DELETE FROM flow_edges WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM flow_boundaries WHERE service_id = ?", (service_id,))
+    conn.execute("DELETE FROM static_error_contracts WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM entrypoints WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_message_contracts WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_persistence_facts WHERE service_id = ?", (service_id,))
@@ -61,6 +62,21 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (service_id, boundary.source, boundary.kind, boundary.evidence.file_path,
              boundary.evidence.start_line, boundary.evidence.end_line, indexed_at),
+        )
+    for contract in analysis.error_contracts:
+        conn.execute(
+            """INSERT INTO static_error_contracts
+               (service_id, source, role, error_kind, internal_type, protocol,
+                transport_code, public_code, exposes_internal_detail, retryability,
+                file_path, start_line, end_line, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                service_id, contract.source, contract.role, contract.error_kind,
+                contract.internal_type, contract.protocol, contract.transport_code,
+                contract.public_code, int(contract.exposes_internal_detail),
+                contract.retryability, contract.evidence.file_path,
+                contract.evidence.start_line, contract.evidence.end_line, indexed_at,
+            ),
         )
     for fact in analysis.persistence_facts:
         conn.execute(
@@ -119,6 +135,18 @@ def list_static_message_contracts(conn: sqlite3.Connection, service_id: int) -> 
     return conn.execute(
         """SELECT direction, channel, routing_key, payload_type, message_version, file_path, start_line, end_line
            FROM static_message_contracts WHERE service_id = ? ORDER BY channel, routing_key""",
+        (service_id,),
+    ).fetchall()
+
+
+def list_static_error_contracts(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT source, role, error_kind, internal_type, protocol, transport_code,
+                  public_code, exposes_internal_detail, retryability, file_path,
+                  start_line, end_line
+           FROM static_error_contracts
+           WHERE service_id = ?
+           ORDER BY source, role, internal_type, transport_code, file_path, start_line""",
         (service_id,),
     ).fetchall()
 
