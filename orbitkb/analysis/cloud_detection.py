@@ -1,18 +1,21 @@
-"""Deterministic cloud SDK operation detection, computed once across every
-file — the same shape as `PersistenceFact` detection in `engine.py`
-(`_persistence_facts`, called once from `StaticAnalysisEngine.analyze`): a
-flat pass over raw source text, not integrated into each language's
-tree-sitter `_FileAnalyzer`. What each pass matches is still a real syntactic
-anchor from `orbitkb.analysis.cloud_taxonomy` — an imported SDK class actually
-constructed, or a client bound from a literal service-name argument — never a
-loose keyword guess.
+"""Deterministic cloud SDK operation resolution shared across languages.
 
-Trade-off accepted for v1 (surfaced to and confirmed by the user): a
-`CloudFact` here does not also produce a `FlowEdge`, so it will not appear in
-`trace_flow` or `describe_entrypoint`'s bounded flow — only in
-`describe_cloud_dependencies`. Wiring cloud operations into per-language
-bounded-flow resolution the way GORM/Mongoose calls are is a legitimate
-follow-up, not required for the deterministic fact itself.
+For Go, JVM and Node, a `CloudFact` is now produced *inside* each analyzer's
+own per-function walk in `engine.py` — the same place GORM/Mongoose/Prisma
+calls are already reclassified — so it also gets a real `FlowEdge` whose
+`source` is the containing function's symbol, visible in `trace_flow`/
+`describe_entrypoint`. This module holds the shared, language-agnostic pieces
+that makes possible: `ClientKind` (what a locally-declared client resolves
+to), the per-language "declared client" resolvers reused by `engine.py`, and
+`cloud_edge_kind_and_fact`, which turns an already-resolved call edge
+(`receiver.method`) into a `FlowEdge.kind` override plus its matching
+`CloudFact` in one step.
+
+Python is the one exception: its analyzer (`_PythonCliAnalyzer`) has no
+entrypoint/function-boundary machinery to attach a `FlowEdge` source to, so
+`detect_cloud_facts` remains a flat, whole-file pass for it alone — a
+`CloudFact` without a `FlowEdge`, same posture the v1 trade-off described for
+every language before this integration.
 """
 from __future__ import annotations
 
@@ -42,20 +45,54 @@ from orbitkb.analysis.models import CloudFact, Evidence
 from orbitkb.analysis.node_imports import parse_node_named_imports
 
 # (provider, service_name, resource_type, sdk, operation lookup table) — what a
-# locally-declared client variable/parameter/field resolves to, shared by every
-# "declared client -> method call" detector below (JVM, Go).
-_ClientKind = tuple[str, str, str, str, "dict[str, tuple[str, str]]"]
+# locally-declared client variable/parameter/field resolves to. Consumed by
+# engine.py's per-function walk via cloud_edge_kind_and_fact below.
+ClientKind = tuple[str, str, str, str, "dict[str, tuple[str, str]]"]
 
 _NODE_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx"}
 
+# flow_edges.kind has no 'admin' value; an admin-kind cloud operation (e.g.
+# SNS Subscribe) becomes a generic 'invokes' edge rather than a guessed one.
+CLOUD_OPERATION_KIND_TO_FLOW_EDGE_KIND: dict[str, str] = {
+    "publish": "publishes", "consume": "consumes", "read": "reads",
+    "write": "writes", "admin": "invokes",
+}
 
-def _line(source: str, index: int) -> int:
-    return source.count("\n", 0, index) + 1
+
+def cloud_edge_kind_and_fact(
+    target: str, evidence: Evidence, declarations: dict[str, ClientKind],
+) -> tuple[str | None, CloudFact | None]:
+    """Given an already-resolved call edge's target (`receiver.method`, as
+    every tree-sitter `_FileAnalyzer` already produces) and the declared-client
+    table for its file, resolves both the `FlowEdge.kind` override and the
+    matching `CloudFact` in one step — `(None, None)` when the receiver isn't
+    a verified cloud client or the method isn't one of its known operations.
+    Shared by every per-function "declared client -> method call" integration
+    (JVM, Go, Node's Azure Blob) so a cloud call gets a real `FlowEdge` whose
+    `source` is the containing function, the same way GORM/Mongoose calls do.
+    """
+    receiver, separator, method = target.rpartition(".")
+    if not separator or receiver not in declarations:
+        return None, None
+    provider, service_name, resource_type, sdk, method_table = declarations[receiver]
+    operation = method_table.get(method)
+    if operation is None:
+        return None, None
+    operation_kind, canonical_operation = operation
+    fact = CloudFact(
+        provider=provider, resource_type=resource_type, service_name=service_name,
+        operation=canonical_operation, operation_kind=operation_kind, sdk=sdk, target_name=None,
+        evidence=evidence,
+    )
+    return CLOUD_OPERATION_KIND_TO_FLOW_EDGE_KIND[operation_kind], fact
 
 
-def _node_command_imports(source: str) -> dict[str, tuple[str, str]]:
+def node_command_imports(source: str) -> dict[str, tuple[str, str]]:
     """Local identifier -> (module basename, original Command class name), for
-    every named import from a recognized `@aws-sdk/client-*` package."""
+    every named import from a recognized `@aws-sdk/client-*` package. AWS SDK
+    v3's Command construction (`new SendMessageCommand(...)`) has no declared
+    client to reclassify a call on — engine.py walks `new_expression` nodes
+    directly and resolves them against this table instead."""
     return {
         local_name: (module_name, original_name)
         for local_name, module_name, original_name in parse_node_named_imports(source)
@@ -65,7 +102,7 @@ def _node_command_imports(source: str) -> dict[str, tuple[str, str]]:
 
 def _node_azure_import_names(source: str) -> set[str]:
     """Local identifiers proven imported from `@azure/storage-blob` — the
-    same import-source check `_node_command_imports` already applies for AWS,
+    same import-source check `node_command_imports` already applies for AWS,
     closing the gap where a project's own unrelated class happening to be
     named `BlobServiceClient` would otherwise be mistaken for Azure's."""
     return {
@@ -82,11 +119,10 @@ _NODE_AZURE_BLOB_DECLARATION_RE = re.compile(
 )
 
 
-def _node_azure_client_declarations(source: str) -> dict[str, _ClientKind]:
+def node_azure_client_declarations(source: str) -> dict[str, ClientKind]:
     """Azure Blob's Node SDK is a stateful client bound to a variable (unlike
-    AWS SDK v3's stateless Command construction), so this needs the same
-    "declared client -> later method call" resolution JVM/Go already use, not
-    the Command-construction shortcut `_node_cloud_facts` takes for AWS."""
+    AWS SDK v3's stateless Command construction), so it fits the same
+    "declared client -> later method call" resolution JVM/Go use."""
     verified_types = _node_azure_import_names(source)
     return {
         identifier: ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
@@ -95,24 +131,75 @@ def _node_azure_client_declarations(source: str) -> dict[str, _ClientKind]:
     }
 
 
-def _node_cloud_facts(source: str, rel_path: str) -> list[CloudFact]:
-    facts: list[CloudFact] = list(_client_call_facts(source, rel_path, _node_azure_client_declarations(source)))
-    for local_name, (module_name, original) in _node_command_imports(source).items():
-        service_name = AWS_SDK_JS_V3_MODULE_SERVICE[module_name]
+def _jvm_client_kind(type_name: str, imports: dict[str, str]) -> ClientKind | None:
+    """Only trusts `type_name` once its own import resolves to the exact FQN
+    the real SDK ships — a project's own unrelated `SqsClient` with no such
+    import (or a different one) resolves to None here, not a false positive."""
+    resolved_fqn = imports.get(type_name)
+    if resolved_fqn is None:
+        return None
+    if resolved_fqn == AWS_SDK_JAVA_V2_FQN.get(type_name):
+        service_name = AWS_SDK_JAVA_V2_TYPES[type_name]
         resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
-        if resource_type is None:
+        return None if resource_type is None else ("aws", service_name, resource_type, "aws-sdk-java-v2", AWS_SDK_METHOD_TABLE)
+    if resolved_fqn == AWS_SDK_JAVA_V1_FQN.get(type_name):
+        service_name = AWS_SDK_JAVA_V1_TYPES[type_name]
+        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
+        return None if resource_type is None else ("aws", service_name, resource_type, "aws-sdk-java-v1", AWS_SDK_METHOD_TABLE)
+    if resolved_fqn == AZURE_BLOB_JAVA_FQN.get(type_name):
+        return ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
+    return None
+
+
+_JVM_CLIENT_TYPE_ALTERNATION = "|".join(
+    re.escape(t) for t in sorted({*AWS_SDK_JAVA_V1_TYPES, *AWS_SDK_JAVA_V2_TYPES, *AZURE_BLOB_CLIENT_TYPES}, key=len, reverse=True)
+)
+# Java: `TYPE name;` / Kotlin: `val name: TYPE` — declaration order is reversed
+# between the two languages, so each gets its own pattern rather than one
+# trying to cover both orders ambiguously.
+_JAVA_FIELD_RE = re.compile(
+    r"\b(?:private|protected|public)?\s*(?:final\s+)?(" + _JVM_CLIENT_TYPE_ALTERNATION + r")\s+(\w+)\s*[=;]"
+)
+_KOTLIN_FIELD_RE = re.compile(
+    r"\b(?:private\s+|protected\s+|public\s+)?(?:val|var)\s+(\w+)\s*:\s*(" + _JVM_CLIENT_TYPE_ALTERNATION + r")\b"
+)
+
+
+def jvm_client_declarations(source: str) -> dict[str, ClientKind]:
+    imports = parse_jvm_imports(source)
+    declarations: dict[str, ClientKind] = {}
+    for match in _JAVA_FIELD_RE.finditer(source):
+        kind = _jvm_client_kind(match.group(1), imports)
+        if kind is not None:
+            declarations[match.group(2)] = kind
+    for match in _KOTLIN_FIELD_RE.finditer(source):
+        kind = _jvm_client_kind(match.group(2), imports)
+        if kind is not None:
+            declarations[match.group(1)] = kind
+    return declarations
+
+
+# Any package alias, not a fixed set — safety comes from verifying the
+# alias's own import path against GO_CLOUD_IMPORT_PATHS below, not from
+# constraining which alias spellings this regex will even consider.
+_GO_CLIENT_PARAMETER_RE = re.compile(r"\b(\w+)\s+\*(\w+)\.Client\b")
+
+
+def go_client_declarations(source: str) -> dict[str, ClientKind]:
+    import_paths = parse_go_import_paths(source)
+    declarations: dict[str, ClientKind] = {}
+    for identifier, package_alias in _GO_CLIENT_PARAMETER_RE.findall(source):
+        resolved = GO_CLOUD_IMPORT_PATHS.get(import_paths.get(package_alias, ""))
+        if resolved is None:
             continue
-        operation_kind, operation = AWS_SDK_JS_V3_COMMANDS[original]
-        pattern = re.compile(r"\bnew\s+" + re.escape(local_name) + r"\s*\(")
-        for match in pattern.finditer(source):
-            line = _line(source, match.start())
-            facts.append(CloudFact(
-                provider="aws", resource_type=resource_type, service_name=service_name,
-                operation=operation, operation_kind=operation_kind, sdk="aws-sdk-js-v3",
-                target_name=None,
-                evidence=Evidence(file_path=rel_path, start_line=line, end_line=line),
-            ))
-    return facts
+        provider, service_name = resolved
+        if provider == "azure":
+            declarations[identifier] = ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
+            continue
+        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
+        if resource_type is not None:
+            declarations[identifier] = ("aws", service_name, resource_type, "aws-sdk-go-v2", AWS_SDK_GO_V2_METHODS)
+    return declarations
 
 
 def _boto3_bound_variables(tree: ast.Module) -> dict[str, str]:
@@ -175,118 +262,15 @@ def _python_cloud_facts(source: str, rel_path: str) -> list[CloudFact]:
     return facts
 
 
-def _client_call_facts(source: str, rel_path: str, declarations: dict[str, _ClientKind]) -> list[CloudFact]:
-    """Shared by every "declared client -> method call" detector (JVM, Go): once
-    a variable/parameter/field is known to be a recognized SDK client, any call
-    on that identifier whose method name matches the client's own operation
-    table is a fact — regardless of which language declared it."""
-    facts: list[CloudFact] = []
-    for identifier, (provider, service_name, resource_type, sdk, method_table) in declarations.items():
-        pattern = re.compile(r"\b" + re.escape(identifier) + r"\s*\.\s*(\w+)\s*\(")
-        for match in pattern.finditer(source):
-            operation = method_table.get(match.group(1))
-            if operation is None:
-                continue
-            operation_kind, canonical_operation = operation
-            line = _line(source, match.start())
-            facts.append(CloudFact(
-                provider=provider, resource_type=resource_type, service_name=service_name,
-                operation=canonical_operation, operation_kind=operation_kind, sdk=sdk, target_name=None,
-                evidence=Evidence(file_path=rel_path, start_line=line, end_line=line),
-            ))
-    return facts
-
-
-def _jvm_client_kind(type_name: str, imports: dict[str, str]) -> _ClientKind | None:
-    """Only trusts `type_name` once its own import resolves to the exact FQN
-    the real SDK ships — a project's own unrelated `SqsClient` with no such
-    import (or a different one) resolves to None here, not a false positive."""
-    resolved_fqn = imports.get(type_name)
-    if resolved_fqn is None:
-        return None
-    if resolved_fqn == AWS_SDK_JAVA_V2_FQN.get(type_name):
-        service_name = AWS_SDK_JAVA_V2_TYPES[type_name]
-        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
-        return None if resource_type is None else ("aws", service_name, resource_type, "aws-sdk-java-v2", AWS_SDK_METHOD_TABLE)
-    if resolved_fqn == AWS_SDK_JAVA_V1_FQN.get(type_name):
-        service_name = AWS_SDK_JAVA_V1_TYPES[type_name]
-        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
-        return None if resource_type is None else ("aws", service_name, resource_type, "aws-sdk-java-v1", AWS_SDK_METHOD_TABLE)
-    if resolved_fqn == AZURE_BLOB_JAVA_FQN.get(type_name):
-        return ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
-    return None
-
-
-_JVM_CLIENT_TYPE_ALTERNATION = "|".join(
-    re.escape(t) for t in sorted({*AWS_SDK_JAVA_V1_TYPES, *AWS_SDK_JAVA_V2_TYPES, *AZURE_BLOB_CLIENT_TYPES}, key=len, reverse=True)
-)
-# Java: `TYPE name;` / Kotlin: `val name: TYPE` — declaration order is reversed
-# between the two languages, so each gets its own pattern rather than one
-# trying to cover both orders ambiguously.
-_JAVA_FIELD_RE = re.compile(
-    r"\b(?:private|protected|public)?\s*(?:final\s+)?(" + _JVM_CLIENT_TYPE_ALTERNATION + r")\s+(\w+)\s*[=;]"
-)
-_KOTLIN_FIELD_RE = re.compile(
-    r"\b(?:private\s+|protected\s+|public\s+)?(?:val|var)\s+(\w+)\s*:\s*(" + _JVM_CLIENT_TYPE_ALTERNATION + r")\b"
-)
-
-
-def _jvm_client_declarations(source: str) -> dict[str, _ClientKind]:
-    imports = parse_jvm_imports(source)
-    declarations: dict[str, _ClientKind] = {}
-    for match in _JAVA_FIELD_RE.finditer(source):
-        kind = _jvm_client_kind(match.group(1), imports)
-        if kind is not None:
-            declarations[match.group(2)] = kind
-    for match in _KOTLIN_FIELD_RE.finditer(source):
-        kind = _jvm_client_kind(match.group(2), imports)
-        if kind is not None:
-            declarations[match.group(1)] = kind
-    return declarations
-
-
-def _jvm_cloud_facts(source: str, rel_path: str) -> list[CloudFact]:
-    return _client_call_facts(source, rel_path, _jvm_client_declarations(source))
-
-
-# Any package alias, not a fixed set — safety comes from verifying the
-# alias's own import path against GO_CLOUD_IMPORT_PATHS below, not from
-# constraining which alias spellings this regex will even consider.
-_GO_CLIENT_PARAMETER_RE = re.compile(r"\b(\w+)\s+\*(\w+)\.Client\b")
-
-
-def _go_client_declarations(source: str) -> dict[str, _ClientKind]:
-    import_paths = parse_go_import_paths(source)
-    declarations: dict[str, _ClientKind] = {}
-    for identifier, package_alias in _GO_CLIENT_PARAMETER_RE.findall(source):
-        resolved = GO_CLOUD_IMPORT_PATHS.get(import_paths.get(package_alias, ""))
-        if resolved is None:
-            continue
-        provider, service_name = resolved
-        if provider == "azure":
-            declarations[identifier] = ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
-            continue
-        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
-        if resource_type is not None:
-            declarations[identifier] = ("aws", service_name, resource_type, "aws-sdk-go-v2", AWS_SDK_GO_V2_METHODS)
-    return declarations
-
-
-def _go_cloud_facts(source: str, rel_path: str) -> list[CloudFact]:
-    return _client_call_facts(source, rel_path, _go_client_declarations(source))
-
-
 def detect_cloud_facts(files: list[Path], root: Path) -> list[CloudFact]:
+    """Python only — Go/JVM/Node facts are now produced inside engine.py's own
+    per-function walk (see module docstring), so they no longer flow through
+    this flat, whole-file entry point."""
     facts: list[CloudFact] = []
     for path in files:
+        if path.suffix != ".py":
+            continue
         rel_path = path.relative_to(root).as_posix()
         text = path.read_text(encoding="utf-8", errors="ignore")
-        if path.suffix in _NODE_EXTENSIONS:
-            facts.extend(_node_cloud_facts(text, rel_path))
-        elif path.suffix == ".py":
-            facts.extend(_python_cloud_facts(text, rel_path))
-        elif path.suffix in {".java", ".kt"}:
-            facts.extend(_jvm_cloud_facts(text, rel_path))
-        elif path.suffix == ".go":
-            facts.extend(_go_cloud_facts(text, rel_path))
+        facts.extend(_python_cloud_facts(text, rel_path))
     return facts

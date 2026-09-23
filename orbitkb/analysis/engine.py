@@ -19,11 +19,25 @@ import tree_sitter_kotlin
 import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
 
-from orbitkb.analysis.cloud_detection import detect_cloud_facts
+from orbitkb.analysis.cloud_detection import (
+    CLOUD_OPERATION_KIND_TO_FLOW_EDGE_KIND,
+    cloud_edge_kind_and_fact,
+    detect_cloud_facts,
+    go_client_declarations,
+    jvm_client_declarations,
+    node_azure_client_declarations,
+    node_command_imports,
+)
+from orbitkb.analysis.cloud_taxonomy import (
+    AWS_SDK_JS_V3_COMMANDS,
+    AWS_SDK_JS_V3_MODULE_SERVICE,
+    AWS_SERVICE_RESOURCE_TYPE,
+)
 from orbitkb.analysis.depth import DepthProvider, NoopDepthProvider
 from orbitkb.analysis.go_imports import parse_go_import_declarations
 from orbitkb.analysis.models import (
     AnalysisResult,
+    CloudFact,
     EntryPoint,
     Evidence,
     FlowBoundary,
@@ -342,15 +356,19 @@ def _spring_edges_for(
     root: Path,
     source: bytes,
     receivers: _SpringPersistenceReceivers,
-) -> list[FlowEdge]:
+    cloud_declarations: dict[str, tuple],
+) -> tuple[list[FlowEdge], list[CloudFact]]:
     edges = _FileAnalyzer._edges_for(function, path, root, source)
     classified = []
+    cloud_facts: list[CloudFact] = []
     for edge in edges:
+        cloud_kind, cloud_fact = cloud_edge_kind_and_fact(edge.target, edge.evidence, cloud_declarations)
         kind = (
             _spring_repository_call_kind(edge.target, receivers.repositories)
             or _spring_jdbc_template_call_kind(edge.target, receivers.jdbc_templates)
             or _spring_mongo_template_call_kind(edge.target, receivers.mongo_templates)
             or _entity_manager_call_kind(edge.target, receivers.entity_managers)
+            or cloud_kind
         )
         # Generic name matching is disabled for JVM persistence: `repository.save`
         # is an operation only with a local repository dependency.
@@ -359,7 +377,9 @@ def _spring_edges_for(
         classified.append(FlowEdge(
             edge.source, edge.target, kind or edge.kind, edge.evidence, edge.confidence, edge.origin,
         ))
-    return classified
+        if cloud_fact is not None:
+            cloud_facts.append(cloud_fact)
+    return classified, cloud_facts
 
 
 def _spring_data_repository_types(files: list[Path]) -> frozenset[str]:
@@ -503,6 +523,7 @@ class _GoAnalyzer(_FileAnalyzer):
         source_text = source.decode("utf-8", errors="ignore")
         package = _go_package_name(source_text, path)
         imports = _go_imports(source_text)
+        cloud_declarations = go_client_declarations(source_text)
         functions: list[_Function] = []
         for node in _walk(tree):
             if node.type not in {"function_declaration", "method_declaration"}:
@@ -521,8 +542,15 @@ class _GoAnalyzer(_FileAnalyzer):
             symbol = f"{receiver}.{name}" if receiver else f"{package}.{name}"
             functions.append(_Function(name, symbol, body, node))
 
+        edges: list[FlowEdge] = []
+        cloud_facts: list[CloudFact] = []
+        for fn in functions:
+            fn_edges, fn_facts = self._edges_for_go(fn, path, root, source, cloud_declarations)
+            edges.extend(fn_edges)
+            cloud_facts.extend(fn_facts)
         result = AnalysisResult(
-            edges=[edge for fn in functions for edge in self._edges_for_go(fn, path, root, source)],
+            edges=edges,
+            cloud_facts=cloud_facts,
             symbols=[_symbol(fn, path, root, imports=imports) for fn in functions],
             message_contracts=[
                 contract
@@ -550,7 +578,9 @@ class _GoAnalyzer(_FileAnalyzer):
                     handler = _Function(channel, symbol, body, args[-1])
                     result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
                     result.symbols.append(_symbol(handler, path, root, imports=imports))
-                    result.edges.extend(self._edges_for_go(handler, path, root, source))
+                    handler_edges, handler_facts = self._edges_for_go(handler, path, root, source, cloud_declarations)
+                    result.edges.extend(handler_edges)
+                    result.cloud_facts.extend(handler_facts)
                     result.boundaries.extend(self._boundaries_for(handler, path, root, source))
                     result.contracts[symbol] = _message_contract(channel, _text(args[-1], source), "go")
             if method not in self.ROUTE_METHODS or len(args) < 2:
@@ -566,22 +596,25 @@ class _GoAnalyzer(_FileAnalyzer):
         return result
 
     @staticmethod
-    def _edges_for_go(function: _Function, path: Path, root: Path, source: bytes) -> list[FlowEdge]:
+    def _edges_for_go(
+        function: _Function, path: Path, root: Path, source: bytes, cloud_declarations: dict,
+    ) -> tuple[list[FlowEdge], list[CloudFact]]:
         db_parameters = _gorm_db_parameters(_text(function.declaration, source))
         sql_parameters = _database_sql_parameters(_text(function.declaration, source))
-        return [
-            FlowEdge(
-                edge.source,
-                edge.target,
+        edges: list[FlowEdge] = []
+        cloud_facts: list[CloudFact] = []
+        for edge in _FileAnalyzer._edges_for(function, path, root, source):
+            cloud_kind, cloud_fact = cloud_edge_kind_and_fact(edge.target, edge.evidence, cloud_declarations)
+            kind = (
                 _gorm_call_kind(edge.target, db_parameters)
                 or _database_sql_call_kind(edge.target, sql_parameters)
-                or edge.kind,
-                edge.evidence,
-                edge.confidence,
-                edge.origin,
+                or cloud_kind
+                or edge.kind
             )
-            for edge in _FileAnalyzer._edges_for(function, path, root, source)
-        ]
+            edges.append(FlowEdge(edge.source, edge.target, kind, edge.evidence, edge.confidence, edge.origin))
+            if cloud_fact is not None:
+                cloud_facts.append(cloud_fact)
+        return edges, cloud_facts
 
 
 class _KotlinSpringAnalyzer(_FileAnalyzer):
@@ -596,6 +629,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
         source = path.read_bytes()
         tree = self.parse(source)
+        cloud_declarations = jvm_client_declarations(source.decode("utf-8", errors="ignore"))
         result = AnalysisResult()
         for class_node in (node for node in _walk(tree) if node.type == "class_declaration"):
             class_name_node = class_node.child_by_field_name("name")
@@ -624,9 +658,11 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 body = function_node.child_by_field_name("body") or function_node
                 function = _Function(_text(name_node, source), symbol, body, function_node)
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
-                result.edges.extend(_spring_edges_for(
-                    function, path, root, source, persistence_receivers,
-                ))
+                function_edges, function_cloud_facts = _spring_edges_for(
+                    function, path, root, source, persistence_receivers, cloud_declarations,
+                )
+                result.edges.extend(function_edges)
+                result.cloud_facts.extend(function_cloud_facts)
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(function_node, source), publishers, path, root, function_node, kotlin=True)
@@ -650,6 +686,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
         source = path.read_bytes()
         tree = self.parse(source)
+        cloud_declarations = jvm_client_declarations(source.decode("utf-8", errors="ignore"))
         result = AnalysisResult()
         for class_node in (node for node in _walk(tree) if node.type == "class_declaration"):
             class_name_node = class_node.child_by_field_name("name")
@@ -680,9 +717,11 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 symbol = f"{class_name}.{name}"
                 function = _Function(name, symbol, body, method_node)
                 result.symbols.append(_symbol(function, path, root, implements, qualifiers=qualifiers, primary=primary))
-                result.edges.extend(_spring_edges_for(
-                    function, path, root, source, persistence_receivers,
-                ))
+                function_edges, function_cloud_facts = _spring_edges_for(
+                    function, path, root, source, persistence_receivers, cloud_declarations,
+                )
+                result.edges.extend(function_edges)
+                result.cloud_facts.extend(function_cloud_facts)
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(method_node, source), publishers, path, root, method_node)
@@ -724,6 +763,8 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         imports = _node_named_imports(source_text)
         mongoose_models = _mongoose_model_variables(source_text)
         prisma_clients = _prisma_client_variables(source_text)
+        client_declarations = node_azure_client_declarations(source_text)
+        command_imports = node_command_imports(source_text)
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
         for node in _walk(tree):
             if node.type != "function_declaration":
@@ -735,7 +776,11 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             name = _text(name_node, source)
             function = _Function(name, f"{path.stem}.{name}", body, node)
             result.symbols.append(_symbol(function, path, root, imports=imports))
-            result.edges.extend(self._edges_for_node(function, path, root, source, mongoose_models, prisma_clients))
+            function_edges, function_cloud_facts = self._edges_for_node(
+                function, path, root, source, mongoose_models, prisma_clients, client_declarations, command_imports,
+            )
+            result.edges.extend(function_edges)
+            result.cloud_facts.extend(function_cloud_facts)
             result.boundaries.extend(self._boundaries_for(function, path, root, source))
         for parent in _walk(tree):
             if parent.type != "pair" or _text(parent.child_by_field_name("key"), source) not in {"Query", "Mutation", "Subscription"}:
@@ -754,7 +799,11 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 result.entrypoints.append(EntryPoint("graphql", operation.upper(), name, symbol, _evidence(path, root, resolver)))
                 function = _Function(name, symbol, handler, resolver)
                 result.symbols.append(_symbol(function, path, root, imports=imports))
-                result.edges.extend(self._edges_for_node(function, path, root, source, mongoose_models, prisma_clients))
+                function_edges, function_cloud_facts = self._edges_for_node(
+                    function, path, root, source, mongoose_models, prisma_clients, client_declarations, command_imports,
+                )
+                result.edges.extend(function_edges)
+                result.cloud_facts.extend(function_cloud_facts)
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
         for node in _walk(tree):
             if node.type != "call_expression":
@@ -772,7 +821,11 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             result.entrypoints.append(EntryPoint("message", "CONSUME", channel, symbol, _evidence(path, root, node)))
             function = _Function(channel, symbol, handler, node)
             result.symbols.append(_symbol(function, path, root, imports=imports))
-            result.edges.extend(self._edges_for_node(function, path, root, source, mongoose_models, prisma_clients))
+            function_edges, function_cloud_facts = self._edges_for_node(
+                function, path, root, source, mongoose_models, prisma_clients, client_declarations, command_imports,
+            )
+            result.edges.extend(function_edges)
+            result.cloud_facts.extend(function_cloud_facts)
             result.boundaries.extend(self._boundaries_for(function, path, root, source))
             result.contracts[symbol] = _message_contract(channel, _text(handler, source), "node")
         return result
@@ -780,21 +833,49 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
     @staticmethod
     def _edges_for_node(
         function: _Function, path: Path, root: Path, source: bytes, mongoose_models: frozenset[str],
-        prisma_clients: frozenset[str],
-    ) -> list[FlowEdge]:
-        return [
-            FlowEdge(
-                edge.source,
-                edge.target,
+        prisma_clients: frozenset[str], client_declarations: dict, command_imports: dict[str, tuple[str, str]],
+    ) -> tuple[list[FlowEdge], list[CloudFact]]:
+        edges: list[FlowEdge] = []
+        cloud_facts: list[CloudFact] = []
+        for edge in _FileAnalyzer._edges_for(function, path, root, source):
+            cloud_kind, cloud_fact = cloud_edge_kind_and_fact(edge.target, edge.evidence, client_declarations)
+            kind = (
                 _mongoose_call_kind(edge.target, mongoose_models)
                 or _prisma_call_kind(edge.target, prisma_clients)
-                or edge.kind,
-                edge.evidence,
-                edge.confidence,
-                edge.origin,
+                or cloud_kind
+                or edge.kind
             )
-            for edge in _FileAnalyzer._edges_for(function, path, root, source)
-        ]
+            edges.append(FlowEdge(edge.source, edge.target, kind, edge.evidence, edge.confidence, edge.origin))
+            if cloud_fact is not None:
+                cloud_facts.append(cloud_fact)
+        for node in _walk(function.body):
+            if node.type != "new_expression":
+                continue
+            constructor = node.child_by_field_name("constructor")
+            if constructor is None:
+                continue
+            local_name = _text(constructor, source)
+            resolved = command_imports.get(local_name)
+            if resolved is None:
+                continue
+            module_name, original_name = resolved
+            service_name = AWS_SDK_JS_V3_MODULE_SERVICE.get(module_name)
+            resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name) if service_name else None
+            operation = AWS_SDK_JS_V3_COMMANDS.get(original_name)
+            if service_name is None or resource_type is None or operation is None:
+                continue
+            operation_kind, canonical_operation = operation
+            evidence = _evidence(path, root, node)
+            edges.append(FlowEdge(
+                function.symbol, f"aws:{service_name}.{canonical_operation}",
+                CLOUD_OPERATION_KIND_TO_FLOW_EDGE_KIND[operation_kind], evidence,
+            ))
+            cloud_facts.append(CloudFact(
+                provider="aws", resource_type=resource_type, service_name=service_name,
+                operation=canonical_operation, operation_kind=operation_kind, sdk="aws-sdk-js-v3",
+                target_name=None, evidence=evidence,
+            ))
+        return edges, cloud_facts
 
 
 class _GraphqlContractExtractor:

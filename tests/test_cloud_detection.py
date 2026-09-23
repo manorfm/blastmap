@@ -1,53 +1,21 @@
+"""Python's `detect_cloud_facts` is exercised directly here since it remains a
+flat, whole-file pass (see its module docstring). Go/JVM/Node no longer flow
+through it — their "declared client -> method call" resolution is unit-tested
+here against the public resolver functions themselves
+(`node_command_imports`, `node_azure_client_declarations`,
+`jvm_client_declarations`, `go_client_declarations`), and their end-to-end
+`FlowEdge`+`CloudFact` production through `StaticAnalysisEngine` is covered in
+`tests/test_cloud_flow_edges.py`.
+"""
 from pathlib import Path
 
-from orbitkb.analysis.cloud_detection import detect_cloud_facts
-from orbitkb.analysis.engine import StaticAnalysisEngine
-
-
-def test_node_sdk_v3_command_construction_is_detected(tmp_path: Path):
-    (tmp_path / "publisher.ts").write_text(
-        'import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";\n\n'
-        "const sqs = new SQSClient({ region: 'us-east-1' });\n"
-        "await sqs.send(new SendMessageCommand({ QueueUrl: url, MessageBody: body }));\n"
-    )
-
-    facts = detect_cloud_facts([tmp_path / "publisher.ts"], tmp_path)
-
-    assert len(facts) == 1
-    fact = facts[0]
-    assert fact.provider == "aws"
-    assert fact.resource_type == "queue"
-    assert fact.service_name == "sqs"
-    assert fact.operation == "SendMessage"
-    assert fact.operation_kind == "publish"
-    assert fact.sdk == "aws-sdk-js-v3"
-    assert fact.target_name is None
-    assert fact.evidence.file_path == "publisher.ts"
-    assert fact.evidence.start_line == 4
-
-
-def test_node_sdk_v3_resolves_an_import_alias(tmp_path: Path):
-    (tmp_path / "publisher.ts").write_text(
-        'import { PutObjectCommand as PutCmd } from "@aws-sdk/client-s3";\n\n'
-        "await s3.send(new PutCmd({ Bucket: b, Key: k }));\n"
-    )
-
-    facts = detect_cloud_facts([tmp_path / "publisher.ts"], tmp_path)
-
-    assert len(facts) == 1
-    assert facts[0].service_name == "s3"
-    assert facts[0].resource_type == "object_storage"
-    assert facts[0].operation == "PutObject"
-    assert facts[0].operation_kind == "write"
-
-
-def test_node_import_from_an_unrelated_package_is_ignored(tmp_path: Path):
-    (tmp_path / "unrelated.ts").write_text(
-        'import { SendMessageCommand } from "./local-commands";\n\n'
-        "new SendMessageCommand({});\n"
-    )
-
-    assert detect_cloud_facts([tmp_path / "unrelated.ts"], tmp_path) == []
+from orbitkb.analysis.cloud_detection import (
+    detect_cloud_facts,
+    go_client_declarations,
+    jvm_client_declarations,
+    node_azure_client_declarations,
+    node_command_imports,
+)
 
 
 def test_python_boto3_client_call_is_detected(tmp_path: Path):
@@ -107,273 +75,203 @@ def test_irrelevant_file_extensions_are_skipped(tmp_path: Path):
     assert detect_cloud_facts([tmp_path / "notes.md"], tmp_path) == []
 
 
-def test_java_field_declared_with_sdk_v2_client_type_is_detected(tmp_path: Path):
-    (tmp_path / "OrderPublisher.java").write_text(
+def test_node_sdk_v3_command_construction_is_resolved():
+    source = (
+        'import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";\n\n'
+        "const sqs = new SQSClient({ region: 'us-east-1' });\n"
+    )
+
+    imports = node_command_imports(source)
+
+    assert imports == {"SendMessageCommand": ("client-sqs", "SendMessageCommand")}
+
+
+def test_node_sdk_v3_resolves_an_import_alias():
+    source = 'import { PutObjectCommand as PutCmd } from "@aws-sdk/client-s3";\n'
+
+    imports = node_command_imports(source)
+
+    assert imports == {"PutCmd": ("client-s3", "PutObjectCommand")}
+
+
+def test_node_command_import_from_an_unrelated_package_is_ignored():
+    source = 'import { SendMessageCommand } from "./local-commands";\n'
+
+    assert node_command_imports(source) == {}
+
+
+def test_java_field_declared_with_sdk_v2_client_type_is_detected():
+    source = (
         "import software.amazon.awssdk.services.sqs.SqsClient;\n\n"
         "public class OrderPublisher {\n"
-        "    private final SqsClient sqsClient;\n\n"
-        "    void publish(String body) {\n"
-        "        sqsClient.sendMessage(SendMessageRequest.builder().build());\n"
-        "    }\n"
+        "    private final SqsClient sqsClient;\n"
         "}\n"
     )
 
-    facts = detect_cloud_facts([tmp_path / "OrderPublisher.java"], tmp_path)
+    declarations = jvm_client_declarations(source)
 
-    assert len(facts) == 1
-    fact = facts[0]
-    assert fact.provider == "aws"
-    assert fact.service_name == "sqs"
-    assert fact.operation == "SendMessage"
-    assert fact.sdk == "aws-sdk-java-v2"
+    assert "sqsClient" in declarations
+    provider, service_name, resource_type, sdk, _ = declarations["sqsClient"]
+    assert (provider, service_name, resource_type, sdk) == ("aws", "sqs", "queue", "aws-sdk-java-v2")
 
 
-def test_java_field_declared_with_sdk_v1_client_type_is_detected(tmp_path: Path):
-    (tmp_path / "OrderPublisher.java").write_text(
+def test_java_field_declared_with_sdk_v1_client_type_is_detected():
+    source = (
         "import com.amazonaws.services.sqs.AmazonSQSClient;\n\n"
         "public class OrderPublisher {\n"
-        "    private AmazonSQSClient sqsClient;\n\n"
-        "    void publish(String body) {\n"
-        "        sqsClient.sendMessage(new SendMessageRequest());\n"
-        "    }\n"
+        "    private AmazonSQSClient sqsClient;\n"
         "}\n"
     )
 
-    facts = detect_cloud_facts([tmp_path / "OrderPublisher.java"], tmp_path)
+    declarations = jvm_client_declarations(source)
 
-    assert len(facts) == 1
-    assert facts[0].sdk == "aws-sdk-java-v1"
-    assert facts[0].service_name == "sqs"
+    assert declarations["sqsClient"][3] == "aws-sdk-java-v1"
+    assert declarations["sqsClient"][1] == "sqs"
 
 
-def test_kotlin_field_declared_with_sdk_v2_client_type_is_detected(tmp_path: Path):
-    (tmp_path / "OrderPublisher.kt").write_text(
+def test_kotlin_field_declared_with_sdk_v2_client_type_is_detected():
+    source = (
         "import software.amazon.awssdk.services.sqs.SqsClient\n\n"
-        "class OrderPublisher(private val sqsClient: SqsClient) {\n"
-        "    fun publish(body: String) {\n"
-        "        sqsClient.sendMessage(SendMessageRequest.builder().build())\n"
-        "    }\n"
-        "}\n"
+        "class OrderPublisher(private val sqsClient: SqsClient)\n"
     )
 
-    facts = detect_cloud_facts([tmp_path / "OrderPublisher.kt"], tmp_path)
+    declarations = jvm_client_declarations(source)
 
-    assert len(facts) == 1
-    assert facts[0].service_name == "sqs"
-    assert facts[0].sdk == "aws-sdk-java-v2"
+    assert declarations["sqsClient"][1] == "sqs"
+    assert declarations["sqsClient"][3] == "aws-sdk-java-v2"
 
 
-def test_jvm_type_with_the_right_name_but_no_matching_import_is_ignored(tmp_path: Path):
+def test_jvm_type_with_the_right_name_but_no_matching_import_is_ignored():
     """A local class that happens to be named SqsClient, with no relation to
     the AWS SDK, must not be mistaken for one — the false positive bare
     type-name matching alone would produce."""
-    (tmp_path / "OrderPublisher.java").write_text(
+    source = (
         "public class OrderPublisher {\n"
-        "    private final SqsClient sqsClient;\n\n"
-        "    void publish(String body) {\n"
-        "        sqsClient.sendMessage(body);\n"
-        "    }\n"
+        "    private final SqsClient sqsClient;\n"
         "}\n"
     )
 
-    assert detect_cloud_facts([tmp_path / "OrderPublisher.java"], tmp_path) == []
+    assert jvm_client_declarations(source) == {}
 
 
-def test_jvm_type_with_the_right_name_but_wrong_import_is_ignored(tmp_path: Path):
-    (tmp_path / "OrderPublisher.java").write_text(
+def test_jvm_type_with_the_right_name_but_wrong_import_is_ignored():
+    source = (
         "import com.example.internal.SqsClient;\n\n"
         "public class OrderPublisher {\n"
-        "    private final SqsClient sqsClient;\n\n"
-        "    void publish(String body) {\n"
-        "        sqsClient.sendMessage(body);\n"
-        "    }\n"
+        "    private final SqsClient sqsClient;\n"
         "}\n"
     )
 
-    assert detect_cloud_facts([tmp_path / "OrderPublisher.java"], tmp_path) == []
+    assert jvm_client_declarations(source) == {}
 
 
-def test_go_parameter_typed_as_sqs_client_is_detected(tmp_path: Path):
-    (tmp_path / "publisher.go").write_text(
+def test_unrelated_java_field_type_is_ignored():
+    source = (
+        "public class Unrelated {\n"
+        "    private final String sqsClient;\n"
+        "}\n"
+    )
+
+    assert jvm_client_declarations(source) == {}
+
+
+def test_go_parameter_typed_as_sqs_client_is_detected():
+    source = (
         "package publisher\n\n"
         'import "github.com/aws/aws-sdk-go-v2/service/sqs"\n\n'
         "func Publish(client *sqs.Client, body string) {\n"
-        "\tclient.SendMessage(ctx, &sqs.SendMessageInput{})\n"
         "}\n"
     )
 
-    facts = detect_cloud_facts([tmp_path / "publisher.go"], tmp_path)
+    declarations = go_client_declarations(source)
 
-    assert len(facts) == 1
-    fact = facts[0]
-    assert fact.provider == "aws"
-    assert fact.service_name == "sqs"
-    assert fact.operation == "SendMessage"
-    assert fact.sdk == "aws-sdk-go-v2"
+    assert declarations["client"][1] == "sqs"
+    assert declarations["client"][3] == "aws-sdk-go-v2"
 
 
-def test_go_package_alias_with_the_right_name_but_wrong_import_is_ignored(tmp_path: Path):
-    (tmp_path / "publisher.go").write_text(
+def test_go_package_alias_with_the_right_name_but_wrong_import_is_ignored():
+    source = (
         "package publisher\n\n"
         'import "example.com/internal/sqs"\n\n'
         "func Publish(client *sqs.Client, body string) {\n"
-        "\tclient.SendMessage(ctx, &sqs.SendMessageInput{})\n"
         "}\n"
     )
 
-    assert detect_cloud_facts([tmp_path / "publisher.go"], tmp_path) == []
+    assert go_client_declarations(source) == {}
 
 
-def test_azure_blob_client_in_java_is_detected(tmp_path: Path):
-    (tmp_path / "AssetsUploader.java").write_text(
+def test_azure_blob_client_in_java_is_detected():
+    source = (
         "import com.azure.storage.blob.BlobContainerClient;\n\n"
         "public class AssetsUploader {\n"
-        "    private final BlobContainerClient containerClient;\n\n"
-        "    void upload(byte[] data) {\n"
-        "        containerClient.upload(data);\n"
-        "    }\n"
+        "    private final BlobContainerClient containerClient;\n"
         "}\n"
     )
 
-    facts = detect_cloud_facts([tmp_path / "AssetsUploader.java"], tmp_path)
+    declarations = jvm_client_declarations(source)
 
-    assert len(facts) == 1
-    fact = facts[0]
-    assert fact.provider == "azure"
-    assert fact.resource_type == "object_storage"
-    assert fact.service_name == "blob_storage"
-    assert fact.sdk == "azure-storage-blob"
+    provider, service_name, resource_type, sdk, _ = declarations["containerClient"]
+    assert (provider, resource_type, service_name, sdk) == ("azure", "object_storage", "blob_storage", "azure-storage-blob")
 
 
-def test_azure_blob_client_in_go_is_detected(tmp_path: Path):
-    (tmp_path / "uploader.go").write_text(
+def test_azure_blob_client_in_go_is_detected():
+    source = (
         "package uploader\n\n"
         'import "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"\n\n'
         "func Upload(client *azblob.Client, data []byte) {\n"
-        "\tclient.upload(data)\n"
         "}\n"
     )
 
-    facts = detect_cloud_facts([tmp_path / "uploader.go"], tmp_path)
+    declarations = go_client_declarations(source)
 
-    assert len(facts) == 1
-    assert facts[0].provider == "azure"
-    assert facts[0].sdk == "azure-storage-blob"
+    assert declarations["client"][0] == "azure"
+    assert declarations["client"][3] == "azure-storage-blob"
 
 
-def test_azure_blob_client_in_node_is_detected(tmp_path: Path):
-    (tmp_path / "uploader.ts").write_text(
+def test_azure_blob_client_in_node_is_detected():
+    source = (
         'import { BlobServiceClient } from "@azure/storage-blob";\n\n'
-        "const client = new BlobServiceClient(url, credential);\n\n"
-        "export async function upload(data: Buffer) {\n"
-        "  await client.upload(data);\n"
-        "}\n"
+        "const client = new BlobServiceClient(url, credential);\n"
     )
 
-    facts = detect_cloud_facts([tmp_path / "uploader.ts"], tmp_path)
+    declarations = node_azure_client_declarations(source)
 
-    assert len(facts) == 1
-    fact = facts[0]
-    assert fact.provider == "azure"
-    assert fact.resource_type == "object_storage"
-    assert fact.service_name == "blob_storage"
-    assert fact.sdk == "azure-storage-blob"
+    provider, service_name, resource_type, sdk, _ = declarations["client"]
+    assert (provider, resource_type, service_name, sdk) == ("azure", "object_storage", "blob_storage", "azure-storage-blob")
 
 
-def test_node_variable_not_constructed_from_an_azure_blob_type_is_ignored(tmp_path: Path):
-    (tmp_path / "unrelated.ts").write_text(
-        "const client = new SomeOtherClient(url);\n\n"
-        "client.upload(data);\n"
-    )
+def test_node_variable_not_constructed_from_an_azure_blob_type_is_ignored():
+    source = "const client = new SomeOtherClient(url);\n"
 
-    assert detect_cloud_facts([tmp_path / "unrelated.ts"], tmp_path) == []
+    assert node_azure_client_declarations(source) == {}
 
 
-def test_node_type_with_the_right_name_but_no_matching_import_is_ignored(tmp_path: Path):
+def test_node_type_with_the_right_name_but_no_matching_import_is_ignored():
     """A local class named BlobServiceClient with no relation to Azure's SDK
     (no import from @azure/storage-blob at all) must not be mistaken for
     one."""
-    (tmp_path / "unrelated.ts").write_text(
-        "const client = new BlobServiceClient(url, credential);\n\n"
-        "client.upload(data);\n"
-    )
+    source = "const client = new BlobServiceClient(url, credential);\n"
 
-    assert detect_cloud_facts([tmp_path / "unrelated.ts"], tmp_path) == []
+    assert node_azure_client_declarations(source) == {}
 
 
-def test_node_type_with_the_right_name_but_wrong_import_is_ignored(tmp_path: Path):
-    (tmp_path / "unrelated.ts").write_text(
+def test_node_type_with_the_right_name_but_wrong_import_is_ignored():
+    source = (
         'import { BlobServiceClient } from "./local-fake-azure";\n\n'
-        "const client = new BlobServiceClient(url, credential);\n\n"
-        "client.upload(data);\n"
+        "const client = new BlobServiceClient(url, credential);\n"
     )
 
-    assert detect_cloud_facts([tmp_path / "unrelated.ts"], tmp_path) == []
-
-
-def test_unrelated_java_field_type_is_ignored(tmp_path: Path):
-    (tmp_path / "Unrelated.java").write_text(
-        "public class Unrelated {\n"
-        "    private final String sqsClient;\n\n"
-        "    void publish() {\n"
-        "        sqsClient.sendMessage(\"x\");\n"
-        "    }\n"
-        "}\n"
-    )
-
-    assert detect_cloud_facts([tmp_path / "Unrelated.java"], tmp_path) == []
-
-
-def test_static_analysis_engine_surfaces_cloud_facts_for_node_ts(tmp_path: Path):
-    (tmp_path / "publisher.ts").write_text(
-        'import { SendMessageCommand } from "@aws-sdk/client-sqs";\n\n'
-        "await sqs.send(new SendMessageCommand({ QueueUrl: url, MessageBody: body }));\n"
-    )
-
-    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
-
-    assert len(result.cloud_facts) == 1
-    assert result.cloud_facts[0].service_name == "sqs"
+    assert node_azure_client_declarations(source) == {}
 
 
 def test_static_analysis_engine_surfaces_cloud_facts_for_python(tmp_path: Path):
+    from orbitkb.analysis.engine import StaticAnalysisEngine
+
     (tmp_path / "publisher.py").write_text(
         "import boto3\n\nsqs = boto3.client('sqs')\nsqs.send_message(QueueUrl=url, MessageBody=body)\n"
     )
 
     result = StaticAnalysisEngine().analyze(tmp_path, "python")
-
-    assert len(result.cloud_facts) == 1
-    assert result.cloud_facts[0].service_name == "sqs"
-
-
-def test_static_analysis_engine_surfaces_cloud_facts_for_jvm_spring(tmp_path: Path):
-    (tmp_path / "OrderPublisher.java").write_text(
-        "import software.amazon.awssdk.services.sqs.SqsClient;\n\n"
-        "public class OrderPublisher {\n"
-        "    private final SqsClient sqsClient;\n\n"
-        "    void publish(String body) {\n"
-        "        sqsClient.sendMessage(SendMessageRequest.builder().build());\n"
-        "    }\n"
-        "}\n"
-    )
-
-    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
-
-    assert len(result.cloud_facts) == 1
-    assert result.cloud_facts[0].service_name == "sqs"
-
-
-def test_static_analysis_engine_surfaces_cloud_facts_for_go(tmp_path: Path):
-    (tmp_path / "publisher.go").write_text(
-        "package publisher\n\n"
-        'import "github.com/aws/aws-sdk-go-v2/service/sqs"\n\n'
-        "func Publish(client *sqs.Client, body string) {\n"
-        "\tclient.SendMessage(ctx, &sqs.SendMessageInput{})\n"
-        "}\n"
-    )
-
-    result = StaticAnalysisEngine().analyze(tmp_path, "go")
 
     assert len(result.cloud_facts) == 1
     assert result.cloud_facts[0].service_name == "sqs"
