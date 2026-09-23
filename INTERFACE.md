@@ -153,7 +153,11 @@ remains capped at five cards.
 `kind` is one of `invokes`, `injects`, `validates`, `reads`, `writes`,
 `publishes` or `consumes`. The response follows only symbols reachable from the
 selected entrypoint, with a hard edge budget; unrelated service flow is omitted.
-`origin` is `static`, `codegraph` or `runtime`. The
+`origin` is `static`, `codegraph` or `runtime`. The `error_contracts` list contains
+source-proven error metadata for symbols reachable from the selected entrypoint:
+whether a symbol raises, handles or maps an error, its category/type and any literal
+transport/public code. It never contains exception messages, response bodies or stack
+traces. Missing handlers and dynamic mappings are not inferred as failures. The
 optional `smells` list contains explicit hypotheses, never a conclusive architecture
 classification; for example, a GraphQL mutation that directly writes state is flagged
 as possible BFF domain-policy leakage for human validation. A flow that both writes

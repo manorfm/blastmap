@@ -1,4 +1,11 @@
-from orbitkb.analysis.models import AnalysisResult, EntryPoint, Evidence, FlowBoundary, FlowEdge
+from orbitkb.analysis.models import (
+    AnalysisResult,
+    EntryPoint,
+    ErrorContract,
+    Evidence,
+    FlowBoundary,
+    FlowEdge,
+)
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import flows, services
 from orbitkb.mcp import queries
@@ -72,6 +79,41 @@ def test_describe_entrypoint_includes_a_deterministic_graphql_contract(tmp_path)
     detail = queries.describe_entrypoint(conn, "checkout", "graphql", "mutation", "checkout")
 
     assert detail["contract"] == {"arguments": [], "returns": {"type": "Receipt", "required": True}}
+
+
+def test_describe_entrypoint_includes_only_reachable_static_error_contracts(tmp_path):
+    conn = open_db(tmp_path / "error-contracts.db")
+    service_id = services.ensure_service(conn, "orders", "/repos/orders", "jvm-spring")
+    evidence = Evidence("OrdersController.java", 12, 15)
+    flows.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "OrdersController.create", evidence)],
+            edges=[FlowEdge("OrdersController.create", "CreateOrder.execute", "invokes", evidence)],
+            error_contracts=[
+                ErrorContract(
+                    source="CreateOrder.execute", role="raises", error_kind="conflict",
+                    internal_type="InsufficientStockException", protocol="internal", transport_code=None,
+                    public_code=None, exposes_internal_detail=False, retryability="not_retryable", evidence=evidence,
+                ),
+                ErrorContract(
+                    source="Unrelated.reconcile", role="raises", error_kind="dependency",
+                    internal_type="PartnerUnavailable", protocol="internal", transport_code=None,
+                    public_code=None, exposes_internal_detail=False, retryability="retryable", evidence=evidence,
+                ),
+            ],
+        ),
+    )
+
+    detail = queries.describe_entrypoint(conn, "orders", "http", "post", "/orders")
+
+    assert detail["error_contracts"] == [{
+        "source": "CreateOrder.execute", "role": "raises", "error_kind": "conflict",
+        "internal_type": "InsufficientStockException", "protocol": "internal", "transport_code": None,
+        "public_code": None, "exposes_internal_detail": False, "retryability": "not_retryable",
+        "evidence": {"file": "OrdersController.java", "start_line": 12, "end_line": 15},
+    }]
 
 
 def test_describe_entrypoint_bounds_flow_context_and_reports_truncation(tmp_path):

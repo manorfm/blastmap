@@ -306,6 +306,18 @@ def describe_entrypoint(
             }}
             for item in flows_repo.list_flow_boundaries(conn, row["id"], flow_symbols)
         ],
+        "error_contracts": [
+            {
+                "source": item["source"], "role": item["role"], "error_kind": item["error_kind"],
+                "internal_type": item["internal_type"], "protocol": item["protocol"],
+                "transport_code": item["transport_code"], "public_code": item["public_code"],
+                "exposes_internal_detail": bool(item["exposes_internal_detail"]),
+                "retryability": item["retryability"], "evidence": {
+                    "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],
+                },
+            }
+            for item in flows_repo.list_static_error_contracts_for_sources(conn, row["id"], flow_symbols)
+        ],
         "contract": flows_repo.get_entrypoint_contract(conn, entrypoint["id"]),
         "smells": find_entrypoint_smells(entrypoint, edges),
     }

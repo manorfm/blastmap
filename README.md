@@ -106,7 +106,7 @@ Start broad, then narrow the request.
 | --- | --- | --- |
 | Plan an epic | `get_change_context` | `describe_service`, `describe_entrypoint` |
 | Find likely impact | `find_change_surface` | `get_relationships`, `describe_api` |
-| Understand a request path | `list_entrypoints` | `describe_entrypoint` |
+| Understand a request path or its static error mapping | `list_entrypoints` | `describe_entrypoint` |
 | Inspect data or events | `describe_persistence`, `describe_messages` | `get_relationships` |
 | Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |

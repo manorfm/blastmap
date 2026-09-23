@@ -140,14 +140,34 @@ def list_static_message_contracts(conn: sqlite3.Connection, service_id: int) -> 
 
 
 def list_static_error_contracts(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return _list_static_error_contracts(conn, service_id)
+
+
+def list_static_error_contracts_for_sources(
+    conn: sqlite3.Connection, service_id: int, sources: set[str],
+) -> list[sqlite3.Row]:
+    if not sources:
+        return []
+    return _list_static_error_contracts(conn, service_id, sources)
+
+
+def _list_static_error_contracts(
+    conn: sqlite3.Connection, service_id: int, sources: set[str] | None = None,
+) -> list[sqlite3.Row]:
+    source_filter = ""
+    params: list[object] = [service_id]
+    if sources:
+        placeholders = ", ".join("?" for _ in sources)
+        source_filter = f" AND source IN ({placeholders})"  # nosec B608 - placeholders are generated from set cardinality.
+        params.extend(sorted(sources))
     return conn.execute(
         """SELECT source, role, error_kind, internal_type, protocol, transport_code,
                   public_code, exposes_internal_detail, retryability, file_path,
                   start_line, end_line
            FROM static_error_contracts
-           WHERE service_id = ?
+           WHERE service_id = ?""" + source_filter + """
            ORDER BY source, role, internal_type, transport_code, file_path, start_line""",
-        (service_id,),
+        params,
     ).fetchall()
 
 
