@@ -267,6 +267,24 @@ CREATE TABLE IF NOT EXISTS static_error_contracts (
 CREATE INDEX IF NOT EXISTS idx_static_error_contracts_service ON static_error_contracts(service_id);
 CREATE INDEX IF NOT EXISTS idx_static_error_contracts_source ON static_error_contracts(service_id, source);
 
+-- Static service calls are source-proven transport relations. The target is a
+-- declared service identifier, not a runtime-discovered address or a guess.
+CREATE TABLE IF NOT EXISTS static_service_calls (
+    id              INTEGER PRIMARY KEY,
+    service_id      INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    source          TEXT NOT NULL,
+    target_service  TEXT NOT NULL,
+    protocol        TEXT NOT NULL CHECK (protocol IN ('http', 'grpc', 'graphql')),
+    target_method   TEXT,
+    target_path     TEXT,
+    file_path       TEXT NOT NULL,
+    start_line      INTEGER NOT NULL,
+    end_line        INTEGER NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_static_service_calls_service ON static_service_calls(service_id);
+CREATE INDEX IF NOT EXISTS idx_static_service_calls_source ON static_service_calls(service_id, source);
+
 CREATE TABLE IF NOT EXISTS flow_boundaries (
     id          INTEGER PRIMARY KEY,
     service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

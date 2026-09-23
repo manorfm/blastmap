@@ -95,6 +95,18 @@ class ErrorContract:
 
 
 @dataclass(frozen=True)
+class StaticServiceCall:
+    """A locally proven call to a named service and transport endpoint."""
+
+    source: str
+    target_service: str
+    protocol: str
+    target_method: str | None
+    target_path: str | None
+    evidence: Evidence
+
+
+@dataclass(frozen=True)
 class PersistenceFact:
     name: str
     kind: str
@@ -129,6 +141,7 @@ class AnalysisResult:
     message_contracts: list[MessageContract] = field(default_factory=list)
     boundaries: list[FlowBoundary] = field(default_factory=list)
     error_contracts: list[ErrorContract] = field(default_factory=list)
+    static_service_calls: list[StaticServiceCall] = field(default_factory=list)
     persistence_facts: list[PersistenceFact] = field(default_factory=list)
     cloud_facts: list[CloudFact] = field(default_factory=list)
 
@@ -141,5 +154,6 @@ class AnalysisResult:
         self.message_contracts.extend(other.message_contracts)
         self.boundaries.extend(other.boundaries)
         self.error_contracts.extend(other.error_contracts)
+        self.static_service_calls.extend(other.static_service_calls)
         self.persistence_facts.extend(other.persistence_facts)
         self.cloud_facts.extend(other.cloud_facts)

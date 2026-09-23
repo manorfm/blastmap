@@ -13,6 +13,7 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
     conn.execute("DELETE FROM flow_edges WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM flow_boundaries WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_error_contracts WHERE service_id = ?", (service_id,))
+    conn.execute("DELETE FROM static_service_calls WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM entrypoints WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_message_contracts WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_persistence_facts WHERE service_id = ?", (service_id,))
@@ -78,6 +79,18 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
                 contract.evidence.start_line, contract.evidence.end_line, indexed_at,
             ),
         )
+    for call in analysis.static_service_calls:
+        conn.execute(
+            """INSERT INTO static_service_calls
+               (service_id, source, target_service, protocol, target_method, target_path,
+                file_path, start_line, end_line, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                service_id, call.source, call.target_service, call.protocol,
+                call.target_method, call.target_path, call.evidence.file_path,
+                call.evidence.start_line, call.evidence.end_line, indexed_at,
+            ),
+        )
     for fact in analysis.persistence_facts:
         conn.execute(
             """INSERT INTO static_persistence_facts
@@ -141,6 +154,17 @@ def list_static_message_contracts(conn: sqlite3.Connection, service_id: int) -> 
 
 def list_static_error_contracts(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return _list_static_error_contracts(conn, service_id)
+
+
+def list_static_service_calls(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT source, target_service, protocol, target_method, target_path,
+                  file_path, start_line, end_line
+           FROM static_service_calls
+           WHERE service_id = ?
+           ORDER BY source, target_service, target_method, target_path, file_path, start_line""",
+        (service_id,),
+    ).fetchall()
 
 
 def list_static_error_contracts_for_sources(
