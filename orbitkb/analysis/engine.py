@@ -1478,7 +1478,11 @@ def _spring_http_contract(declaration: str, annotations: str, kotlin: bool = Fal
     return contract
 
 
-_HTTP_STATUS_CODES = {"OK": 200, "CREATED": 201, "ACCEPTED": 202, "NO_CONTENT": 204, "BAD_REQUEST": 400, "NOT_FOUND": 404, "CONFLICT": 409}
+_HTTP_STATUS_CODES = {
+    "OK": 200, "CREATED": 201, "ACCEPTED": 202, "NO_CONTENT": 204,
+    "BAD_REQUEST": 400, "NOT_FOUND": 404, "CONFLICT": 409,
+    "INTERNAL_SERVER_ERROR": 500, "SERVICE_UNAVAILABLE": 503, "GATEWAY_TIMEOUT": 504,
+}
 
 _ERROR_KIND_BY_HTTP_STATUS = {
     400: "validation", 401: "authorization", 403: "authorization", 404: "not_found",
@@ -1504,11 +1508,12 @@ def _spring_error_contracts(
         return []
     status = statuses[0]
     code = status["code"]
+    internal_type = match.group(1).rsplit(".", 1)[-1]
     return [ErrorContract(
         source=symbol,
         role="maps",
-        error_kind=_ERROR_KIND_BY_HTTP_STATUS.get(code, "unexpected" if code >= 500 else "unknown"),
-        internal_type=match.group(1).rsplit(".", 1)[-1],
+        error_kind="timeout" if _is_timeout_exception_type(internal_type) else _ERROR_KIND_BY_HTTP_STATUS.get(code, "unexpected" if code >= 500 else "unknown"),
+        internal_type=internal_type,
         protocol="http",
         transport_code=str(code),
         public_code=None,
@@ -1553,6 +1558,10 @@ _TIMEOUT_EXCEPTION_TYPES = frozenset({
 })
 
 
+def _is_timeout_exception_type(error_type: str) -> bool:
+    return error_type.rsplit(".", 1)[-1].casefold() in _TIMEOUT_EXCEPTION_TYPES
+
+
 def _spring_timeout_fallback_contracts(
     symbol: str,
     declaration: str,
@@ -1579,7 +1588,7 @@ def _spring_timeout_fallback_contracts(
     for pattern, is_catch in patterns:
         for match in pattern.finditer(declaration):
             error_type = match.group("type").rsplit(".", 1)[-1]
-            if error_type.casefold() not in _TIMEOUT_EXCEPTION_TYPES:
+            if not _is_timeout_exception_type(error_type):
                 continue
             protocol, transport_code = _timeout_fallback_transport(declaration, match.end()) if is_catch else ("internal", None)
             contracts.append(ErrorContract(

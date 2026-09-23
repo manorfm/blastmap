@@ -1056,6 +1056,30 @@ def test_spring_marks_an_explicit_success_timeout_fallback_as_http_success(tmp_p
     ]
 
 
+def test_spring_classifies_explicit_timeout_status_mappings(tmp_path: Path):
+    (tmp_path / "TimeoutExceptionHandler.java").write_text(
+        '''@ControllerAdvice
+class TimeoutExceptionHandler {
+  @ExceptionHandler(TimeoutException.class) @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+  ApiError internal(TimeoutException error) { return new ApiError(); }
+  @ExceptionHandler(SocketTimeoutException.class) @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+  ApiError unavailable(SocketTimeoutException error) { return new ApiError(); }
+  @ExceptionHandler(ReadTimeoutException.class) @ResponseStatus(HttpStatus.GATEWAY_TIMEOUT)
+  ApiError gateway(ReadTimeoutException error) { return new ApiError(); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(contract.source, contract.error_kind, contract.transport_code) for contract in result.error_contracts} == {
+        ("TimeoutExceptionHandler.internal", "timeout", "500"),
+        ("TimeoutExceptionHandler.unavailable", "timeout", "503"),
+        ("TimeoutExceptionHandler.gateway", "timeout", "504"),
+    }
+
+
 def test_spring_exception_handler_emits_a_static_error_contract(tmp_path: Path):
     (tmp_path / "ApiExceptionHandler.java").write_text(
         '''@ControllerAdvice

@@ -130,6 +130,10 @@ fallbacks). Timeout fallbacks require a typed `catch`, `onErrorResume` or
 are never indexed. Dynamic global handlers, proxies and gateways remain explicit
 unknowns rather than inferred behavior.
 
+Explicit Spring mappings for known timeout exception types retain their literal HTTP
+status, including 500, 503 and 504, so agents can distinguish an internal-error
+translation from an unavailable or gateway-timeout contract.
+
 For Java/Kotlin Spring, the same bounded response includes `service_calls` when an
 entrypoint reaches a Feign client with a literal service name and HTTP route, or an
 injected `RestTemplate` or `WebClient` with a literal single-label service host. Feign
