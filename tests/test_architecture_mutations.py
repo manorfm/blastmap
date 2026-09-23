@@ -12,6 +12,7 @@ from orbitkb.analysis.models import (
     ErrorContract,
     Evidence,
     FlowEdge,
+    StaticServiceCall,
 )
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
@@ -192,6 +193,33 @@ def test_unmapped_downstream_error_disappears_when_caller_maps_the_known_error(t
     flows_repo.replace_analysis(conn, checkout, AnalysisResult(error_contracts=[caller_mapping]))
 
     assert find_unmapped_downstream_errors(conn) == []
+
+
+def test_unmapped_downstream_error_uses_a_proven_feign_client_call(tmp_path: Path):
+    conn = open_db(tmp_path / "static-downstream-error.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    inventory = services_repo.ensure_service(conn, "inventory", "/tmp/inventory", "jvm-spring")
+    feign_call = StaticServiceCall(
+        source="CheckoutService.checkout", target_service="inventory", protocol="http",
+        target_method="POST", target_path="/reservations", evidence=STATIC_EVIDENCE,
+    )
+    downstream = ErrorContract(
+        source="InventoryExceptionHandler.stock", role="maps", error_kind="conflict",
+        internal_type="InsufficientStockException", protocol="http", transport_code="409",
+        public_code="OUT_OF_STOCK", exposes_internal_detail=False, retryability="not_retryable",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, checkout, AnalysisResult(static_service_calls=[feign_call]))
+    flows_repo.replace_analysis(conn, inventory, AnalysisResult(error_contracts=[downstream]))
+
+    findings = find_unmapped_downstream_errors(conn)
+
+    assert _kinds(findings) == {"possible_unmapped_downstream_error"}
+    assert findings[0]["detail"]["caller"] == {
+        "service": "checkout", "symbol": "CheckoutService.checkout",
+        "method": "POST", "path": "/reservations",
+    }
+    assert findings[0]["detail"]["confidence"] == 0.6
 
 
 def _replace_calls(conn, service_id: int, api_id: int, targets: list[str]) -> None:

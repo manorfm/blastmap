@@ -507,14 +507,42 @@ def find_error_semantics_lost(conn: sqlite3.Connection) -> list[dict]:
 
 
 def find_unmapped_downstream_errors(conn: sqlite3.Connection) -> list[dict]:
-    """Surface resolved internal HTTP calls whose downstream 4xx has no known caller mapping.
+    """Surface internal HTTP calls whose downstream 4xx has no known caller mapping.
 
-    This is intentionally a low-confidence review signal. A service-level call
-    relation does not yet prove which client branch receives a status, and a caller
-    can translate the error into another local type. Those cases are stated as
-    unknowns instead of being reported as a definite 500 regression.
+    A source-proven call is preferred over a service-level relation inferred while
+    indexing. Neither proves runtime translation behavior, so both remain review
+    signals instead of claims that an error will become HTTP 500.
     """
     names = _service_names(conn)
+    static_rows = conn.execute(
+        """SELECT caller.id AS from_service_id, target.id AS to_service_id,
+                  call.source AS caller_source, call.target_method AS api_method,
+                  call.target_path AS api_path, call.file_path AS caller_file_path,
+                  call.start_line AS caller_start_line, call.end_line AS caller_end_line,
+                  downstream.source AS downstream_source, downstream.error_kind,
+                  downstream.internal_type, downstream.transport_code,
+                  downstream.public_code, downstream.file_path,
+                  downstream.start_line, downstream.end_line
+           FROM static_service_calls call
+           JOIN services caller ON caller.id = call.service_id
+           JOIN services target ON LOWER(target.name) = LOWER(call.target_service)
+           JOIN static_error_contracts downstream ON downstream.service_id = target.id
+           WHERE call.protocol = 'http'
+             AND downstream.role IN ('raises', 'maps')
+             AND downstream.protocol = 'http'
+             AND CAST(downstream.transport_code AS INTEGER) BETWEEN 400 AND 499
+             AND downstream.internal_type IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM static_error_contracts caller_mapping
+                 WHERE caller_mapping.service_id = caller.id
+                   AND caller_mapping.role = 'maps'
+                   AND caller_mapping.internal_type = downstream.internal_type
+                   AND caller_mapping.protocol = 'http'
+                   AND CAST(caller_mapping.transport_code AS INTEGER) BETWEEN 400 AND 499
+             )
+           ORDER BY caller.id, target.id, call.source, call.target_method, call.target_path,
+                    downstream.internal_type, downstream.source""",
+    ).fetchall()
     rows = conn.execute(
         """SELECT sc.from_service_id, sc.to_service_id, a.method AS api_method,
                   a.path AS api_path, downstream.source AS downstream_source,
@@ -539,10 +567,55 @@ def find_unmapped_downstream_errors(conn: sqlite3.Connection) -> list[dict]:
                    AND caller.protocol = 'http'
                    AND CAST(caller.transport_code AS INTEGER) BETWEEN 400 AND 499
              )
+             AND NOT EXISTS (
+                 SELECT 1 FROM static_service_calls static_call
+                 JOIN services static_target
+                   ON LOWER(static_target.name) = LOWER(static_call.target_service)
+                 WHERE static_call.service_id = sc.from_service_id
+                   AND static_call.protocol = 'http'
+                   AND static_target.id = sc.to_service_id
+             )
            ORDER BY sc.from_service_id, sc.to_service_id, a.method, a.path,
                     downstream.internal_type, downstream.source""",
     ).fetchall()
     findings: list[dict] = []
+    for row in static_rows:
+        findings.append({
+            "kind": "possible_unmapped_downstream_error", "severity": "info",
+            "services": [names[row["from_service_id"]], names[row["to_service_id"]]],
+            "reason": (
+                f"{names[row['from_service_id']]} {row['api_method']} {row['api_path']} calls "
+                f"{names[row['to_service_id']]}, which exposes {row['internal_type']} as HTTP "
+                f"{row['transport_code']}; no same-type client-error mapping is indexed in the caller."
+            ),
+            "detail": {
+                "caller": {
+                    "service": names[row["from_service_id"]], "symbol": row["caller_source"],
+                    "method": row["api_method"], "path": row["api_path"],
+                },
+                "downstream": {
+                    "service": names[row["to_service_id"]], "symbol": row["downstream_source"],
+                    "error_type": row["internal_type"], "kind": row["error_kind"],
+                    "status": row["transport_code"], "public_code": row["public_code"],
+                },
+                "confidence": 0.6,
+                "evidence": [
+                    {
+                        "file": row["caller_file_path"], "start_line": row["caller_start_line"],
+                        "end_line": row["caller_end_line"],
+                    },
+                    _edge_evidence(row),
+                ],
+                "unknowns": [
+                    "The declared client call proves the target endpoint, but not which runtime response branch it receives.",
+                    "The downstream mapping may be global or may not apply to this endpoint.",
+                    "The caller may translate the downstream error to another local type or rely on a handler outside the indexed source.",
+                ],
+                "remediation": [
+                    "Review the client boundary and preserve, explicitly translate, or document this downstream client-error contract.",
+                ],
+            },
+        })
     for row in rows:
         findings.append({
             "kind": "possible_unmapped_downstream_error", "severity": "info",

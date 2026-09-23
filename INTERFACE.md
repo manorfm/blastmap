@@ -182,11 +182,13 @@ the same source-proven client/domain exception is raised as a 4xx category and m
 to HTTP 5xx in one service. Both remain hypotheses: handlers, gateways or proxies
 outside the indexed source may intentionally alter the final response.
 
-`possible_unmapped_downstream_error` is a lower-confidence cross-service signal. It
-requires a reconciled internal HTTP call and a source-proven 4xx contract in the
-downstream service, while no same-type 4xx mapping is indexed in the caller. It does
-not claim the caller returns 500: the response explicitly preserves uncertainty about
-client branches, translated exception types and handlers outside indexed source.
+`possible_unmapped_downstream_error` is a cross-service review signal. It prefers a
+source-proven Java Feign call with literal service and route mappings (confidence
+`0.6`), and otherwise uses a reconciled internal HTTP call (confidence `0.35`). It
+requires a source-proven 4xx contract in the downstream service while no same-type
+4xx mapping is indexed in the caller. It does not claim the caller returns 500: the
+response explicitly preserves uncertainty about client branches, endpoint-specific
+handler applicability, translated exception types and handlers outside indexed source.
 
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
