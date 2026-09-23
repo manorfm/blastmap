@@ -34,6 +34,7 @@ from orbitkb.generation.architecture import (
     find_shared_database,
     find_static_http_calls_without_resilience_policy,
     find_timeout_fallbacks_masking_failures,
+    find_timeouts_mapped_as_internal_server_errors,
     find_timeouts_without_local_fallback,
     find_unmapped_downstream_errors,
     recompute_architecture_view,
@@ -455,6 +456,39 @@ def test_timeout_success_fallback_finding_disappears_when_the_endpoint_returns_a
     )
 
     assert find_timeout_fallbacks_masking_failures(conn) == []
+
+
+def test_timeout_mapping_finding_disappears_when_status_becomes_unavailable(tmp_path: Path):
+    conn = open_db(tmp_path / "timeout-mapping.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    internal_error = ErrorContract(
+        source="ApiExceptionHandler.timeout", role="maps", error_kind="timeout",
+        internal_type="TimeoutException", protocol="http", transport_code="500",
+        public_code=None, exposes_internal_detail=False, retryability="unknown",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, checkout, AnalysisResult(error_contracts=[internal_error]))
+
+    findings = find_timeouts_mapped_as_internal_server_errors(conn)
+
+    assert _kinds(findings) == {"possible_timeout_mapped_as_internal_server_error"}
+    assert findings[0]["detail"]["mapping"] == {
+        "symbol": "ApiExceptionHandler.timeout", "error_type": "TimeoutException", "status": "500",
+    }
+    run_id = recompute_architecture_view(conn)
+    assert {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    } == {"possible_timeout_mapped_as_internal_server_error"}
+
+    unavailable = ErrorContract(
+        source="ApiExceptionHandler.timeout", role="maps", error_kind="timeout",
+        internal_type="TimeoutException", protocol="http", transport_code="503",
+        public_code=None, exposes_internal_detail=False, retryability="unknown",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, checkout, AnalysisResult(error_contracts=[unavailable]))
+
+    assert find_timeouts_mapped_as_internal_server_errors(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

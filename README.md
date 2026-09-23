@@ -193,6 +193,11 @@ is intentionally narrower than all fallback values: cached or partial success ca
 valid, and the indexed source cannot prove whether a degradation signal reaches the
 client.
 
+An explicit Spring mapping of a known timeout exception to HTTP 500 is also surfaced
+for review. OrbitKB does not flag the same mapping to 503 or 504; those retain explicit
+unavailability or gateway-timeout semantics. A 500 mapping may still be intentional,
+so the result asks for contract validation rather than prescribing a status change.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,

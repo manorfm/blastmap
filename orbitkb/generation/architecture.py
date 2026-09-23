@@ -878,6 +878,49 @@ def find_timeout_fallbacks_masking_failures(conn: sqlite3.Connection) -> list[di
     return findings
 
 
+def find_timeouts_mapped_as_internal_server_errors(conn: sqlite3.Connection) -> list[dict]:
+    """Flag an explicit timeout mapping that exposes HTTP 500 instead of availability semantics."""
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT service_id, source, internal_type, transport_code,
+                  file_path, start_line, end_line
+           FROM static_error_contracts
+           WHERE role = 'maps'
+             AND error_kind = 'timeout'
+             AND protocol = 'http'
+             AND transport_code = '500'
+           ORDER BY service_id, source, internal_type, file_path, start_line""",
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        service = names[row["service_id"]]
+        findings.append({
+            "kind": "possible_timeout_mapped_as_internal_server_error", "severity": "warning",
+            "services": [service],
+            "reason": (
+                f"{row['source']} maps timeout type {row['internal_type']} to HTTP 500; "
+                "review whether callers need an explicit unavailable or gateway-timeout contract."
+            ),
+            "detail": {
+                "mapping": {
+                    "symbol": row["source"], "error_type": row["internal_type"],
+                    "status": row["transport_code"],
+                },
+                "confidence": 0.8,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": [
+                    "A gateway, compatibility contract or operational policy may intentionally require HTTP 500 for this timeout.",
+                    "Static analysis cannot determine whether the timeout was caused by an internal defect rather than downstream unavailability.",
+                ],
+                "remediation": [
+                    "Confirm the public error contract and prefer an explicit 503 or 504 when the timeout represents temporary unavailability.",
+                    "Document any intentional 500 translation so clients and retry policies can preserve the expected semantics.",
+                ],
+            },
+        })
+    return findings
+
+
 def find_unmapped_downstream_errors(conn: sqlite3.Connection) -> list[dict]:
     """Surface internal HTTP calls whose downstream 4xx has no known caller mapping.
 
@@ -1466,6 +1509,7 @@ _DETECTORS = (
     find_retries_on_potentially_non_idempotent_http_calls,
     find_retries_on_downstream_client_errors,
     find_timeout_fallbacks_masking_failures,
+    find_timeouts_mapped_as_internal_server_errors,
     find_timeouts_without_local_fallback,
     find_unmapped_downstream_errors,
     find_overbroad_exception_handlers,

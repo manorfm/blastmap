@@ -260,6 +260,12 @@ empty or domain fallback values as success. The result remains a review signal: 
 or partial response may be legitimate, and static facts cannot prove whether clients
 receive a degradation indicator.
 
+`possible_timeout_mapped_as_internal_server_error` requires an explicit mapping of a
+known timeout exception to HTTP 500. Mappings to 503 and 504 are not flagged, because
+they preserve explicit unavailable or gateway-timeout semantics. The finding does not
+declare 500 incorrect: a compatibility or gateway contract may intentionally require
+that translation.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally
