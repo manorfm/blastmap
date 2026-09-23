@@ -285,6 +285,24 @@ CREATE TABLE IF NOT EXISTS static_service_calls (
 CREATE INDEX IF NOT EXISTS idx_static_service_calls_service ON static_service_calls(service_id);
 CREATE INDEX IF NOT EXISTS idx_static_service_calls_source ON static_service_calls(service_id, source);
 
+-- Literal resilience limits are stored separately from generic flow boundaries:
+-- their numeric value and unit are evidence, not an inferred runtime guarantee.
+CREATE TABLE IF NOT EXISTS static_resilience_policies (
+    id          INTEGER PRIMARY KEY,
+    service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    source      TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('retry', 'timeout')),
+    mechanism   TEXT NOT NULL CHECK (mechanism IN ('reactor', 'spring_annotation')),
+    value       INTEGER NOT NULL CHECK (value >= 0),
+    unit        TEXT NOT NULL CHECK (unit IN ('retries', 'attempts', 'milliseconds')),
+    file_path   TEXT NOT NULL,
+    start_line  INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_static_resilience_policies_service ON static_resilience_policies(service_id);
+CREATE INDEX IF NOT EXISTS idx_static_resilience_policies_source ON static_resilience_policies(service_id, source);
+
 CREATE TABLE IF NOT EXISTS flow_boundaries (
     id          INTEGER PRIMARY KEY,
     service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

@@ -14,6 +14,7 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
     conn.execute("DELETE FROM flow_boundaries WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_error_contracts WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_service_calls WHERE service_id = ?", (service_id,))
+    conn.execute("DELETE FROM static_resilience_policies WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM entrypoints WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_message_contracts WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_persistence_facts WHERE service_id = ?", (service_id,))
@@ -91,6 +92,18 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
                 call.evidence.start_line, call.evidence.end_line, indexed_at,
             ),
         )
+    for policy in analysis.resilience_policies:
+        conn.execute(
+            """INSERT INTO static_resilience_policies
+               (service_id, source, kind, mechanism, value, unit,
+                file_path, start_line, end_line, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                service_id, policy.source, policy.kind, policy.mechanism,
+                policy.value, policy.unit, policy.evidence.file_path,
+                policy.evidence.start_line, policy.evidence.end_line, indexed_at,
+            ),
+        )
     for fact in analysis.persistence_facts:
         conn.execute(
             """INSERT INTO static_persistence_facts
@@ -158,6 +171,16 @@ def list_static_error_contracts(conn: sqlite3.Connection, service_id: int) -> li
 
 def list_static_service_calls(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return _list_static_service_calls(conn, service_id)
+
+
+def list_static_resilience_policies(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT source, kind, mechanism, value, unit, file_path, start_line, end_line
+           FROM static_resilience_policies
+           WHERE service_id = ?
+           ORDER BY source, kind, mechanism, value, file_path, start_line""",
+        (service_id,),
+    ).fetchall()
 
 
 def list_static_service_calls_for_sources(

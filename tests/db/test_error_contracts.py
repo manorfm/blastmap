@@ -2,6 +2,7 @@ from orbitkb.analysis.models import (
     AnalysisResult,
     ErrorContract,
     Evidence,
+    ResiliencePolicy,
     StaticServiceCall,
 )
 from orbitkb.db.connection import open_db
@@ -86,3 +87,39 @@ def test_static_service_calls_are_replaced_with_the_flow_snapshot(tmp_path):
     flows.replace_analysis(conn, service_id, AnalysisResult())
 
     assert flows.list_static_service_calls(conn, service_id) == []
+
+
+def test_static_resilience_policies_are_replaced_with_the_flow_snapshot(tmp_path):
+    conn = open_db(tmp_path / "resilience.db")
+    service_id = services.ensure_service(conn, "checkout", "/repos/checkout", "jvm-spring")
+    evidence = Evidence("CheckoutClient.java", 24, 24)
+
+    flows.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(resilience_policies=[
+            ResiliencePolicy(
+                source="CheckoutClient.reserve",
+                kind="timeout",
+                mechanism="reactor",
+                value=2_000,
+                unit="milliseconds",
+                evidence=evidence,
+            ),
+        ]),
+    )
+
+    assert [dict(row) for row in flows.list_static_resilience_policies(conn, service_id)] == [{
+        "source": "CheckoutClient.reserve",
+        "kind": "timeout",
+        "mechanism": "reactor",
+        "value": 2_000,
+        "unit": "milliseconds",
+        "file_path": "CheckoutClient.java",
+        "start_line": 24,
+        "end_line": 24,
+    }]
+
+    flows.replace_analysis(conn, service_id, AnalysisResult())
+
+    assert flows.list_static_resilience_policies(conn, service_id) == []
