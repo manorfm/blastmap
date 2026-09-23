@@ -12,7 +12,7 @@ A service is identified by `(repository, name)`, not by its name alone. Every
 optional `repository` filter. Every service-scoped tool accepts optional
 `repository`: `describe_service`, `list_apis`, `describe_api`, `list_entrypoints`,
 `describe_entrypoint`, `describe_persistence`, `describe_messages`,
-`list_security_findings` and `get_relationships`. An unqualified duplicate returns
+`describe_cloud_dependencies`, `list_security_findings` and `get_relationships`. An unqualified duplicate returns
 an ambiguity error with candidate repository names; agents must pass one of them.
 `trace_flow` independently accepts `from_repository` and `to_repository`.
 
@@ -45,8 +45,9 @@ treated as deletion.
    entrypoint.
 4. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
    reachable deterministic flow evidence.
-5. Use `describe_api`, `describe_persistence`, `describe_messages` or
-   `get_relationships` only when the selected flow requires them.
+5. Use `describe_api`, `describe_persistence`, `describe_messages`,
+   `describe_cloud_dependencies` or `get_relationships` only when the selected flow
+   requires them.
 6. Call `list_security_findings(service)` before changing credentials,
    configuration or an external integration; it returns locations and remediation,
    never source excerpts or secret values.
@@ -109,10 +110,12 @@ Shared, multi-host SQLite locking is outside the supported operating model.
 ## Support boundaries
 
 Static facts for Go, Java/Spring, Kotlin/Spring and Node/TypeScript/GraphQL are
-supported only where source evidence is deterministic. Dynamic wiring, runtime
-observations and external depth enrichment remain explicitly bounded or
-experimental. The server returns unknowns rather than elevating heuristics to facts;
-compact change context remains capped at five cards.
+supported only where source evidence is deterministic. Cloud/IaC facts (AWS
+SQS/SNS/S3/EventBridge, Azure Blob Storage, Terraform/CloudFormation/Kubernetes)
+follow the same posture but have no `FlowEdge` counterpart yet — see "Cloud and IaC
+dependencies". Dynamic wiring, runtime observations and external depth enrichment
+remain explicitly bounded or experimental. The server returns unknowns rather than
+elevating heuristics to facts; compact change context remains capped at five cards.
 
 ## Entrypoint response
 
@@ -269,6 +272,63 @@ not replace the generated persistence entities.
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an
 agent can deliberately request more depth instead of receiving it by default.
+
+## Cloud and IaC dependencies
+
+`describe_cloud_dependencies(service, limit?, offset?, repository?)` returns two
+independently paginated lists, never merged into one inferred claim:
+
+```json
+{
+  "service": "orders-service",
+  "repository": "shop",
+  "static_facts": [
+    {
+      "provider": "aws", "resource_type": "queue", "service_name": "sqs",
+      "operation": "SendMessage", "operation_kind": "publish", "sdk": "aws-sdk-js-v3",
+      "target_name": null,
+      "evidence": {"file": "publisher.ts", "start_line": 4, "end_line": 4}
+    }
+  ],
+  "iac_resources": [
+    {
+      "provider": "aws", "resource_type": "queue", "iac_resource_type": "aws_sqs_queue",
+      "logical_name": "orders", "physical_name": "orders-queue", "source_format": "terraform",
+      "confidence": "high",
+      "evidence": {"file": "infra/main.tf", "start_line": 1, "end_line": 3}
+    }
+  ],
+  "pagination": {"limit": 50, "offset": 0, "static_facts": {"total": 1, "truncated": false}, "iac_resources": {"total": 1, "truncated": false}}
+}
+```
+
+`static_facts` is deterministic evidence from source code: a locally-declared SDK
+client type or a named SDK import actually constructed, resolved against a
+vendor-sourced operation table — never a keyword guess. Supported: AWS SQS, SNS, S3
+and EventBridge (Go, Java, Kotlin, Node/TypeScript, Python) and Azure Blob Storage
+(Go, Java, Kotlin, Node/TypeScript). `target_name` is the literal resource name only
+when the call site names it as a plain string; an interpolated or otherwise dynamic
+value is `null`, never guessed. It has no `FlowEdge` counterpart yet, so it does not
+appear in `trace_flow` or `describe_entrypoint`'s flow.
+
+`iac_resources` is structurally parsed Terraform (`python-hcl2`), CloudFormation
+(`cfn-flip`/JSON) and plain Kubernetes manifests in the same repository — real
+grammars, not regex on infrastructure text. A resource's type and logical name are
+literal by construction; `physical_name` is `null` whenever the declaring attribute
+is an interpolated expression. `service_id` (and therefore whether a resource shows
+up in one service's `describe_cloud_dependencies` at all) is set only when the
+declaring file structurally falls under exactly one indexed service's root;
+otherwise it stays repository-scoped and is visible only via
+`find_architecture_smells`' cloud findings, not this tool. Unrendered Helm chart
+templates are detected and skipped, never mis-parsed as plain YAML; GCP and
+Dockerfile are out of scope.
+
+`find_architecture_smells` adds three cloud-derived findings computed from the same
+facts, no extra cost: `cloud_dependency_without_iac` (code names a cloud resource no
+Terraform/CloudFormation in the repository declares), `cloud_iac_resource_unused`
+(the inverse), and `shared_cloud_resource` (two services whose code names the same
+queue/topic/bucket — coupling through shared infrastructure, the cloud analog of
+`shared_database`).
 
 ## External depth-provider contract
 

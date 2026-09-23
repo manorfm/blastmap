@@ -108,6 +108,7 @@ Start broad, then narrow the request.
 | Find likely impact | `find_change_surface` | `get_relationships`, `describe_api` |
 | Understand a request path | `list_entrypoints` | `describe_entrypoint` |
 | Inspect data or events | `describe_persistence`, `describe_messages` | `get_relationships` |
+| Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |
 | Compare runtime and static paths | `describe_runtime_divergence` | `describe_entrypoint` |
 
@@ -145,6 +146,7 @@ The supported deterministic subset is intentionally focused:
 | Node and TypeScript | GraphQL, Mongoose, Prisma, RabbitMQ | Dynamic imports and runtime composition remain unknown. |
 | GraphQL | Operations, local schema contracts, input/output shapes | Remote composition, directives and federation behavior are not inferred. |
 | Persistence and messaging | Postgres/Mongo evidence, RabbitMQ bindings and contracts | Only literal, source-proven configuration is exposed. |
+| Cloud/infra | AWS SQS/SNS/S3/EventBridge and Azure Blob Storage call sites (Go, Java, Kotlin, Node/TS, Python), plus Terraform/CloudFormation/plain Kubernetes declarations, parsed with real grammars (`python-hcl2`, `cfn-flip`) — never keyword matching | GCP, Dockerfile, and unrendered Helm templates are not resolved; a cloud fact does not appear in `trace_flow`/`describe_entrypoint`, only in `describe_cloud_dependencies`. |
 | Runtime evidence | Normalized OTel or broker edges | Experimental; payloads, trace IDs and attributes are rejected. |
 
 An optional external depth provider can enrich a selected flow when native resolution
@@ -275,7 +277,8 @@ analysis still scans the service on each index/update, so profile a real reposit
 before adding cache or parallelism.
 
 Architecture rules have fact-mutation tests for cycles, fan-out, shared storage,
-read-entrypoint side effects and RabbitMQ recovery-policy hypotheses. Static and
+read-entrypoint side effects, RabbitMQ recovery-policy hypotheses, and cloud
+dependencies undeclared in IaC (or declared but unreferenced in code). Static and
 change-surface evaluations are deterministic regression checks; they do not claim to
 measure an LLM's judgment on arbitrary codebases.
 
