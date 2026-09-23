@@ -114,8 +114,10 @@ Start broad, then narrow the request.
 
 `get_change_context` returns at most five compact service cards. It includes likely
 impact, flow, contracts at risk, persistence, messaging, architectural hypotheses,
-unknowns and recommended next queries. It does not reread the source tree while
-answering.
+unknowns and recommended next queries. A selected service card can additionally
+include up to three source-proven, unambiguous Feign dependencies with their literal
+target routes and resolved service identity; when indexed, the remote endpoint link
+and code location are included. It does not reread the source tree while answering.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

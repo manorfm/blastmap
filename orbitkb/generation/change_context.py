@@ -85,7 +85,7 @@ def _service_context(conn: sqlite3.Connection, name: str, repository_id: int | N
     if row is None:
         return None
     interfaces = _interfaces(conn, row["id"])
-    return {
+    context = {
         "service": row["name"],
         "repository": row["repository_name"],
         "stack": row["stack"],
@@ -109,6 +109,48 @@ def _service_context(conn: sqlite3.Connection, name: str, repository_id: int | N
             for item in messages_repo.list_messages(conn, row["id"])[:MAX_ITEMS_PER_SERVICE]
         ],
     }
+    static_dependencies = _resolved_static_dependencies(conn, row)
+    if static_dependencies:
+        context["static_outbound_dependencies"] = static_dependencies
+    return context
+
+
+def _resolved_static_dependencies(conn: sqlite3.Connection, service: sqlite3.Row) -> list[dict]:
+    """Compactly expose only unambiguous source-proven remote dependencies."""
+    dependencies = []
+    for call in flows_repo.list_static_service_calls(conn, service["id"]):
+        target, _candidates = services_repo.resolve_service_reference(
+            conn, call["target_service"], service["repository_id"],
+        )
+        if target is None:
+            continue
+        resolved_target: dict = {
+            "service": target["name"], "repository": target["repository_name"],
+            "status": "service_indexed",
+        }
+        if (
+            call["protocol"] == "http"
+            and isinstance(call["target_method"], str)
+            and isinstance(call["target_path"], str)
+        ):
+            entrypoint = flows_repo.get_entrypoint(
+                conn, target["id"], "http", call["target_method"], call["target_path"],
+            )
+            if entrypoint is not None:
+                resolved_target["status"] = "endpoint_indexed"
+                resolved_target["entrypoint"] = {
+                    "method": entrypoint["method"], "path": entrypoint["name"],
+                    "symbol": entrypoint["symbol"], "evidence": {
+                        "file": entrypoint["file_path"], "start_line": entrypoint["start_line"],
+                        "end_line": entrypoint["end_line"],
+                    },
+                }
+        dependencies.append({
+            "source": call["source"], "service": call["target_service"],
+            "protocol": call["protocol"], "method": call["target_method"],
+            "path": call["target_path"], "resolved_target": resolved_target,
+        })
+    return dependencies[:MAX_ITEMS_PER_SERVICE]
 
 
 def _interfaces(conn: sqlite3.Connection, service_id: int) -> list[dict]:

@@ -108,6 +108,23 @@ def list_service_candidates_by_name(conn: sqlite3.Connection, name: str) -> list
     ).fetchall()
 
 
+def resolve_service_reference(
+    conn: sqlite3.Connection, name: str, preferred_repository_id: int | None = None,
+) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+    """Resolve one named service, preferring an unambiguous local repository peer."""
+    candidates = list_service_candidates_by_name(conn, name)
+    if len(candidates) == 1:
+        return candidates[0], candidates
+    if preferred_repository_id is not None:
+        local_candidates = [
+            candidate for candidate in candidates
+            if candidate["repository_id"] == preferred_repository_id
+        ]
+        if len(local_candidates) == 1:
+            return local_candidates[0], candidates
+    return None, candidates
+
+
 def list_duplicate_service_names(conn: sqlite3.Connection) -> list[str]:
     """Names requiring an explicit repository qualifier in cumulative tools."""
     return [

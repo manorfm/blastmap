@@ -109,15 +109,9 @@ def _resolve_static_service_call_target(
     )
     if key in cache:
         return cache[key]
-    candidates = services_repo.list_service_candidates_by_name(conn, call["target_service"])
-    target = candidates[0] if len(candidates) == 1 else None
-    if target is None and caller["repository_id"] is not None:
-        same_repository = [
-            candidate for candidate in candidates
-            if candidate["repository_id"] == caller["repository_id"]
-        ]
-        if len(same_repository) == 1:
-            target = same_repository[0]
+    target, candidates = services_repo.resolve_service_reference(
+        conn, call["target_service"], caller["repository_id"],
+    )
     if target is None:
         resolution = (
             {"status": "not_indexed"}

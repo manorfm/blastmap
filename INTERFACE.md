@@ -64,8 +64,13 @@ five service cards from already-indexed facts; it never reads source. The respon
 contains `impact` (primary/secondary findings, cross-service flow, contracts/data and
 external integrations), compact `services` cards, matching `architecture_risks`,
 `unknowns`, `recommended_next_queries` and a `budget` object. Each card contains only
-interfaces, outbound dependencies, persistence and messages. Use its recommended
-detail tools rather than treating it as a full service dump.
+interfaces, outbound dependencies, persistence and messages. A card may also include
+up to three `static_outbound_dependencies`: source-proven Java/Kotlin Feign calls
+whose target service resolves unambiguously, including literal method/route and the
+resolved service identity. When the remote route is indexed, its symbol and evidence
+are included in `resolved_target`. Ambiguous and unindexed targets are omitted to
+protect the context budget and avoid inventing scope. Use its recommended detail tools
+rather than treating it as a full service dump.
 
 ## Context-budget calibration
 
