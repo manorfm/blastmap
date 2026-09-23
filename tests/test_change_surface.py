@@ -6,7 +6,12 @@ deterministically without a real subprocess call — matching the harness's own
 from pathlib import Path
 
 from benchmark.fixtures import build_pix_fixture
-from orbitkb.analysis.models import AnalysisResult, CloudFact, Evidence
+from orbitkb.analysis.models import (
+    AnalysisResult,
+    CloudFact,
+    Evidence,
+    StaticServiceCall,
+)
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import change_surface as change_surface_repo
 from orbitkb.db.repositories import embeddings as embeddings_repo
@@ -204,6 +209,41 @@ def test_hallucinated_service_is_filtered_and_evidence_confidence_attached(tmp_p
     assert ("checkout-service", "payments-service") in flow_pairs
 
     assert any(r["tool"] == "describe_api" and r["arguments"]["service"] == "checkout-service" for r in result["recommended_next_queries"])
+
+
+def test_static_remote_dependency_complements_the_change_surface_ranking(tmp_path: Path):
+    conn = _build_pix_fixture(tmp_path / "static-dependency-ranking.db")
+    checkout = services_repo.get_service_by_name(conn, "checkout-service")
+    services_repo.ensure_service(conn, "inventory-service", "/repos/inventory", "jvm-spring")
+    evidence = Evidence("CheckoutService.java", 18, 18)
+    flows_repo.replace_analysis(
+        conn,
+        checkout["id"],
+        AnalysisResult(static_service_calls=[
+            StaticServiceCall(
+                source="CheckoutService.submit", target_service="inventory-service", protocol="http",
+                target_method="POST", target_path="/reservations", evidence=evidence,
+            ),
+        ]),
+    )
+    backend = FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "Add a payment method", backend)
+
+    assert backend.calls == 1
+    assert result["secondary"] == [{
+        "service": "inventory-service", "reason": (
+            "checkout-service has a source-proven HTTP call to inventory-service POST /reservations; "
+            "review the client boundary and remote contract."
+        ), "confidence": 0.6, "origin": "static_dependency", "via_service": "checkout-service",
+        "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+    }]
+    assert {tuple(item[key] for key in ("from", "to", "type", "origin")) for item in result["flow"]} >= {
+        ("checkout-service", "inventory-service", "HTTP", "static"),
+    }
 
 
 def test_external_and_unmapped_internal_buckets_are_populated(tmp_path: Path):

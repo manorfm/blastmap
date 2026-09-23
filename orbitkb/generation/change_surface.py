@@ -30,11 +30,17 @@ from orbitkb.generation.embeddings import EmbeddingBackend, cosine_similarity
 from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, load_schema
 from orbitkb.generation.next_queries import NextQueryRecommender
-from orbitkb.generation.retrieval import CandidateRetrieval, FallbackRetrieval, KeywordGraphRetrieval, SemanticRetrieval
+from orbitkb.generation.retrieval import (
+    CandidateRetrieval,
+    FallbackRetrieval,
+    KeywordGraphRetrieval,
+    SemanticRetrieval,
+)
 
 MAX_CANDIDATES = 10
 MAX_LISTED_PER_SERVICE = 8
 MAX_EVIDENCE_PER_SERVICE = 5
+MAX_STATIC_DEPENDENCY_FINDINGS = 3
 
 
 @dataclass
@@ -207,15 +213,80 @@ def _filter_known(
 
 
 def _derive_flow(conn: sqlite3.Connection, service_names: set[str], repository_id: int | None = None) -> list[dict]:
-    flow = []
+    flow_by_relation: dict[tuple[str, str, str], dict] = {}
     for name in service_names:
         row = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
         if row is None:
             continue
         for c in service_calls_repo.list_calls_for_service(conn, row["id"]):
             if c["to_service_name"] in service_names:
-                flow.append({"from": name, "to": c["to_service_name"], "type": c["call_kind"].upper()})
-    return flow
+                relation = (name, c["to_service_name"], c["call_kind"].upper())
+                flow_by_relation[relation] = {"from": name, "to": c["to_service_name"], "type": relation[2]}
+        for call in flows_repo.list_static_service_calls(conn, row["id"]):
+            target, _candidates = services_repo.resolve_service_reference(
+                conn, call["target_service"], row["repository_id"],
+            )
+            if (
+                target is None
+                or target["name"] not in service_names
+                or (repository_id is not None and target["repository_id"] != repository_id)
+            ):
+                continue
+            relation = (name, target["name"], call["protocol"].upper())
+            flow_by_relation[relation] = {
+                "from": name, "to": target["name"], "type": relation[2], "origin": "static",
+            }
+    return list(flow_by_relation.values())
+
+
+def _derive_static_dependency_findings(
+    conn: sqlite3.Connection,
+    primary_names: list[str],
+    excluded_names: set[str],
+    repository_id: int | None = None,
+) -> list[dict]:
+    """Add direct, source-proven dependencies of primary services as review targets.
+
+    The call itself is deterministic, while whether a requested change crosses its
+    client boundary remains an inference. It is therefore a bounded secondary
+    finding with explicit provenance, never promoted to a primary edit mandate.
+    """
+    findings = []
+    seen_targets: set[int] = set()
+    for source_name in primary_names:
+        source = services_repo.get_service_by_name(conn, source_name, repository_id=repository_id)
+        if source is None:
+            continue
+        for call in flows_repo.list_static_service_calls(conn, source["id"]):
+            target, _candidates = services_repo.resolve_service_reference(
+                conn, call["target_service"], source["repository_id"],
+            )
+            if (
+                target is None
+                or target["id"] in seen_targets
+                or target["name"] in excluded_names
+                or (repository_id is not None and target["repository_id"] != repository_id)
+            ):
+                continue
+            seen_targets.add(target["id"])
+            method = call["target_method"] or "UNKNOWN"
+            path = call["target_path"] or "UNKNOWN"
+            findings.append({
+                "service": target["name"],
+                "reason": (
+                    f"{source_name} has a source-proven {call['protocol'].upper()} call to "
+                    f"{target['name']} {method} {path}; review the client boundary and remote contract."
+                ),
+                "confidence": 0.6,
+                "origin": "static_dependency",
+                "via_service": source_name,
+                "evidence": [{
+                    "file": call["file_path"], "start_line": call["start_line"], "end_line": call["end_line"],
+                }],
+            })
+            if len(findings) >= MAX_STATIC_DEPENDENCY_FINDINGS:
+                return findings
+    return findings
 
 
 def _derive_dependency_hints(
@@ -470,6 +541,12 @@ def analyze_change_surface(
     no_change = _filter_known(conn, result.get("no_change", []), known, evidence_by_service)
 
     primary_names = [f["service"] for f in primary]
+    excluded_static_targets = {
+        finding["service"] for finding in [*primary, *secondary, *no_change]
+    }
+    secondary.extend(
+        _derive_static_dependency_findings(conn, primary_names, excluded_static_targets, repository_id)
+    )
     secondary_names = [f["service"] for f in secondary]
     relevant = set(primary_names) | set(secondary_names)
     unmapped_internal_hint = _derive_dependency_hints(

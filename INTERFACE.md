@@ -72,6 +72,12 @@ are included in `resolved_target`. Ambiguous and unindexed targets are omitted t
 protect the context budget and avoid inventing scope. Use its recommended detail tools
 rather than treating it as a full service dump.
 
+`find_change_surface` may append up to three `secondary` findings with
+`origin: static_dependency`. These are direct, unambiguous Java/Kotlin Feign targets
+of an LLM-selected primary service. The call fact is deterministic; the `0.6`
+confidence applies only to whether the task needs to cross that boundary. A matching
+flow edge has `origin: static`. No additional LLM call is made.
+
 ## Context-budget calibration
 
 Every `get_change_context` response has `telemetry: {recorded, run_id?}`. Its
