@@ -294,7 +294,7 @@ independently paginated lists, never merged into one inferred claim:
     {
       "provider": "aws", "resource_type": "queue", "iac_resource_type": "aws_sqs_queue",
       "logical_name": "orders", "physical_name": "orders-queue", "source_format": "terraform",
-      "confidence": "high",
+      "confidence": "high", "attributes": {"redrive_policy": true},
       "evidence": {"file": "infra/main.tf", "start_line": 1, "end_line": 3}
     }
   ],
@@ -320,8 +320,18 @@ up in one service's `describe_cloud_dependencies` at all) is set only when the
 declaring file structurally falls under exactly one indexed service's root;
 otherwise it stays repository-scoped and is visible only via
 `find_architecture_smells`' cloud findings, not this tool. Unrendered Helm chart
-templates are detected and skipped, never mis-parsed as plain YAML; GCP and
-Dockerfile are out of scope.
+templates are detected and skipped, never mis-parsed as plain YAML. GCP
+(Pub/Sub, GCS) and expanded Azure (Service Bus, Event Hub, Event Grid) and AWS
+Kinesis are declared in the taxonomy and recognized in Terraform/CloudFormation,
+but not yet wired into code-level detection (in progress); Dockerfile is out
+of scope.
+
+`attributes` is a small, curated set of literal attributes tracked per resource
+type — presence-only for ones whose value can't be resolved as a literal in
+practice (`redrive_policy` is almost always a `jsonencode(...)` call), literal
+value for ones where the value itself matters (`acl`, `container_access_type`).
+Never a default-filled guess: an attribute absent from the declaration, or whose
+value depends on an interpolated expression, is simply absent from this object.
 
 `find_architecture_smells` adds three cloud-derived findings computed from the same
 facts, no extra cost: `cloud_dependency_without_iac` (code names a cloud resource no
