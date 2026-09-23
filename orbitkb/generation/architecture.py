@@ -463,11 +463,139 @@ def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> 
     return findings
 
 
+def find_cloud_code_without_iac(conn: sqlite3.Connection) -> list[dict]:
+    """A service's own code proves it publishes/consumes/reads/writes a named
+    cloud resource, but no Terraform/CloudFormation declaration in its
+    repository resolves to that same literal name. Only facts with a
+    source-proven `target_name` are considered — an unresolved call site can't
+    be compared to anything, so it is silently excluded rather than guessed
+    into either bucket."""
+    names = _service_names(conn)
+    rows = conn.execute(
+        """
+        SELECT scf.service_id, scf.provider, scf.resource_type, scf.service_name,
+               scf.operation, scf.target_name, scf.file_path, scf.start_line, scf.end_line
+        FROM static_cloud_facts scf
+        JOIN services svc ON svc.id = scf.service_id
+        WHERE scf.target_name IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM cloud_iac_resources cir
+              WHERE cir.repository_id IS svc.repository_id
+                AND cir.provider = scf.provider AND cir.resource_type = scf.resource_type
+                AND cir.physical_name = scf.target_name
+          )
+        ORDER BY scf.service_id, scf.target_name
+        """
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        service = names[row["service_id"]]
+        findings.append({
+            "kind": "cloud_dependency_without_iac", "severity": "warning",
+            "services": [service],
+            "reason": (
+                f"{service} code {row['operation']}s '{row['target_name']}' ({row['provider']}:"
+                f"{row['service_name']}), but no matching Terraform/CloudFormation declaration was "
+                "found in this repository."
+            ),
+            "detail": {
+                "target_name": row["target_name"], "provider": row["provider"],
+                "resource_type": row["resource_type"], "confidence": 0.7,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": [
+                    "The resource may be declared in IaC outside this repository, or provisioned manually.",
+                ],
+                "remediation": ["Confirm this resource is declared somewhere, or add its IaC declaration."],
+            },
+        })
+    return findings
+
+
+def find_cloud_iac_unused_in_code(conn: sqlite3.Connection) -> list[dict]:
+    """The inverse of find_cloud_code_without_iac: a Terraform/CloudFormation
+    declaration whose literal name no indexed code in the same repository
+    references. Only resources structurally attributed to one indexed service
+    are considered — a repository-scoped resource (no single service root
+    contains its declaring file) has no service to report this against, and is
+    excluded rather than attached to an arbitrary one."""
+    names = _service_names(conn)
+    rows = conn.execute(
+        """
+        SELECT cir.service_id, cir.provider, cir.resource_type, cir.iac_resource_type,
+               cir.logical_name, cir.physical_name, cir.file_path, cir.start_line, cir.end_line
+        FROM cloud_iac_resources cir
+        JOIN services svc ON svc.id = cir.service_id
+        WHERE cir.physical_name IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM static_cloud_facts scf
+              JOIN services fact_svc ON fact_svc.id = scf.service_id
+              WHERE fact_svc.repository_id IS svc.repository_id
+                AND scf.provider = cir.provider AND scf.resource_type = cir.resource_type
+                AND scf.target_name = cir.physical_name
+          )
+        ORDER BY cir.service_id, cir.physical_name
+        """
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        service = names[row["service_id"]]
+        findings.append({
+            # A provisioned-but-unreferenced resource is far less alarming than
+            # code referencing something undeclared, hence "info" not "warning".
+            "kind": "cloud_iac_resource_unused", "severity": "info",
+            "services": [service],
+            "reason": (
+                f"{service}'s Terraform/CloudFormation declares {row['iac_resource_type']} "
+                f"'{row['physical_name']}', but no indexed code in this repository references it."
+            ),
+            "detail": {
+                "iac_resource_type": row["iac_resource_type"], "logical_name": row["logical_name"],
+                "physical_name": row["physical_name"], "confidence": 0.6,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": [
+                    "Code that references this resource may live in a service not yet indexed.",
+                ],
+                "remediation": ["Confirm the resource is still needed, or index the code that uses it."],
+            },
+        })
+    return findings
+
+
+def find_shared_cloud_resource(conn: sqlite3.Connection) -> list[dict]:
+    """Two or more different services whose code proves they talk to the same
+    named cloud resource — coupling through a shared queue/topic/bucket, the
+    cloud analog of find_shared_database."""
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT provider, resource_type, target_name, GROUP_CONCAT(DISTINCT service_id) AS service_ids
+           FROM static_cloud_facts WHERE target_name IS NOT NULL
+           GROUP BY provider, resource_type, target_name HAVING COUNT(DISTINCT service_id) > 1"""
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        service_ids = [int(x) for x in row["service_ids"].split(",")]
+        service_names = sorted(names[i] for i in service_ids if i in names)
+        findings.append({
+            "kind": "shared_cloud_resource", "severity": "info",
+            "services": service_names,
+            "reason": (
+                f"{', '.join(service_names)} all talk to the same {row['provider']}:{row['resource_type']} "
+                f"'{row['target_name']}' — coupling through a shared cloud resource."
+            ),
+            "detail": {
+                "provider": row["provider"], "resource_type": row["resource_type"],
+                "target_name": row["target_name"],
+            },
+        })
+    return findings
+
+
 _DETECTORS = (
     find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects,
     find_message_consumers_without_recovery_policy,
+    find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
 )
 
 
