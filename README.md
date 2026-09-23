@@ -157,6 +157,12 @@ review signal, not proof that the caller returns HTTP 500. When a literal static
 also resolves to an indexed downstream endpoint, only error contracts reachable from
 that endpoint's static flow are considered.
 
+`find_architecture_smells` also flags a source-proven internal HTTP call with no
+literal timeout or retry policy on the same source symbol. This is a prompt to review
+the client boundary, not evidence that production has no protection: defaults and
+client configuration may live outside indexed source. Retrying non-idempotent work is
+not recommended without an idempotency guarantee.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,

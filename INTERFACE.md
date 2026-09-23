@@ -223,6 +223,13 @@ contract downstream while no same-type 4xx mapping is indexed in the caller. It 
 not claim the caller returns 500: the response explicitly preserves uncertainty about
 client branches, translated exception types and handlers outside indexed source.
 
+`possible_missing_http_resilience_policy` is another static HTTP review signal. It
+requires a source-proven internal call and no literal timeout or retry policy on the
+same source symbol. The result identifies the caller symbol and target route, but does
+not claim runtime protection is absent: defaults, client factories and configuration
+may be outside indexed source. Its remediation explicitly asks for retry safety or an
+idempotency guarantee before adding retries.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally

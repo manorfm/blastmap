@@ -507,6 +507,60 @@ def find_error_semantics_lost(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_static_http_calls_without_resilience_policy(conn: sqlite3.Connection) -> list[dict]:
+    """Flag a proven internal HTTP call with no literal policy on its source symbol.
+
+    Absence from the static model is deliberately not treated as absence at runtime:
+    Spring or client defaults may be configured elsewhere. This is a narrow review
+    signal that points to the exact boundary that needs verification.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT call.service_id, call.source, call.target_service,
+                  call.target_method, call.target_path,
+                  call.file_path, call.start_line, call.end_line
+           FROM static_service_calls call
+           WHERE call.protocol = 'http'
+             AND NOT EXISTS (
+                 SELECT 1 FROM static_resilience_policies policy
+                 WHERE policy.service_id = call.service_id
+                   AND policy.source = call.source
+             )
+           ORDER BY call.service_id, call.source, call.target_service,
+                    call.target_method, call.target_path, call.file_path, call.start_line""",
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        caller = names[row["service_id"]]
+        target = f"{row['target_method'] or 'HTTP'} {row['target_path'] or '/'}"
+        findings.append({
+            "kind": "possible_missing_http_resilience_policy", "severity": "info",
+            "services": [caller],
+            "reason": (
+                f"{row['source']} calls internal service {row['target_service']} ({target}) "
+                "without a source-proven literal timeout or retry policy."
+            ),
+            "detail": {
+                "caller": {"service": caller, "symbol": row["source"]},
+                "target": {
+                    "service": row["target_service"], "method": row["target_method"],
+                    "path": row["target_path"],
+                },
+                "confidence": 0.5,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": [
+                    "Timeouts or retries may be configured globally, by a client factory, or outside the indexed source.",
+                    "Static analysis cannot establish whether retrying this operation is safe or idempotent.",
+                ],
+                "remediation": [
+                    "Review the client boundary and document or declare an appropriate timeout.",
+                    "Add retries only when the downstream operation is safe to repeat or protected by an idempotency key.",
+                ],
+            },
+        })
+    return findings
+
+
 def find_unmapped_downstream_errors(conn: sqlite3.Connection) -> list[dict]:
     """Surface internal HTTP calls whose downstream 4xx has no known caller mapping.
 
@@ -1091,6 +1145,7 @@ _DETECTORS = (
     find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects, find_error_semantics_lost,
+    find_static_http_calls_without_resilience_policy,
     find_unmapped_downstream_errors,
     find_overbroad_exception_handlers,
     find_message_consumers_without_recovery_policy,

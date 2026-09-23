@@ -12,10 +12,12 @@ from orbitkb.analysis.models import (
     ErrorContract,
     Evidence,
     FlowEdge,
+    ResiliencePolicy,
     StaticServiceCall,
 )
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import architecture as architecture_repo
 from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
@@ -28,7 +30,9 @@ from orbitkb.generation.architecture import (
     find_overbroad_exception_handlers,
     find_read_entrypoint_side_effects,
     find_shared_database,
+    find_static_http_calls_without_resilience_policy,
     find_unmapped_downstream_errors,
+    recompute_architecture_view,
 )
 
 EVIDENCE = [{"file": "main.py", "start_line": 1, "end_line": 5}]
@@ -220,6 +224,40 @@ def test_unmapped_downstream_error_uses_a_proven_feign_client_call(tmp_path: Pat
         "method": "POST", "path": "/reservations",
     }
     assert findings[0]["detail"]["confidence"] == 0.6
+
+
+def test_http_resilience_finding_disappears_when_a_literal_source_policy_is_present(tmp_path: Path):
+    conn = open_db(tmp_path / "http-resilience.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    call = StaticServiceCall(
+        source="CheckoutService.checkout", target_service="inventory", protocol="http",
+        target_method="POST", target_path="/reservations", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, checkout, AnalysisResult(static_service_calls=[call]))
+
+    findings = find_static_http_calls_without_resilience_policy(conn)
+
+    assert _kinds(findings) == {"possible_missing_http_resilience_policy"}
+    assert findings[0]["detail"]["caller"] == {
+        "service": "checkout", "symbol": "CheckoutService.checkout",
+    }
+    assert findings[0]["detail"]["target"] == {
+        "service": "inventory", "method": "POST", "path": "/reservations",
+    }
+    run_id = recompute_architecture_view(conn)
+    assert {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    } == {"possible_missing_http_resilience_policy"}
+
+    policy = ResiliencePolicy(
+        source="CheckoutService.checkout", kind="timeout", mechanism="reactor",
+        value=2_000, unit="milliseconds", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, checkout, AnalysisResult(static_service_calls=[call], resilience_policies=[policy]),
+    )
+
+    assert find_static_http_calls_without_resilience_policy(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):
