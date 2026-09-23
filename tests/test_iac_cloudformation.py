@@ -79,3 +79,68 @@ def test_template_without_resources_key_returns_empty(tmp_path: Path):
     template.write_text("AWSTemplateFormatVersion: '2010-09-09'\n")
 
     assert parse_cloudformation_file(template) == []
+
+
+def test_sqs_queue_with_redrive_policy_tracks_presence(tmp_path: Path):
+    template = tmp_path / "template.yaml"
+    template.write_text(
+        "Resources:\n"
+        "  OrdersQueue:\n"
+        "    Type: AWS::SQS::Queue\n"
+        "    Properties:\n"
+        "      QueueName: orders-queue\n"
+        "      RedrivePolicy:\n"
+        "        deadLetterTargetArn: !GetAtt DLQ.Arn\n"
+        "        maxReceiveCount: 5\n"
+    )
+
+    resources = parse_cloudformation_file(template)
+
+    assert resources[0].attributes == {"RedrivePolicy": True}
+
+
+def test_sqs_queue_without_redrive_policy_has_no_tracked_attributes(tmp_path: Path):
+    template = tmp_path / "template.yaml"
+    template.write_text(
+        "Resources:\n"
+        "  OrdersQueue:\n"
+        "    Type: AWS::SQS::Queue\n"
+        "    Properties:\n"
+        "      QueueName: orders-queue\n"
+    )
+
+    resources = parse_cloudformation_file(template)
+
+    assert resources[0].attributes == {}
+
+
+def test_s3_bucket_tracks_literal_access_control_value(tmp_path: Path):
+    template = tmp_path / "template.yaml"
+    template.write_text(
+        "Resources:\n"
+        "  AssetsBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      BucketName: my-assets-bucket\n"
+        "      AccessControl: PublicRead\n"
+    )
+
+    resources = parse_cloudformation_file(template)
+
+    assert resources[0].attributes == {"AccessControl": "PublicRead"}
+
+
+def test_s3_bucket_with_intrinsic_access_control_does_not_track_it(tmp_path: Path):
+    template = tmp_path / "template.yaml"
+    template.write_text(
+        "Resources:\n"
+        "  AssetsBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      BucketName: my-assets-bucket\n"
+        "      AccessControl: !Ref BucketAclParam\n"
+    )
+
+    resources = parse_cloudformation_file(template)
+
+    assert resources[0].attributes == {}

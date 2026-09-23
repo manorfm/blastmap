@@ -143,8 +143,8 @@ CREATE TABLE IF NOT EXISTS static_message_contracts (
 CREATE TABLE IF NOT EXISTS static_cloud_facts (
     id             INTEGER PRIMARY KEY,
     service_id     INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-    provider       TEXT NOT NULL CHECK (provider IN ('aws', 'azure')),
-    resource_type  TEXT NOT NULL CHECK (resource_type IN ('queue', 'pubsub', 'event_bus', 'object_storage')),
+    provider       TEXT NOT NULL CHECK (provider IN ('aws', 'azure', 'gcp')),
+    resource_type  TEXT NOT NULL CHECK (resource_type IN ('queue', 'pubsub', 'event_bus', 'object_storage', 'stream')),
     service_name   TEXT NOT NULL,
     operation      TEXT NOT NULL,
     operation_kind TEXT NOT NULL CHECK (operation_kind IN ('publish', 'consume', 'read', 'write', 'admin')),
@@ -169,8 +169,8 @@ CREATE TABLE IF NOT EXISTS cloud_iac_resources (
     id                  INTEGER PRIMARY KEY,
     repository_id       INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
     service_id          INTEGER REFERENCES services(id) ON DELETE SET NULL,
-    provider            TEXT NOT NULL CHECK (provider IN ('aws', 'azure')),
-    resource_type       TEXT NOT NULL CHECK (resource_type IN ('queue', 'pubsub', 'event_bus', 'object_storage')),
+    provider            TEXT NOT NULL CHECK (provider IN ('aws', 'azure', 'gcp')),
+    resource_type       TEXT NOT NULL CHECK (resource_type IN ('queue', 'pubsub', 'event_bus', 'object_storage', 'stream')),
     iac_resource_type   TEXT NOT NULL,
     logical_name        TEXT NOT NULL,
     physical_name       TEXT,
@@ -179,7 +179,12 @@ CREATE TABLE IF NOT EXISTS cloud_iac_resources (
     file_path           TEXT NOT NULL,
     start_line          INTEGER NOT NULL,
     end_line            INTEGER NOT NULL,
-    updated_at          TEXT NOT NULL
+    updated_at          TEXT NOT NULL,
+    -- JSON object of a small, curated set of literal attributes worth tracking
+    -- per resource type (see cloud_taxonomy.IAC_PRESENCE_ATTRIBUTES/
+    -- IAC_VALUE_ATTRIBUTES) — bool for presence-only attributes, string for
+    -- value-matters ones. One flexible column instead of a new one per smell.
+    attributes_json     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_iac_resources_repository ON cloud_iac_resources(repository_id);
 CREATE INDEX IF NOT EXISTS idx_cloud_iac_resources_service ON cloud_iac_resources(service_id);

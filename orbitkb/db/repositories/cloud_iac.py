@@ -3,6 +3,7 @@ whole repository — see orbitkb/iac/scanner.py, which produces the
 `IacResource` records this replaces wholesale on every `orbitkb index`."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from orbitkb.db.repositories import services as services_repo
@@ -28,13 +29,14 @@ def replace_iac_resources(
             repository_id, service_id, resource.provider, resource.resource_type,
             resource.iac_resource_type, resource.logical_name, resource.physical_name,
             resource.source_format, resource.confidence, resource.file_path,
-            resource.start_line, resource.end_line, timestamp,
+            resource.start_line, resource.end_line, timestamp, json.dumps(resource.attributes),
         ))
     conn.executemany(
         """INSERT INTO cloud_iac_resources
            (repository_id, service_id, provider, resource_type, iac_resource_type, logical_name,
-            physical_name, source_format, confidence, file_path, start_line, end_line, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            physical_name, source_format, confidence, file_path, start_line, end_line, updated_at,
+            attributes_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()

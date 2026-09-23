@@ -100,3 +100,61 @@ def test_malformed_file_returns_no_resources_instead_of_raising(tmp_path: Path):
     tf.write_text('resource "aws_sqs_queue" "orders" {\n  name = \n')
 
     assert parse_terraform_file(tf) == []
+
+
+def test_sqs_queue_with_redrive_policy_tracks_presence(tmp_path: Path):
+    tf = tmp_path / "main.tf"
+    tf.write_text(
+        'resource "aws_sqs_queue" "orders" {\n'
+        '  name = "orders-queue"\n'
+        "  redrive_policy = jsonencode({\n"
+        "    deadLetterTargetArn = aws_sqs_queue.dlq.arn\n"
+        "    maxReceiveCount     = 5\n"
+        "  })\n"
+        "}\n"
+    )
+
+    resources = parse_terraform_file(tf)
+
+    assert resources[0].attributes == {"redrive_policy": True}
+
+
+def test_sqs_queue_without_redrive_policy_has_no_tracked_attributes(tmp_path: Path):
+    tf = tmp_path / "main.tf"
+    tf.write_text(
+        'resource "aws_sqs_queue" "orders" {\n'
+        '  name = "orders-queue"\n'
+        "}\n"
+    )
+
+    resources = parse_terraform_file(tf)
+
+    assert resources[0].attributes == {}
+
+
+def test_s3_bucket_tracks_literal_acl_value(tmp_path: Path):
+    tf = tmp_path / "main.tf"
+    tf.write_text(
+        'resource "aws_s3_bucket" "assets" {\n'
+        '  bucket = "my-assets-bucket"\n'
+        '  acl    = "public-read"\n'
+        "}\n"
+    )
+
+    resources = parse_terraform_file(tf)
+
+    assert resources[0].attributes == {"acl": "public-read"}
+
+
+def test_s3_bucket_with_interpolated_acl_does_not_track_it(tmp_path: Path):
+    tf = tmp_path / "main.tf"
+    tf.write_text(
+        'resource "aws_s3_bucket" "assets" {\n'
+        '  bucket = "my-assets-bucket"\n'
+        "  acl    = local.bucket_acl\n"
+        "}\n"
+    )
+
+    resources = parse_terraform_file(tf)
+
+    assert resources[0].attributes == {}

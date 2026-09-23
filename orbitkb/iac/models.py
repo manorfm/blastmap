@@ -4,7 +4,7 @@ from its own format's structured parse into the same fact shape, instead of
 each format inventing its own return type."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -24,3 +24,8 @@ class IacResource:
     # one candidate matches. None means "belongs to the repository, ownership
     # not resolvable" — never a guess between multiple candidates.
     matched_service_name: str | None = None
+    # A small, curated set of literal attributes worth tracking for smells
+    # (see cloud_taxonomy.IAC_PRESENCE_ATTRIBUTES/IAC_VALUE_ATTRIBUTES) — bool
+    # for presence-only attributes, str for value-matters ones. Empty when the
+    # resource type has none tracked, never a guessed/default-filled value.
+    attributes: dict[str, bool | str] = field(default_factory=dict)

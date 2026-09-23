@@ -49,11 +49,31 @@ def test_describe_cloud_dependencies_returns_static_facts_and_iac_resources(tmp_
     assert result["iac_resources"] == [{
         "provider": "aws", "resource_type": "queue", "iac_resource_type": "aws_sqs_queue",
         "logical_name": "orders", "physical_name": "orders-queue", "source_format": "terraform",
-        "confidence": "high",
+        "confidence": "high", "attributes": {},
         "evidence": {"file": "infra/main.tf", "start_line": 1, "end_line": 3},
     }]
     assert result["pagination"]["static_facts"]["total"] == 1
     assert result["pagination"]["iac_resources"]["total"] == 1
+
+
+def test_describe_cloud_dependencies_surfaces_tracked_attributes(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(
+        conn, "orders-service", "/tmp/shop/orders-service", "node-ts", repository_id=repository_id,
+    )
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [
+        IacResource(
+            provider="aws", resource_type="queue", iac_resource_type="aws_sqs_queue",
+            logical_name="orders", physical_name="orders-queue", source_format="terraform",
+            confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+            matched_service_name="orders-service", attributes={"redrive_policy": True},
+        ),
+    ])
+
+    result = queries.describe_cloud_dependencies(conn, "orders-service")
+
+    assert result["iac_resources"][0]["attributes"] == {"redrive_policy": True}
 
 
 def test_describe_cloud_dependencies_on_unknown_service_returns_error(tmp_path: Path):

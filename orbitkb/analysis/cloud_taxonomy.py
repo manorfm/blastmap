@@ -88,6 +88,25 @@ IAC_NAME_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "google_storage_bucket": ("name",),
 }
 
+# Attribute(s) whose mere presence on a declaration is tracked, value never
+# inspected — `redrive_policy` is almost always a `jsonencode(...)` call in
+# real Terraform, not a literal string, so its *content* can't be resolved
+# the way IAC_NAME_ATTRIBUTES resolves a name; only "was a dead-letter policy
+# configured at all" is asked for the DLQ smell, and the key's presence alone
+# answers that.
+IAC_PRESENCE_ATTRIBUTES: dict[str, tuple[str, ...]] = {
+    "aws_sqs_queue": ("redrive_policy",),
+    "AWS::SQS::Queue": ("RedrivePolicy",),
+}
+
+# Attribute(s) whose literal value matters, same "only literal, interpolation
+# discarded" rule IAC_NAME_ATTRIBUTES already uses for physical_name.
+IAC_VALUE_ATTRIBUTES: dict[str, tuple[str, ...]] = {
+    "aws_s3_bucket": ("acl",),
+    "AWS::S3::Bucket": ("AccessControl",),
+    "azurerm_storage_container": ("container_access_type",),
+}
+
 # operation_kind is one of: 'publish' | 'consume' | 'read' | 'write' | 'admin'.
 
 # AWS SDK for JavaScript v3 Command class name -> (operation_kind, canonical

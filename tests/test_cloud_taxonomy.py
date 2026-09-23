@@ -20,7 +20,9 @@ from orbitkb.analysis.cloud_taxonomy import (
     GCS_METHOD_TABLE,
     GO_CLOUD_IMPORT_PATHS,
     IAC_NAME_ATTRIBUTES,
+    IAC_PRESENCE_ATTRIBUTES,
     IAC_RESOURCE_TYPE_TABLE,
+    IAC_VALUE_ATTRIBUTES,
     is_unresolved_literal,
     otel_messaging_system,
 )
@@ -201,3 +203,14 @@ def test_azure_servicebus_and_eventhub_method_tables_exist():
     assert AZURE_SERVICEBUS_METHOD_TABLE["sendMessages"] == ("publish", "SendMessages")
     assert AZURE_SERVICEBUS_METHOD_TABLE["receiveMessages"] == ("consume", "ReceiveMessages")
     assert AZURE_EVENTHUB_METHOD_TABLE["sendBatch"] == ("publish", "SendBatch")
+
+
+def test_iac_presence_attributes_track_dlq_configuration_key_only():
+    assert IAC_PRESENCE_ATTRIBUTES["aws_sqs_queue"] == ("redrive_policy",)
+    assert IAC_PRESENCE_ATTRIBUTES["AWS::SQS::Queue"] == ("RedrivePolicy",)
+
+
+def test_iac_value_attributes_track_public_access_controls():
+    assert IAC_VALUE_ATTRIBUTES["aws_s3_bucket"] == ("acl",)
+    assert IAC_VALUE_ATTRIBUTES["AWS::S3::Bucket"] == ("AccessControl",)
+    assert IAC_VALUE_ATTRIBUTES["azurerm_storage_container"] == ("container_access_type",)

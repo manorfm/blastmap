@@ -451,7 +451,7 @@ def describe_cloud_dependencies(
                 "provider": r["provider"], "resource_type": r["resource_type"],
                 "iac_resource_type": r["iac_resource_type"], "logical_name": r["logical_name"],
                 "physical_name": r["physical_name"], "source_format": r["source_format"],
-                "confidence": r["confidence"],
+                "confidence": r["confidence"], "attributes": json.loads(r["attributes_json"] or "{}"),
                 "evidence": {"file": r["file_path"], "start_line": r["start_line"], "end_line": r["end_line"]},
             }
             for r in iac_resources

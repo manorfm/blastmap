@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from orbitkb.db.connection import open_db
@@ -64,3 +65,29 @@ def test_list_iac_resources_for_service_filters_by_matched_service(tmp_path: Pat
     rows = cloud_iac_repo.list_iac_resources_for_service(conn, service_id)
     assert len(rows) == 1
     assert rows[0]["service_id"] == service_id
+
+
+def test_attributes_are_persisted_as_json(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    resource = IacResource(
+        provider="aws", resource_type="queue", iac_resource_type="aws_sqs_queue",
+        logical_name="orders", physical_name="orders-queue", source_format="terraform",
+        confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+        attributes={"redrive_policy": True, "acl": "public-read"},
+    )
+
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [resource])
+
+    row = cloud_iac_repo.list_iac_resources_for_repository(conn, repository_id)[0]
+    assert json.loads(row["attributes_json"]) == {"redrive_policy": True, "acl": "public-read"}
+
+
+def test_attributes_default_to_an_empty_json_object(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [_resource()])
+
+    row = cloud_iac_repo.list_iac_resources_for_repository(conn, repository_id)[0]
+    assert json.loads(row["attributes_json"]) == {}

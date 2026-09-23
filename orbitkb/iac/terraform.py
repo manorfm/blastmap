@@ -19,7 +19,9 @@ from lark.exceptions import LarkError
 
 from orbitkb.analysis.cloud_taxonomy import (
     IAC_NAME_ATTRIBUTES,
+    IAC_PRESENCE_ATTRIBUTES,
     IAC_RESOURCE_TYPE_TABLE,
+    IAC_VALUE_ATTRIBUTES,
     is_unresolved_literal,
 )
 from orbitkb.iac.evidence import find_line
@@ -42,6 +44,20 @@ def _resolve_physical_name(attrs: dict, iac_resource_type: str) -> str | None:
             continue
         return value
     return None
+
+
+def _resolve_attributes(attrs: dict, iac_resource_type: str) -> dict[str, bool | str]:
+    """Presence-only and value-matters tracked attributes for one resource,
+    same "only literal" posture as _resolve_physical_name for the latter."""
+    resolved: dict[str, bool | str] = {}
+    for attr_name in IAC_PRESENCE_ATTRIBUTES.get(iac_resource_type, ()):
+        if attr_name in attrs:
+            resolved[attr_name] = True
+    for attr_name in IAC_VALUE_ATTRIBUTES.get(iac_resource_type, ()):
+        value = _unquote(attrs.get(attr_name))
+        if value is not None and not is_unresolved_literal(value):
+            resolved[attr_name] = value
+    return resolved
 
 
 def _declaration_pattern(iac_resource_type: str, logical_name: str) -> re.Pattern[str]:
@@ -85,5 +101,6 @@ def parse_terraform_file(path: Path) -> list[IacResource]:
                     file_path=str(path),
                     start_line=line,
                     end_line=line,
+                    attributes=_resolve_attributes(attrs, iac_resource_type),
                 ))
     return resources
