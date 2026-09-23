@@ -445,6 +445,67 @@ def find_overbroad_exception_handlers(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_error_semantics_lost(conn: sqlite3.Connection) -> list[dict]:
+    """Find a source-proven client/domain error degraded to an HTTP 5xx mapping.
+
+    Both sides of the finding must refer to the same explicit local exception type.
+    This is intentionally intra-service: connecting an error across services also
+    requires a resolved client-to-endpoint relation and is a later capability.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT raised.service_id, raised.source AS raised_source,
+                  raised.error_kind AS raised_kind, raised.internal_type,
+                  raised.file_path AS raised_file_path, raised.start_line AS raised_start_line,
+                  raised.end_line AS raised_end_line, mapped.source AS mapped_source,
+                  mapped.protocol AS mapped_protocol, mapped.transport_code AS mapped_code,
+                  mapped.file_path AS mapped_file_path, mapped.start_line AS mapped_start_line,
+                  mapped.end_line AS mapped_end_line
+           FROM static_error_contracts raised
+           JOIN static_error_contracts mapped
+             ON mapped.service_id = raised.service_id
+            AND mapped.internal_type = raised.internal_type
+           WHERE raised.role = 'raises'
+             AND mapped.role = 'maps'
+             AND raised.internal_type IS NOT NULL
+             AND raised.error_kind IN ('authorization', 'conflict', 'not_found', 'rate_limit', 'validation')
+             AND mapped.protocol = 'http'
+             AND CAST(mapped.transport_code AS INTEGER) BETWEEN 500 AND 599
+           ORDER BY raised.service_id, raised.internal_type, raised.source, mapped.source""",
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        findings.append({
+            "kind": "possible_error_semantics_lost", "severity": "warning",
+            "services": [names[row["service_id"]]],
+            "reason": (
+                f"{row['raised_source']} raises {row['raised_kind']} error '{row['internal_type']}', "
+                f"but {row['mapped_source']} maps the same type to HTTP {row['mapped_code']}."
+            ),
+            "detail": {
+                "error_type": row["internal_type"], "origin": {
+                    "symbol": row["raised_source"], "kind": row["raised_kind"],
+                },
+                "mapping": {
+                    "symbol": row["mapped_source"], "protocol": row["mapped_protocol"],
+                    "code": row["mapped_code"],
+                },
+                "confidence": 0.85,
+                "evidence": [
+                    {"file": row["raised_file_path"], "start_line": row["raised_start_line"], "end_line": row["raised_end_line"]},
+                    {"file": row["mapped_file_path"], "start_line": row["mapped_start_line"], "end_line": row["mapped_end_line"]},
+                ],
+                "unknowns": [
+                    "Static analysis cannot establish whether a gateway or an external contract intentionally requires this 5xx translation.",
+                ],
+                "remediation": [
+                    "Preserve the documented client/domain error status, or document why this error must become a server failure.",
+                ],
+            },
+        })
+    return findings
+
+
 def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> list[dict]:
     """Flag RabbitMQ consumers without a source-proven recovery mechanism.
 
@@ -817,7 +878,7 @@ def find_missing_bucket_versioning(conn: sqlite3.Connection) -> list[dict]:
 _DETECTORS = (
     find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
-    find_flow_hypotheses, find_read_entrypoint_side_effects,
+    find_flow_hypotheses, find_read_entrypoint_side_effects, find_error_semantics_lost,
     find_overbroad_exception_handlers,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,

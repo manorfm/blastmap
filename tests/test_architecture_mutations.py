@@ -21,6 +21,7 @@ from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import (
     find_cycles,
+    find_error_semantics_lost,
     find_fan_imbalance,
     find_message_consumers_without_recovery_policy,
     find_overbroad_exception_handlers,
@@ -126,6 +127,33 @@ def test_overbroad_exception_handler_disappears_when_the_mapping_becomes_specifi
     flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[specific]))
 
     assert find_overbroad_exception_handlers(conn) == []
+
+
+def test_error_semantics_lost_disappears_when_a_conflict_is_mapped_to_409(tmp_path: Path):
+    conn = open_db(tmp_path / "error-semantics.db")
+    service = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
+    raised = ErrorContract(
+        source="StockReservation.reserve", role="raises", error_kind="conflict",
+        internal_type="InsufficientStockException", protocol="internal", transport_code=None,
+        public_code=None, exposes_internal_detail=False, retryability="not_retryable", evidence=STATIC_EVIDENCE,
+    )
+    degraded = ErrorContract(
+        source="ApiExceptionHandler.handleStock", role="maps", error_kind="unexpected",
+        internal_type="InsufficientStockException", protocol="http", transport_code="500",
+        public_code=None, exposes_internal_detail=False, retryability="unknown", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[raised, degraded]))
+
+    assert _kinds(find_error_semantics_lost(conn)) == {"possible_error_semantics_lost"}
+
+    preserved = ErrorContract(
+        source="ApiExceptionHandler.handleStock", role="maps", error_kind="conflict",
+        internal_type="InsufficientStockException", protocol="http", transport_code="409",
+        public_code=None, exposes_internal_detail=False, retryability="not_retryable", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[raised, preserved]))
+
+    assert find_error_semantics_lost(conn) == []
 
 
 def _replace_calls(conn, service_id: int, api_id: int, targets: list[str]) -> None:
