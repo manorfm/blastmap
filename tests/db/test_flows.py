@@ -1,5 +1,6 @@
 from orbitkb.analysis.models import (
     AnalysisResult,
+    CloudFact,
     EntryPoint,
     Evidence,
     FlowEdge,
@@ -46,3 +47,25 @@ def test_static_message_contracts_are_replaced_with_the_flow_snapshot(tmp_path):
         "message_version": "1",
         "file_path": "resolvers.ts", "start_line": 10, "end_line": 10,
     }]
+
+
+def test_static_cloud_facts_are_replaced_with_the_flow_snapshot(tmp_path):
+    conn = open_db(tmp_path / "cloud.db")
+    service_id = services.ensure_service(conn, "orders", "/repos/orders", "node-ts")
+    evidence = Evidence("publisher.ts", 4, 4)
+
+    flows.replace_analysis(
+        conn, service_id, AnalysisResult(cloud_facts=[
+            CloudFact("aws", "queue", "sqs", "SendMessage", "publish", "aws-sdk-js-v3", None, evidence),
+        ]),
+    )
+
+    facts = flows.list_static_cloud_facts(conn, service_id)
+    assert [dict(row) for row in facts] == [{
+        "provider": "aws", "resource_type": "queue", "service_name": "sqs",
+        "operation": "SendMessage", "operation_kind": "publish", "sdk": "aws-sdk-js-v3",
+        "target_name": None, "file_path": "publisher.ts", "start_line": 4, "end_line": 4,
+    }]
+
+    flows.replace_analysis(conn, service_id, AnalysisResult())
+    assert flows.list_static_cloud_facts(conn, service_id) == []

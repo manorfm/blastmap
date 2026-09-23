@@ -177,6 +177,27 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.describe_messages(conn, service, limit, offset, repository)
 
     @mcp.tool()
+    def describe_cloud_dependencies(
+        service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
+    ) -> dict:
+        """What one microservice deterministically talks to in the cloud (AWS
+        SQS/SNS/S3/EventBridge, Azure Blob Storage): `static_facts` is every proven
+        SDK call site in its code (provider, service, operation, evidence — never a
+        keyword guess, only a locally-declared client/import actually constructed or
+        called), and `iac_resources` is what Terraform/CloudFormation/Kubernetes in
+        this repository declares and structurally attributes to this service. The
+        two are reported separately and never merged into one claim: code without a
+        matching declaration, or a declaration nothing in code references, are both
+        left for you to interpret, not resolved here — see find_architecture_smells
+        for a system-wide check of that gap. Capped at `limit` items per list
+        (default 50) starting at `offset`; each list's own `total`/`truncated` in
+        `pagination` tells you whether to page further. Call this before changing
+        anything that publishes, consumes, reads or writes a cloud resource. Pass
+        repository when the service name is duplicated."""
+        with closing(_conn()) as conn:
+            return queries.describe_cloud_dependencies(conn, service, limit, offset, repository)
+
+    @mcp.tool()
     def search(query: str, repository: str | None = None) -> dict:
         """Keyword search across services, APIs, persistence entities and message
         relationships (SQLite FTS5, not semantic). Optionally pass repository to

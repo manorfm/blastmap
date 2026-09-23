@@ -12,6 +12,7 @@ from orbitkb.analysis.smells import find_entrypoint_smells
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import architecture as architecture_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
+from orbitkb.db.repositories import cloud_iac as cloud_iac_repo
 from orbitkb.db.repositories import components as components_repo
 from orbitkb.db.repositories import context_telemetry as context_telemetry_repo
 from orbitkb.db.repositories import flows as flows_repo
@@ -417,6 +418,45 @@ def describe_messages(
             for item in flows_repo.list_static_message_contracts(conn, row["id"])
         ],
         **page,
+    }
+
+
+def describe_cloud_dependencies(
+    conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
+    repository: str | None = None,
+) -> dict:
+    error = _validate_pagination(limit, offset)
+    if error:
+        return {"error": error}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
+    static_facts, facts_page = _paginate(flows_repo.list_static_cloud_facts(conn, row["id"]), limit, offset)
+    iac_resources, iac_page = _paginate(
+        cloud_iac_repo.list_iac_resources_for_service(conn, row["id"]), limit, offset,
+    )
+    return {
+        "service": row["name"], "repository": row["repository_name"],
+        "static_facts": [
+            {
+                "provider": f["provider"], "resource_type": f["resource_type"],
+                "service_name": f["service_name"], "operation": f["operation"],
+                "operation_kind": f["operation_kind"], "sdk": f["sdk"], "target_name": f["target_name"],
+                "evidence": {"file": f["file_path"], "start_line": f["start_line"], "end_line": f["end_line"]},
+            }
+            for f in static_facts
+        ],
+        "iac_resources": [
+            {
+                "provider": r["provider"], "resource_type": r["resource_type"],
+                "iac_resource_type": r["iac_resource_type"], "logical_name": r["logical_name"],
+                "physical_name": r["physical_name"], "source_format": r["source_format"],
+                "confidence": r["confidence"],
+                "evidence": {"file": r["file_path"], "start_line": r["start_line"], "end_line": r["end_line"]},
+            }
+            for r in iac_resources
+        ],
+        "pagination": {"limit": limit, "offset": offset, "static_facts": facts_page, "iac_resources": iac_page},
     }
 
 

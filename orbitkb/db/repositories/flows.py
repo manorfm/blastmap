@@ -15,6 +15,7 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
     conn.execute("DELETE FROM entrypoints WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_message_contracts WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_persistence_facts WHERE service_id = ?", (service_id,))
+    conn.execute("DELETE FROM static_cloud_facts WHERE service_id = ?", (service_id,))
     indexed_at = now()
     entrypoint_ids: dict[str, int] = {}
     for entry in analysis.entrypoints:
@@ -67,6 +68,16 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
                (service_id, name, kind, owner, file_path, start_line, end_line, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (service_id, fact.name, fact.kind, fact.owner, fact.evidence.file_path,
+             fact.evidence.start_line, fact.evidence.end_line, indexed_at),
+        )
+    for fact in analysis.cloud_facts:
+        conn.execute(
+            """INSERT INTO static_cloud_facts
+               (service_id, provider, resource_type, service_name, operation, operation_kind,
+                sdk, target_name, file_path, start_line, end_line, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (service_id, fact.provider, fact.resource_type, fact.service_name, fact.operation,
+             fact.operation_kind, fact.sdk, fact.target_name, fact.evidence.file_path,
              fact.evidence.start_line, fact.evidence.end_line, indexed_at),
         )
 
@@ -125,6 +136,15 @@ def list_flow_boundaries(conn: sqlite3.Connection, service_id: int, symbols: set
 def list_static_persistence_facts(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT name, kind, owner, file_path, start_line, end_line FROM static_persistence_facts WHERE service_id = ? ORDER BY name",
+        (service_id,),
+    ).fetchall()
+
+
+def list_static_cloud_facts(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT provider, resource_type, service_name, operation, operation_kind, sdk, target_name,
+                  file_path, start_line, end_line
+           FROM static_cloud_facts WHERE service_id = ? ORDER BY service_name, operation""",
         (service_id,),
     ).fetchall()
 
