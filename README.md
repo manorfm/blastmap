@@ -163,6 +163,12 @@ the client boundary, not evidence that production has no protection: defaults an
 client configuration may live outside indexed source. Retrying non-idempotent work is
 not recommended without an idempotency guarantee.
 
+When a source-proven retry policy and a source-proven `POST` or `PATCH` call occur in
+the same Spring symbol, OrbitKB also emits a retry/idempotency review signal. It does
+not assume the request is unsafe: an idempotency key or server-side deduplication may
+exist outside indexed source. It instead directs the agent to validate repeat safety
+before preserving or expanding retries.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,

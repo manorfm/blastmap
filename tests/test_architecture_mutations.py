@@ -29,6 +29,7 @@ from orbitkb.generation.architecture import (
     find_message_consumers_without_recovery_policy,
     find_overbroad_exception_handlers,
     find_read_entrypoint_side_effects,
+    find_retries_on_potentially_non_idempotent_http_calls,
     find_shared_database,
     find_static_http_calls_without_resilience_policy,
     find_unmapped_downstream_errors,
@@ -258,6 +259,44 @@ def test_http_resilience_finding_disappears_when_a_literal_source_policy_is_pres
     )
 
     assert find_static_http_calls_without_resilience_policy(conn) == []
+
+
+def test_retry_risk_finding_disappears_when_the_http_method_is_idempotent(tmp_path: Path):
+    conn = open_db(tmp_path / "retry-idempotency.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    retry = ResiliencePolicy(
+        source="CheckoutService.reserve", kind="retry", mechanism="reactor",
+        value=2, unit="retries", evidence=STATIC_EVIDENCE,
+    )
+    post = StaticServiceCall(
+        source="CheckoutService.reserve", target_service="inventory", protocol="http",
+        target_method="POST", target_path="/reservations", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, checkout, AnalysisResult(static_service_calls=[post], resilience_policies=[retry]),
+    )
+
+    findings = find_retries_on_potentially_non_idempotent_http_calls(conn)
+
+    assert _kinds(findings) == {"possible_retry_on_non_idempotent_http_call"}
+    assert findings[0]["detail"]["retry_policies"] == [{
+        "mechanism": "reactor", "value": 2, "unit": "retries",
+    }]
+    assert len(findings[0]["detail"]["evidence"]) == 2
+    run_id = recompute_architecture_view(conn)
+    assert {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    } == {"possible_retry_on_non_idempotent_http_call"}
+
+    put = StaticServiceCall(
+        source="CheckoutService.reserve", target_service="inventory", protocol="http",
+        target_method="PUT", target_path="/reservations/1", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, checkout, AnalysisResult(static_service_calls=[put], resilience_policies=[retry]),
+    )
+
+    assert find_retries_on_potentially_non_idempotent_http_calls(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

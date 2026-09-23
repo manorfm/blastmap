@@ -230,6 +230,12 @@ not claim runtime protection is absent: defaults, client factories and configura
 may be outside indexed source. Its remediation explicitly asks for retry safety or an
 idempotency guarantee before adding retries.
 
+`possible_retry_on_non_idempotent_http_call` combines a literal retry policy with a
+source-proven `POST` or `PATCH` call in the same Java/Kotlin Spring symbol. It includes
+the precise retry policies and both policy/call evidence. It is a repeat-safety review,
+not proof that an operation lacks an idempotency key or server-side de-duplication;
+those controls may be configured or implemented outside indexed source.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally

@@ -21,6 +21,7 @@ from orbitkb.db.repositories import flows as flows_repo
 FAN_THRESHOLD = 4
 READ_ENTRYPOINT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 BROAD_EXCEPTION_TYPES = frozenset({"exception", "throwable", "error", "runtimeexception"})
+POTENTIALLY_NON_IDEMPOTENT_HTTP_METHODS = frozenset({"POST", "PATCH"})
 
 
 def _internal_edges(conn: sqlite3.Connection) -> list[tuple[int, int]]:
@@ -555,6 +556,76 @@ def find_static_http_calls_without_resilience_policy(conn: sqlite3.Connection) -
                 "remediation": [
                     "Review the client boundary and document or declare an appropriate timeout.",
                     "Add retries only when the downstream operation is safe to repeat or protected by an idempotency key.",
+                ],
+            },
+        })
+    return findings
+
+
+def find_retries_on_potentially_non_idempotent_http_calls(conn: sqlite3.Connection) -> list[dict]:
+    """Surface literal retries on POST/PATCH calls for an idempotency review.
+
+    POST and PATCH are not proof of unsafe repetition: an API may enforce an
+    idempotency key or server-side de-duplication. The detector therefore reports
+    the precise static combination and preserves that uncertainty for review.
+    """
+    names = _service_names(conn)
+    methods = tuple(sorted(POTENTIALLY_NON_IDEMPOTENT_HTTP_METHODS))
+    placeholders = ", ".join("?" for _ in methods)
+    calls = conn.execute(
+        """SELECT service_id, source, target_service, target_method, target_path,
+                  file_path, start_line, end_line
+           FROM static_service_calls
+           WHERE protocol = 'http' AND target_method IN (""" + placeholders + """ )
+           ORDER BY service_id, source, target_service, target_method, target_path,
+                    file_path, start_line""",
+        methods,
+    ).fetchall()
+    policies_by_source: dict[tuple[int, str], list[sqlite3.Row]] = defaultdict(list)
+    for policy in conn.execute(
+        """SELECT service_id, source, mechanism, value, unit,
+                  file_path, start_line, end_line
+           FROM static_resilience_policies
+           WHERE kind = 'retry'
+           ORDER BY service_id, source, mechanism, value, unit, file_path, start_line""",
+    ).fetchall():
+        policies_by_source[(policy["service_id"], policy["source"])].append(policy)
+
+    findings: list[dict] = []
+    for call in calls:
+        policies = policies_by_source.get((call["service_id"], call["source"]))
+        if not policies:
+            continue
+        caller = names[call["service_id"]]
+        findings.append({
+            "kind": "possible_retry_on_non_idempotent_http_call", "severity": "warning",
+            "services": [caller],
+            "reason": (
+                f"{call['source']} declares retry and calls {call['target_method']} "
+                f"{call['target_service']}{call['target_path'] or '/'}; validate repeat safety."
+            ),
+            "detail": {
+                "caller": {"service": caller, "symbol": call["source"]},
+                "target": {
+                    "service": call["target_service"], "method": call["target_method"],
+                    "path": call["target_path"],
+                },
+                "retry_policies": [
+                    {"mechanism": policy["mechanism"], "value": policy["value"], "unit": policy["unit"]}
+                    for policy in policies
+                ],
+                "confidence": 0.65,
+                "evidence": [
+                    _edge_evidence(call),
+                    *[_edge_evidence(policy) for policy in policies],
+                ],
+                "unknowns": [
+                    "The target may use an idempotency key, request de-duplication or another repeat-safe contract outside the indexed source.",
+                    "A source-level retry declaration does not prove which branch or response category it retries at runtime.",
+                ],
+                "remediation": [
+                    "Confirm that repeating this POST or PATCH is safe before retaining retries.",
+                    "Use an idempotency key or documented server-side de-duplication when retrying can repeat a state change.",
                 ],
             },
         })
@@ -1146,6 +1217,7 @@ _DETECTORS = (
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects, find_error_semantics_lost,
     find_static_http_calls_without_resilience_policy,
+    find_retries_on_potentially_non_idempotent_http_calls,
     find_unmapped_downstream_errors,
     find_overbroad_exception_handlers,
     find_message_consumers_without_recovery_policy,
