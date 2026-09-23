@@ -107,6 +107,125 @@ def test_irrelevant_file_extensions_are_skipped(tmp_path: Path):
     assert detect_cloud_facts([tmp_path / "notes.md"], tmp_path) == []
 
 
+def test_java_field_declared_with_sdk_v2_client_type_is_detected(tmp_path: Path):
+    (tmp_path / "OrderPublisher.java").write_text(
+        "public class OrderPublisher {\n"
+        "    private final SqsClient sqsClient;\n\n"
+        "    void publish(String body) {\n"
+        "        sqsClient.sendMessage(SendMessageRequest.builder().build());\n"
+        "    }\n"
+        "}\n"
+    )
+
+    facts = detect_cloud_facts([tmp_path / "OrderPublisher.java"], tmp_path)
+
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact.provider == "aws"
+    assert fact.service_name == "sqs"
+    assert fact.operation == "SendMessage"
+    assert fact.sdk == "aws-sdk-java-v2"
+
+
+def test_java_field_declared_with_sdk_v1_client_type_is_detected(tmp_path: Path):
+    (tmp_path / "OrderPublisher.java").write_text(
+        "public class OrderPublisher {\n"
+        "    private AmazonSQSClient sqsClient;\n\n"
+        "    void publish(String body) {\n"
+        "        sqsClient.sendMessage(new SendMessageRequest());\n"
+        "    }\n"
+        "}\n"
+    )
+
+    facts = detect_cloud_facts([tmp_path / "OrderPublisher.java"], tmp_path)
+
+    assert len(facts) == 1
+    assert facts[0].sdk == "aws-sdk-java-v1"
+    assert facts[0].service_name == "sqs"
+
+
+def test_kotlin_field_declared_with_sdk_v2_client_type_is_detected(tmp_path: Path):
+    (tmp_path / "OrderPublisher.kt").write_text(
+        "class OrderPublisher(private val sqsClient: SqsClient) {\n"
+        "    fun publish(body: String) {\n"
+        "        sqsClient.sendMessage(SendMessageRequest.builder().build())\n"
+        "    }\n"
+        "}\n"
+    )
+
+    facts = detect_cloud_facts([tmp_path / "OrderPublisher.kt"], tmp_path)
+
+    assert len(facts) == 1
+    assert facts[0].service_name == "sqs"
+    assert facts[0].sdk == "aws-sdk-java-v2"
+
+
+def test_go_parameter_typed_as_sqs_client_is_detected(tmp_path: Path):
+    (tmp_path / "publisher.go").write_text(
+        "package publisher\n\n"
+        "func Publish(client *sqs.Client, body string) {\n"
+        "\tclient.SendMessage(ctx, &sqs.SendMessageInput{})\n"
+        "}\n"
+    )
+
+    facts = detect_cloud_facts([tmp_path / "publisher.go"], tmp_path)
+
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact.provider == "aws"
+    assert fact.service_name == "sqs"
+    assert fact.operation == "SendMessage"
+    assert fact.sdk == "aws-sdk-go-v2"
+
+
+def test_azure_blob_client_in_java_is_detected(tmp_path: Path):
+    (tmp_path / "AssetsUploader.java").write_text(
+        "public class AssetsUploader {\n"
+        "    private final BlobContainerClient containerClient;\n\n"
+        "    void upload(byte[] data) {\n"
+        "        containerClient.upload(data);\n"
+        "    }\n"
+        "}\n"
+    )
+
+    facts = detect_cloud_facts([tmp_path / "AssetsUploader.java"], tmp_path)
+
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact.provider == "azure"
+    assert fact.resource_type == "object_storage"
+    assert fact.service_name == "blob_storage"
+    assert fact.sdk == "azure-storage-blob"
+
+
+def test_azure_blob_client_in_go_is_detected(tmp_path: Path):
+    (tmp_path / "uploader.go").write_text(
+        "package uploader\n\n"
+        "func Upload(client *azblob.Client, data []byte) {\n"
+        "\tclient.upload(data)\n"
+        "}\n"
+    )
+
+    facts = detect_cloud_facts([tmp_path / "uploader.go"], tmp_path)
+
+    assert len(facts) == 1
+    assert facts[0].provider == "azure"
+    assert facts[0].sdk == "azure-storage-blob"
+
+
+def test_unrelated_java_field_type_is_ignored(tmp_path: Path):
+    (tmp_path / "Unrelated.java").write_text(
+        "public class Unrelated {\n"
+        "    private final String sqsClient;\n\n"
+        "    void publish() {\n"
+        "        sqsClient.sendMessage(\"x\");\n"
+        "    }\n"
+        "}\n"
+    )
+
+    assert detect_cloud_facts([tmp_path / "Unrelated.java"], tmp_path) == []
+
+
 def test_static_analysis_engine_surfaces_cloud_facts_for_node_ts(tmp_path: Path):
     (tmp_path / "publisher.ts").write_text(
         'import { SendMessageCommand } from "@aws-sdk/client-sqs";\n\n'
@@ -125,6 +244,36 @@ def test_static_analysis_engine_surfaces_cloud_facts_for_python(tmp_path: Path):
     )
 
     result = StaticAnalysisEngine().analyze(tmp_path, "python")
+
+    assert len(result.cloud_facts) == 1
+    assert result.cloud_facts[0].service_name == "sqs"
+
+
+def test_static_analysis_engine_surfaces_cloud_facts_for_jvm_spring(tmp_path: Path):
+    (tmp_path / "OrderPublisher.java").write_text(
+        "public class OrderPublisher {\n"
+        "    private final SqsClient sqsClient;\n\n"
+        "    void publish(String body) {\n"
+        "        sqsClient.sendMessage(SendMessageRequest.builder().build());\n"
+        "    }\n"
+        "}\n"
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert len(result.cloud_facts) == 1
+    assert result.cloud_facts[0].service_name == "sqs"
+
+
+def test_static_analysis_engine_surfaces_cloud_facts_for_go(tmp_path: Path):
+    (tmp_path / "publisher.go").write_text(
+        "package publisher\n\n"
+        "func Publish(client *sqs.Client, body string) {\n"
+        "\tclient.SendMessage(ctx, &sqs.SendMessageInput{})\n"
+        "}\n"
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
 
     assert len(result.cloud_facts) == 1
     assert result.cloud_facts[0].service_name == "sqs"

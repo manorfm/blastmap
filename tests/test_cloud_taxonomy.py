@@ -1,4 +1,5 @@
 from orbitkb.analysis.cloud_taxonomy import (
+    AWS_SDK_GO_V2_METHODS,
     AWS_SDK_JAVA_V1_TYPES,
     AWS_SDK_JAVA_V2_TYPES,
     AWS_SDK_JS_V3_COMMANDS,
@@ -72,6 +73,12 @@ def test_aws_sdk_method_table_covers_both_js_v2_and_boto3_casing():
     assert AWS_SDK_METHOD_TABLE["sendMessage"] == ("publish", "SendMessage")
     assert AWS_SDK_METHOD_TABLE["send_message"] == ("publish", "SendMessage")
     assert AWS_SDK_METHOD_TABLE["put_object"] == ("write", "PutObject")
+
+
+def test_go_sdk_v2_methods_are_derived_from_js_v3_commands():
+    assert AWS_SDK_GO_V2_METHODS["SendMessage"] == ("publish", "SendMessage")
+    assert AWS_SDK_GO_V2_METHODS["PutObject"] == ("write", "PutObject")
+    assert "SendMessageCommand" not in AWS_SDK_GO_V2_METHODS
 
 
 def test_java_sdk_type_tables_cover_both_generations():

@@ -97,6 +97,16 @@ AWS_SDK_JS_V3_MODULE_SERVICE: dict[str, str] = {
     "client-eventbridge": "eventbridge",
 }
 
+# AWS SDK for Go v2 method name -> (operation_kind, canonical operation). Go's
+# method names are already the bare PascalCase operation name (SendMessage,
+# PutObject, ...) — the same canonical names AWS_SDK_JS_V3_COMMANDS already
+# carries as each Command class's second tuple element, so this is derived
+# from it (stripping the "Command" suffix) instead of hand-typed again.
+AWS_SDK_GO_V2_METHODS: dict[str, tuple[str, str]] = {
+    class_name.removesuffix("Command"): value
+    for class_name, value in AWS_SDK_JS_V3_COMMANDS.items()
+}
+
 # AWS SDK for JavaScript v2 and boto3 share the same operation vocabulary, only
 # differing in casing convention (camelCase vs. snake_case) — one table, both
 # spellings, both resolving to the same canonical operation.

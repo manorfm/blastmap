@@ -21,13 +21,23 @@ import re
 from pathlib import Path
 
 from orbitkb.analysis.cloud_taxonomy import (
+    AWS_SDK_GO_V2_METHODS,
+    AWS_SDK_JAVA_V1_TYPES,
+    AWS_SDK_JAVA_V2_TYPES,
     AWS_SDK_JS_V3_COMMANDS,
     AWS_SDK_JS_V3_MODULE_SERVICE,
     AWS_SDK_METHOD_TABLE,
     AWS_SERVICE_RESOURCE_TYPE,
+    AZURE_BLOB_CLIENT_TYPES,
+    AZURE_BLOB_METHOD_TABLE,
     BOTO3_SERVICE_LITERALS,
 )
 from orbitkb.analysis.models import CloudFact, Evidence
+
+# (provider, service_name, resource_type, sdk, operation lookup table) — what a
+# locally-declared client variable/parameter/field resolves to, shared by every
+# "declared client -> method call" detector below (JVM, Go).
+_ClientKind = tuple[str, str, str, str, "dict[str, tuple[str, str]]"]
 
 _NODE_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx"}
 _NODE_IMPORT_RE = re.compile(r"import\s*\{([^}]+)\}\s*from\s*[\"']([^\"']+)[\"']")
@@ -135,12 +145,103 @@ def _python_cloud_facts(source: str, rel_path: str) -> list[CloudFact]:
     return facts
 
 
+def _client_call_facts(source: str, rel_path: str, declarations: dict[str, _ClientKind]) -> list[CloudFact]:
+    """Shared by every "declared client -> method call" detector (JVM, Go): once
+    a variable/parameter/field is known to be a recognized SDK client, any call
+    on that identifier whose method name matches the client's own operation
+    table is a fact — regardless of which language declared it."""
+    facts: list[CloudFact] = []
+    for identifier, (provider, service_name, resource_type, sdk, method_table) in declarations.items():
+        pattern = re.compile(r"\b" + re.escape(identifier) + r"\s*\.\s*(\w+)\s*\(")
+        for match in pattern.finditer(source):
+            operation = method_table.get(match.group(1))
+            if operation is None:
+                continue
+            operation_kind, canonical_operation = operation
+            line = _line(source, match.start())
+            facts.append(CloudFact(
+                provider=provider, resource_type=resource_type, service_name=service_name,
+                operation=canonical_operation, operation_kind=operation_kind, sdk=sdk, target_name=None,
+                evidence=Evidence(file_path=rel_path, start_line=line, end_line=line),
+            ))
+    return facts
+
+
+def _jvm_client_kind(type_name: str) -> _ClientKind | None:
+    if type_name in AWS_SDK_JAVA_V2_TYPES:
+        service_name = AWS_SDK_JAVA_V2_TYPES[type_name]
+        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
+        return None if resource_type is None else ("aws", service_name, resource_type, "aws-sdk-java-v2", AWS_SDK_METHOD_TABLE)
+    if type_name in AWS_SDK_JAVA_V1_TYPES:
+        service_name = AWS_SDK_JAVA_V1_TYPES[type_name]
+        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
+        return None if resource_type is None else ("aws", service_name, resource_type, "aws-sdk-java-v1", AWS_SDK_METHOD_TABLE)
+    if type_name in AZURE_BLOB_CLIENT_TYPES:
+        return ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
+    return None
+
+
+_JVM_CLIENT_TYPE_ALTERNATION = "|".join(
+    re.escape(t) for t in sorted({*AWS_SDK_JAVA_V1_TYPES, *AWS_SDK_JAVA_V2_TYPES, *AZURE_BLOB_CLIENT_TYPES}, key=len, reverse=True)
+)
+# Java: `TYPE name;` / Kotlin: `val name: TYPE` — declaration order is reversed
+# between the two languages, so each gets its own pattern rather than one
+# trying to cover both orders ambiguously.
+_JAVA_FIELD_RE = re.compile(
+    r"\b(?:private|protected|public)?\s*(?:final\s+)?(" + _JVM_CLIENT_TYPE_ALTERNATION + r")\s+(\w+)\s*[=;]"
+)
+_KOTLIN_FIELD_RE = re.compile(
+    r"\b(?:private\s+|protected\s+|public\s+)?(?:val|var)\s+(\w+)\s*:\s*(" + _JVM_CLIENT_TYPE_ALTERNATION + r")\b"
+)
+
+
+def _jvm_client_declarations(source: str) -> dict[str, _ClientKind]:
+    declarations: dict[str, _ClientKind] = {}
+    for match in _JAVA_FIELD_RE.finditer(source):
+        kind = _jvm_client_kind(match.group(1))
+        if kind is not None:
+            declarations[match.group(2)] = kind
+    for match in _KOTLIN_FIELD_RE.finditer(source):
+        kind = _jvm_client_kind(match.group(2))
+        if kind is not None:
+            declarations[match.group(1)] = kind
+    return declarations
+
+
+def _jvm_cloud_facts(source: str, rel_path: str) -> list[CloudFact]:
+    return _client_call_facts(source, rel_path, _jvm_client_declarations(source))
+
+
+_GO_AWS_CLIENT_RE = re.compile(r"\b(\w+)\s+\*(sqs|sns|s3|eventbridge)\.Client\b")
+_GO_AZBLOB_CLIENT_RE = re.compile(r"\b(\w+)\s+\*azblob\.Client\b")
+
+
+def _go_client_declarations(source: str) -> dict[str, _ClientKind]:
+    declarations: dict[str, _ClientKind] = {}
+    for identifier, package_name in _GO_AWS_CLIENT_RE.findall(source):
+        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(package_name)
+        if resource_type is not None:
+            declarations[identifier] = ("aws", package_name, resource_type, "aws-sdk-go-v2", AWS_SDK_GO_V2_METHODS)
+    for match in _GO_AZBLOB_CLIENT_RE.finditer(source):
+        declarations[match.group(1)] = ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
+    return declarations
+
+
+def _go_cloud_facts(source: str, rel_path: str) -> list[CloudFact]:
+    return _client_call_facts(source, rel_path, _go_client_declarations(source))
+
+
 def detect_cloud_facts(files: list[Path], root: Path) -> list[CloudFact]:
     facts: list[CloudFact] = []
     for path in files:
         rel_path = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8", errors="ignore")
         if path.suffix in _NODE_EXTENSIONS:
-            facts.extend(_node_cloud_facts(path.read_text(encoding="utf-8", errors="ignore"), rel_path))
+            facts.extend(_node_cloud_facts(text, rel_path))
         elif path.suffix == ".py":
-            facts.extend(_python_cloud_facts(path.read_text(encoding="utf-8", errors="ignore"), rel_path))
+            facts.extend(_python_cloud_facts(text, rel_path))
+        elif path.suffix in {".java", ".kt"}:
+            facts.extend(_jvm_cloud_facts(text, rel_path))
+        elif path.suffix == ".go":
+            facts.extend(_go_cloud_facts(text, rel_path))
     return facts
