@@ -126,7 +126,7 @@ contracts (raised or explicitly mapped exception types and literal transport sta
 Error messages and stack traces are never indexed. Dynamic global handlers, proxies
 and gateways remain explicit unknowns rather than inferred behavior.
 
-For Java Spring, the same bounded response includes `service_calls` when an
+For Java/Kotlin Spring, the same bounded response includes `service_calls` when an
 entrypoint reaches a Feign client with a literal service name and HTTP route. This
 gives an agent the target service and endpoint without scanning source; placeholder
 configuration and dynamic URLs remain unknown.
@@ -156,7 +156,7 @@ The supported deterministic subset is intentionally focused:
 | Area | Current coverage | Boundary |
 | --- | --- | --- |
 | Go | HTTP handlers, calls, GORM and `database/sql`, RabbitMQ, Kafka (`segmentio/kafka-go`) | Dynamic routing and types remain unknown. |
-| Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs; Java Feign client calls with literal service and route mappings | Only unambiguous local wiring is resolved; Feign properties, dynamic URLs and Kotlin clients are not inferred. |
+| Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs; Feign client calls with literal service and route mappings | Only unambiguous local wiring is resolved; Feign properties and dynamic URLs are not inferred. |
 | Node and TypeScript | GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
 | GraphQL | Operations, local schema contracts, input/output shapes | Remote composition, directives and federation behavior are not inferred. |
 | Persistence and messaging | Postgres/Mongo evidence, RabbitMQ bindings and contracts, Kafka producer/consumer contracts | Only literal, source-proven configuration is exposed; Kafka consumer detection is Go/JVM/Node only, no Python. |

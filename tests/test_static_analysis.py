@@ -126,6 +126,34 @@ interface InventoryClient {
     ]
 
 
+def test_jvm_spring_analyzer_links_kotlin_feign_invocation_to_declared_target_endpoint(tmp_path: Path):
+    (tmp_path / "InventoryClient.kt").write_text(
+        '''@FeignClient(name = "inventory")
+interface InventoryClient {
+  @PostMapping("/reservations")
+  fun reserve(request: ReserveRequest): Reservation
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "CheckoutService.kt").write_text(
+        '''class CheckoutService(private val inventoryClient: InventoryClient) {
+  fun checkout(request: ReserveRequest): Receipt {
+    val reservation = inventoryClient.reserve(request)
+    return Receipt(reservation)
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(call.source, call.target_service, call.protocol, call.target_method, call.target_path) for call in result.static_service_calls] == [
+        ("CheckoutService.checkout", "inventory", "http", "POST", "/reservations"),
+    ]
+
+
 def test_native_literal_route_prefixes_are_composed(tmp_path: Path):
     (tmp_path / "OrdersController.java").write_text(
         '''@RequestMapping("/api") class OrdersController {

@@ -159,9 +159,9 @@ whether a symbol raises, handles or maps an error, its category/type and any lit
 transport/public code. It never contains exception messages, response bodies or stack
 traces. Missing handlers and dynamic mappings are not inferred as failures. The
 `service_calls` list is similarly bounded to reachable symbols and contains only
-source-proven Java Feign calls with literal target service, method and route; dynamic
-URLs and placeholder configuration are omitted. The optional `smells` list contains
-explicit hypotheses, never a conclusive architecture classification; for example, a
+source-proven Java/Kotlin Feign calls with literal target service, method and route;
+dynamic URLs and placeholder configuration are omitted. The optional `smells` list
+contains explicit hypotheses, never a conclusive architecture classification; for example, a
 GraphQL mutation that directly writes state is flagged
 optional `smells` list contains explicit hypotheses, never a conclusive architecture
 classification; for example, a GraphQL mutation that directly writes state is flagged
@@ -188,7 +188,7 @@ to HTTP 5xx in one service. Both remain hypotheses: handlers, gateways or proxie
 outside the indexed source may intentionally alter the final response.
 
 `possible_unmapped_downstream_error` is a cross-service review signal. It prefers a
-source-proven Java Feign call with literal service and route mappings (confidence
+source-proven Java/Kotlin Feign call with literal service and route mappings (confidence
 `0.6`), and otherwise uses a reconciled internal HTTP call (confidence `0.35`). It
 requires a source-proven 4xx contract in the downstream service while no same-type
 4xx mapping is indexed in the caller. It does not claim the caller returns 500: the

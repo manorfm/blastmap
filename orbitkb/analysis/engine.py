@@ -1677,6 +1677,10 @@ def _spring_feign_service_calls(result: AnalysisResult, files: list[Path]) -> li
         (injection.consumer.split(".", 1)[0], injection.consumer.rsplit(".", 1)[-1]): injection.contract
         for injection in result.injections
     }
+    injected_contracts_by_owner: dict[str, set[str]] = {}
+    for injection in result.injections:
+        owner = injection.consumer.split(".", 1)[0]
+        injected_contracts_by_owner.setdefault(owner, set()).add(injection.contract)
     calls: list[StaticServiceCall] = []
     seen: set[tuple[str, str, str, str, str]] = set()
     for edge in result.edges:
@@ -1685,6 +1689,8 @@ def _spring_feign_service_calls(result: AnalysisResult, files: list[Path]) -> li
             continue
         owner = edge.source.split(".", 1)[0]
         client = injection_contracts.get((owner, receiver))
+        if client is None and receiver in injected_contracts_by_owner.get(owner, set()):
+            client = receiver
         endpoint = endpoints.get((client or "", member))
         if endpoint is None:
             continue
@@ -1708,7 +1714,7 @@ def _feign_endpoints(files: list[Path]) -> dict[tuple[str, str], tuple[str, str,
     """Return only literal method mappings declared in a local Feign interface."""
     endpoints = {}
     for path in files:
-        if path.suffix != ".java":
+        if path.suffix not in {".java", ".kt"}:
             continue
         source = path.read_text(encoding="utf-8", errors="ignore")
         for client_match in _FEIGN_CLIENT_PATTERN.finditer(source):
