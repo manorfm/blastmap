@@ -1032,6 +1032,30 @@ def test_spring_extracts_explicit_timeout_fallbacks_as_handled_error_contracts(t
     }
 
 
+def test_spring_marks_an_explicit_success_timeout_fallback_as_http_success(tmp_path: Path):
+    (tmp_path / "CheckoutController.java").write_text(
+        '''class CheckoutController {
+  private WebClient client;
+  @PostMapping("/checkout")
+  ResponseEntity<Receipt> reserve() {
+    try {
+      return client.post().uri("http://inventory/reservations").retrieve()
+          .bodyToMono(Receipt.class).timeout(Duration.ofSeconds(2)).block();
+    } catch (TimeoutException error) { return ResponseEntity.ok(Receipt.cached()); }
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(contract.source, contract.role, contract.error_kind, contract.protocol, contract.transport_code)
+            for contract in result.error_contracts] == [
+        ("CheckoutController.reserve", "handles", "timeout", "http", "200"),
+    ]
+
+
 def test_spring_exception_handler_emits_a_static_error_contract(tmp_path: Path):
     (tmp_path / "ApiExceptionHandler.java").write_text(
         '''@ControllerAdvice

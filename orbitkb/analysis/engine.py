@@ -1569,31 +1569,60 @@ def _spring_timeout_fallback_contracts(
         else r'\bcatch\s*\(\s*(?P<type>[\w.]+)(?:\s+\w+)?\s*\)'
     )
     patterns = (
-        re.compile(catch_pattern),
-        re.compile(
+        (re.compile(catch_pattern), True),
+        (re.compile(
             r'\.onError(?:Resume|Return)\s*\(\s*(?P<type>[\w.]+)'
             r'(?:\.class|::class\.java)\b',
-        ),
+        ), False),
     )
     contracts: list[ErrorContract] = []
-    for pattern in patterns:
+    for pattern, is_catch in patterns:
         for match in pattern.finditer(declaration):
             error_type = match.group("type").rsplit(".", 1)[-1]
             if error_type.casefold() not in _TIMEOUT_EXCEPTION_TYPES:
                 continue
+            protocol, transport_code = _timeout_fallback_transport(declaration, match.end()) if is_catch else ("internal", None)
             contracts.append(ErrorContract(
                 source=symbol,
                 role="handles",
                 error_kind="timeout",
                 internal_type=error_type,
-                protocol="internal",
-                transport_code=None,
+                protocol=protocol,
+                transport_code=transport_code,
                 public_code=None,
                 exposes_internal_detail=False,
                 retryability="unknown",
                 evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
             ))
     return contracts
+
+
+def _timeout_fallback_transport(declaration: str, catch_end: int) -> tuple[str, str | None]:
+    """Return HTTP success only for an explicit ResponseEntity success in a catch block."""
+    body = _braced_block_after(declaration, catch_end)
+    if body is None:
+        return "internal", None
+    success_response = re.search(
+        r'\breturn\s+ResponseEntity\s*\.\s*(?:ok\s*\(|status\s*\(\s*HttpStatus\.OK\s*\))',
+        body,
+    )
+    return ("http", "200") if success_response else ("internal", None)
+
+
+def _braced_block_after(source: str, start: int) -> str | None:
+    """Return the balanced brace block after an offset, without parsing arbitrary Java."""
+    block_start = source.find("{", start)
+    if block_start < 0:
+        return None
+    depth = 0
+    for index in range(block_start, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[block_start : index + 1]
+    return None
 
 
 def _spring_response_statuses(source: str) -> list[dict]:
