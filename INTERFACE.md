@@ -251,6 +251,13 @@ handler. Only a typed `catch`, Reactor `onErrorResume`, or `onErrorReturn` is ev
 of local handling. It does not claim that controllers, gateways, client factories or
 global handlers do not provide a fallback outside that symbol.
 
+`possible_timeout_fallback_masks_failure` requires an HTTP entrypoint, a source-proven
+internal HTTP call and a typed timeout fallback that explicitly returns HTTP 2xx through
+`ResponseEntity.ok` or `ResponseEntity.status(HttpStatus.OK)`. It does not classify
+empty or domain fallback values as success. The result remains a review signal: a cached
+or partial response may be legitimate, and static facts cannot prove whether clients
+receive a degradation indicator.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally

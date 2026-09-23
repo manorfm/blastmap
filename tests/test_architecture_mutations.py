@@ -33,6 +33,7 @@ from orbitkb.generation.architecture import (
     find_retries_on_potentially_non_idempotent_http_calls,
     find_shared_database,
     find_static_http_calls_without_resilience_policy,
+    find_timeout_fallbacks_masking_failures,
     find_timeouts_without_local_fallback,
     find_unmapped_downstream_errors,
     recompute_architecture_view,
@@ -401,6 +402,59 @@ def test_timeout_fallback_finding_disappears_when_the_source_handles_timeout(tmp
     )
 
     assert find_timeouts_without_local_fallback(conn) == []
+
+
+def test_timeout_success_fallback_finding_disappears_when_the_endpoint_returns_an_error(tmp_path: Path):
+    conn = open_db(tmp_path / "timeout-success-fallback.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    entrypoint = EntryPoint("http", "POST", "/checkout", "CheckoutController.reserve", STATIC_EVIDENCE)
+    call = StaticServiceCall(
+        source="CheckoutController.reserve", target_service="inventory", protocol="http",
+        target_method="POST", target_path="/reservations", evidence=STATIC_EVIDENCE,
+    )
+    successful_fallback = ErrorContract(
+        source="CheckoutController.reserve", role="handles", error_kind="timeout",
+        internal_type="TimeoutException", protocol="http", transport_code="200",
+        public_code=None, exposes_internal_detail=False, retryability="unknown",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(
+            entrypoints=[entrypoint], static_service_calls=[call], error_contracts=[successful_fallback],
+        ),
+    )
+
+    findings = find_timeout_fallbacks_masking_failures(conn)
+
+    assert _kinds(findings) == {"possible_timeout_fallback_masks_failure"}
+    assert findings[0]["detail"]["entrypoint"] == {
+        "method": "POST", "path": "/checkout", "symbol": "CheckoutController.reserve",
+    }
+    assert findings[0]["detail"]["fallback"] == {
+        "error_type": "TimeoutException", "status": "200",
+    }
+    run_id = recompute_architecture_view(conn)
+    assert "possible_timeout_fallback_masks_failure" in {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    }
+
+    error_fallback = ErrorContract(
+        source="CheckoutController.reserve", role="handles", error_kind="timeout",
+        internal_type="TimeoutException", protocol="http", transport_code="503",
+        public_code=None, exposes_internal_detail=False, retryability="unknown",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(
+            entrypoints=[entrypoint], static_service_calls=[call], error_contracts=[error_fallback],
+        ),
+    )
+
+    assert find_timeout_fallbacks_masking_failures(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

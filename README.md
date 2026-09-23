@@ -183,6 +183,12 @@ narrow: controller/gateway handlers and client-factory behavior may still provid
 valid response. The signal asks an agent to verify a safe fallback or controlled error
 translation close to the client boundary.
 
+When an HTTP endpoint explicitly catches a timeout from an internal call and returns
+`ResponseEntity.ok(...)`, OrbitKB also flags the potential for a masked failure. This
+is intentionally narrower than all fallback values: cached or partial success can be
+valid, and the indexed source cannot prove whether a degradation signal reaches the
+client.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,

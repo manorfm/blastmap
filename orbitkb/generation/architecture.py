@@ -805,6 +805,79 @@ def find_timeouts_without_local_fallback(conn: sqlite3.Connection) -> list[dict]
     return findings
 
 
+def find_timeout_fallbacks_masking_failures(conn: sqlite3.Connection) -> list[dict]:
+    """Flag an HTTP endpoint that explicitly turns a local timeout into 2xx.
+
+    Only an explicit ``ResponseEntity`` success fallback is classified this way by
+    the static analyzer. A legitimate cached or partial response is still possible,
+    so this remains a review signal rather than an error classification.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT fallback.service_id, fallback.source, fallback.internal_type,
+                  fallback.transport_code, fallback.file_path, fallback.start_line,
+                  fallback.end_line, entrypoint.method AS entrypoint_method,
+                  entrypoint.name AS entrypoint_path, call.target_service,
+                  call.target_method, call.target_path, call.file_path AS call_file_path,
+                  call.start_line AS call_start_line, call.end_line AS call_end_line
+           FROM static_error_contracts fallback
+           JOIN entrypoints entrypoint
+             ON entrypoint.service_id = fallback.service_id
+            AND entrypoint.symbol = fallback.source
+           JOIN static_service_calls call
+             ON call.service_id = fallback.service_id
+            AND call.source = fallback.source
+           WHERE fallback.role = 'handles'
+             AND fallback.error_kind = 'timeout'
+             AND fallback.protocol = 'http'
+             AND CAST(fallback.transport_code AS INTEGER) BETWEEN 200 AND 299
+             AND call.protocol = 'http'
+           ORDER BY fallback.service_id, fallback.source, call.target_service,
+                    call.target_method, call.target_path, fallback.file_path, fallback.start_line""",
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        service = names[row["service_id"]]
+        findings.append({
+            "kind": "possible_timeout_fallback_masks_failure", "severity": "warning",
+            "services": [service],
+            "reason": (
+                f"HTTP endpoint {row['entrypoint_method']} {row['entrypoint_path']} handles "
+                f"{row['internal_type']} from an internal call by returning HTTP {row['transport_code']}."
+            ),
+            "detail": {
+                "entrypoint": {
+                    "method": row["entrypoint_method"], "path": row["entrypoint_path"],
+                    "symbol": row["source"],
+                },
+                "target": {
+                    "service": row["target_service"], "method": row["target_method"],
+                    "path": row["target_path"],
+                },
+                "fallback": {
+                    "error_type": row["internal_type"], "status": row["transport_code"],
+                },
+                "confidence": 0.8,
+                "evidence": [
+                    {
+                        "file": row["call_file_path"], "start_line": row["call_start_line"],
+                        "end_line": row["call_end_line"],
+                    },
+                    _edge_evidence(row),
+                ],
+                "unknowns": [
+                    "The successful response may be an intentional cached, partial or otherwise documented degraded result.",
+                    "The static facts do not establish whether clients receive an explicit degradation signal in the response body or headers.",
+                ],
+                "remediation": [
+                    "Expose an explicit degraded-result signal or return a controlled timeout/service-unavailable contract.",
+                    "Document any intentional success fallback, including cache freshness and partial-result semantics.",
+                ],
+            },
+        })
+    return findings
+
+
 def find_unmapped_downstream_errors(conn: sqlite3.Connection) -> list[dict]:
     """Surface internal HTTP calls whose downstream 4xx has no known caller mapping.
 
@@ -1392,6 +1465,7 @@ _DETECTORS = (
     find_static_http_calls_without_resilience_policy,
     find_retries_on_potentially_non_idempotent_http_calls,
     find_retries_on_downstream_client_errors,
+    find_timeout_fallbacks_masking_failures,
     find_timeouts_without_local_fallback,
     find_unmapped_downstream_errors,
     find_overbroad_exception_handlers,
