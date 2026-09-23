@@ -158,6 +158,11 @@ source-proven error metadata for symbols reachable from the selected entrypoint:
 whether a symbol raises, handles or maps an error, its category/type and any literal
 transport/public code. It never contains exception messages, response bodies or stack
 traces. Missing handlers and dynamic mappings are not inferred as failures. The
+`service_calls` list is similarly bounded to reachable symbols and contains only
+source-proven Java Feign calls with literal target service, method and route; dynamic
+URLs and placeholder configuration are omitted. The optional `smells` list contains
+explicit hypotheses, never a conclusive architecture classification; for example, a
+GraphQL mutation that directly writes state is flagged
 optional `smells` list contains explicit hypotheses, never a conclusive architecture
 classification; for example, a GraphQL mutation that directly writes state is flagged
 as possible BFF domain-policy leakage for human validation. A flow that both writes

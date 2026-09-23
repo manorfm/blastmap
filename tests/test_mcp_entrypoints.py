@@ -5,6 +5,7 @@ from orbitkb.analysis.models import (
     Evidence,
     FlowBoundary,
     FlowEdge,
+    StaticServiceCall,
 )
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import flows, services
@@ -113,6 +114,38 @@ def test_describe_entrypoint_includes_only_reachable_static_error_contracts(tmp_
         "internal_type": "InsufficientStockException", "protocol": "internal", "transport_code": None,
         "public_code": None, "exposes_internal_detail": False, "retryability": "not_retryable",
         "evidence": {"file": "OrdersController.java", "start_line": 12, "end_line": 15},
+    }]
+
+
+def test_describe_entrypoint_includes_only_reachable_static_service_calls(tmp_path):
+    conn = open_db(tmp_path / "service-calls.db")
+    service_id = services.ensure_service(conn, "checkout", "/repos/checkout", "jvm-spring")
+    evidence = Evidence("CheckoutService.java", 12, 15)
+    flows.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "CheckoutController.create", evidence)],
+            edges=[FlowEdge("CheckoutController.create", "CheckoutService.checkout", "invokes", evidence)],
+            static_service_calls=[
+                StaticServiceCall(
+                    source="CheckoutService.checkout", target_service="inventory", protocol="http",
+                    target_method="POST", target_path="/reservations", evidence=evidence,
+                ),
+                StaticServiceCall(
+                    source="ReconciliationJob.reconcile", target_service="payments", protocol="http",
+                    target_method="GET", target_path="/settlements", evidence=evidence,
+                ),
+            ],
+        ),
+    )
+
+    detail = queries.describe_entrypoint(conn, "checkout", "http", "post", "/orders")
+
+    assert detail["service_calls"] == [{
+        "source": "CheckoutService.checkout", "target_service": "inventory", "protocol": "http",
+        "method": "POST", "path": "/reservations",
+        "evidence": {"file": "CheckoutService.java", "start_line": 12, "end_line": 15},
     }]
 
 

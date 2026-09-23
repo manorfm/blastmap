@@ -318,6 +318,17 @@ def describe_entrypoint(
             }
             for item in flows_repo.list_static_error_contracts_for_sources(conn, row["id"], flow_symbols)
         ],
+        "service_calls": [
+            {
+                "source": item["source"], "target_service": item["target_service"],
+                "protocol": item["protocol"], "method": item["target_method"],
+                "path": item["target_path"], "evidence": {
+                    "file": item["file_path"], "start_line": item["start_line"],
+                    "end_line": item["end_line"],
+                },
+            }
+            for item in flows_repo.list_static_service_calls_for_sources(conn, row["id"], flow_symbols)
+        ],
         "contract": flows_repo.get_entrypoint_contract(conn, entrypoint["id"]),
         "smells": find_entrypoint_smells(entrypoint, edges),
     }

@@ -157,13 +157,33 @@ def list_static_error_contracts(conn: sqlite3.Connection, service_id: int) -> li
 
 
 def list_static_service_calls(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return _list_static_service_calls(conn, service_id)
+
+
+def list_static_service_calls_for_sources(
+    conn: sqlite3.Connection, service_id: int, sources: set[str],
+) -> list[sqlite3.Row]:
+    if not sources:
+        return []
+    return _list_static_service_calls(conn, service_id, sources)
+
+
+def _list_static_service_calls(
+    conn: sqlite3.Connection, service_id: int, sources: set[str] | None = None,
+) -> list[sqlite3.Row]:
+    source_filter = ""
+    params: list[object] = [service_id]
+    if sources:
+        placeholders = ", ".join("?" for _ in sources)
+        source_filter = f" AND source IN ({placeholders})"  # nosec B608 - placeholders are generated from set cardinality.
+        params.extend(sorted(sources))
     return conn.execute(
         """SELECT source, target_service, protocol, target_method, target_path,
                   file_path, start_line, end_line
            FROM static_service_calls
-           WHERE service_id = ?
+           WHERE service_id = ?""" + source_filter + """
            ORDER BY source, target_service, target_method, target_path, file_path, start_line""",
-        (service_id,),
+        params,
     ).fetchall()
 
 
