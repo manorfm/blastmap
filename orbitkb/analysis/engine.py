@@ -357,14 +357,16 @@ def _spring_persistence_receivers(
     )
 
 
-def _spring_rest_template_receivers(injections: list[Injection], class_name: str) -> frozenset[str]:
-    """Return locally injected Spring ``RestTemplate`` member names only."""
+def _spring_http_client_receivers(
+    injections: list[Injection], class_name: str, client_type: str,
+) -> frozenset[str]:
+    """Return locally injected members with one explicit HTTP client type."""
     prefix = f"{class_name}."
     return frozenset(
         injection.consumer.removeprefix(prefix)
         for injection in injections
         if injection.consumer.startswith(prefix)
-        and injection.contract.rsplit(".", 1)[-1] == "RestTemplate"
+        and injection.contract.rsplit(".", 1)[-1] == client_type
     )
 
 
@@ -679,7 +681,8 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                     result.edges.append(FlowEdge(injection_symbol, contract, "injects", evidence))
                     result.injections.append(Injection(injection_symbol, contract, _first_qualifier(_text(parameter, source)), evidence))
             persistence_receivers = _spring_persistence_receivers(result.injections, class_name)
-            rest_template_receivers = _spring_rest_template_receivers(result.injections, class_name)
+            rest_template_receivers = _spring_http_client_receivers(result.injections, class_name, "RestTemplate")
+            web_client_receivers = _spring_http_client_receivers(result.injections, class_name, "WebClient")
             for function_node in (node for node in _walk(class_node) if node.type == "function_declaration"):
                 name_node = function_node.child_by_field_name("name")
                 if name_node is None:
@@ -699,6 +702,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 ))
                 result.static_service_calls.extend(_spring_rest_template_service_calls(
                     symbol, _text(function_node, source), rest_template_receivers, path, root, function_node,
+                ))
+                result.static_service_calls.extend(_spring_web_client_service_calls(
+                    symbol, _text(function_node, source), web_client_receivers, path, root, function_node,
                 ))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(function_node, source), publishers, path, root, function_node, kotlin=True)
@@ -755,7 +761,8 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                     result.edges.append(FlowEdge(consumer, contract, "injects", evidence))
                     result.injections.append(Injection(consumer, contract, _first_qualifier(_text(field, source)), evidence))
             persistence_receivers = _spring_persistence_receivers(result.injections, class_name)
-            rest_template_receivers = _spring_rest_template_receivers(result.injections, class_name)
+            rest_template_receivers = _spring_http_client_receivers(result.injections, class_name, "RestTemplate")
+            web_client_receivers = _spring_http_client_receivers(result.injections, class_name, "WebClient")
             for method_node in (node for node in _walk(class_node) if node.type == "method_declaration"):
                 name_node = method_node.child_by_field_name("name")
                 body = method_node.child_by_field_name("body")
@@ -776,6 +783,9 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 ))
                 result.static_service_calls.extend(_spring_rest_template_service_calls(
                     symbol, _text(method_node, source), rest_template_receivers, path, root, method_node,
+                ))
+                result.static_service_calls.extend(_spring_web_client_service_calls(
+                    symbol, _text(method_node, source), web_client_receivers, path, root, method_node,
                 ))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(method_node, source), publishers, path, root, method_node)
@@ -1759,6 +1769,19 @@ _REST_TEMPLATE_CALL_PATTERN = re.compile(
     r'\b(?P<receiver>\w+)\.(?P<operation>getForEntity|getForObject|postForEntity|postForObject|put|delete)'
     r'\s*\(\s*"(?P<url>https?://[^"]+)"',
 )
+_WEB_CLIENT_CALL_PATTERN = re.compile(
+    r'\b(?P<receiver>\w+)\.(?P<operation>get|post|put|patch|delete)\s*\(\s*\)'
+    r'\s*\.uri\s*\(\s*"(?P<url>https?://[^"]+)"',
+)
+
+
+def _literal_internal_http_destination(url: str) -> tuple[str, str] | None:
+    """Return a safe service host/path pair from a literal internal HTTP URL."""
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if host is None or not re.fullmatch(r"[a-z][a-z0-9-]*", host, re.IGNORECASE):
+        return None
+    return host, parsed.path or "/"
 
 
 def _spring_rest_template_service_calls(
@@ -1779,16 +1802,44 @@ def _spring_rest_template_service_calls(
     for match in _REST_TEMPLATE_CALL_PATTERN.finditer(declaration):
         if match.group("receiver") not in receivers:
             continue
-        parsed = urlparse(match.group("url"))
-        host = parsed.hostname
-        if host is None or not re.fullmatch(r"[a-z][a-z0-9-]*", host, re.IGNORECASE):
+        destination = _literal_internal_http_destination(match.group("url"))
+        if destination is None:
             continue
+        host, target_path = destination
         calls.append(StaticServiceCall(
             source=symbol,
             target_service=host,
             protocol="http",
             target_method=_REST_TEMPLATE_METHODS[match.group("operation")],
-            target_path=parsed.path or "/",
+            target_path=target_path,
+            evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+        ))
+    return calls
+
+
+def _spring_web_client_service_calls(
+    symbol: str,
+    declaration: str,
+    receivers: frozenset[str],
+    path: Path,
+    root: Path,
+    node: Node,
+) -> list[StaticServiceCall]:
+    """Extract literal ``WebClient`` verb/URI pairs on an injected client member."""
+    calls = []
+    for match in _WEB_CLIENT_CALL_PATTERN.finditer(declaration):
+        if match.group("receiver") not in receivers:
+            continue
+        destination = _literal_internal_http_destination(match.group("url"))
+        if destination is None:
+            continue
+        host, target_path = destination
+        calls.append(StaticServiceCall(
+            source=symbol,
+            target_service=host,
+            protocol="http",
+            target_method=match.group("operation").upper(),
+            target_path=target_path,
             evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
         ))
     return calls
