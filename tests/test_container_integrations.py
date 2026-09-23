@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
+import time
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import pytest
@@ -43,6 +46,7 @@ def test_container_services_accept_native_operations_and_match_static_contracts(
         assert "missing order" not in mongo
 
         management_url = f"http://127.0.0.1:{stack.port('rabbitmq', 15672)}"
+        _wait_for_rabbit_management(management_url)
         _rabbit_request(management_url, "PUT", "/api/queues/%2F/orbitkb.events", {"durable": False})
         published = _rabbit_request(
             management_url, "POST", "/api/exchanges/%2F/amq.default/publish",
@@ -67,16 +71,85 @@ def test_container_services_accept_native_operations_and_match_static_contracts(
         stack.stop()
 
 
-def _rabbit_request(base_url: str, method: str, path: str, payload: dict) -> object:
-    body = json.dumps(payload).encode("utf-8")
+def _wait_for_rabbit_management(base_url: str, timeout: float = 30) -> None:
+    """Wait for the published Management API, not merely the RabbitMQ node."""
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while True:
+        try:
+            _rabbit_request(base_url, "GET", "/api/overview", None)
+            return
+        except HTTPError as error:
+            if error.code not in {502, 503, 504}:
+                raise
+            last_error = error
+        except (ConnectionResetError, URLError, OSError) as error:
+            last_error = error
+
+        if time.monotonic() >= deadline:
+            raise TimeoutError("RabbitMQ Management API did not become ready") from last_error
+        time.sleep(0.25)
+
+
+def _rabbit_request(base_url: str, method: str, path: str, payload: dict | None) -> object:
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
     credentials = base64.b64encode(b"guest:guest").decode("ascii")
     request = Request(
         f"{base_url}{path}", data=body, method=method,
         headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/json"},
     )
-    with urlopen(request, timeout=10) as response:  # noqa: S310 -- localhost port comes from this Compose stack.
+    with urlopen(request, timeout=10) as response:
         response_body = response.read()
     return json.loads(response_body) if response_body else None
+
+
+def test_rabbit_request_supports_a_management_readiness_probe(monkeypatch):
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"rabbitmq_version": "3.13"}'
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(sys.modules[__name__], "urlopen", fake_urlopen)
+
+    response = _rabbit_request("http://127.0.0.1:15672", "GET", "/api/overview", None)
+
+    assert response == {"rabbitmq_version": "3.13"}
+    assert captured["request"].get_method() == "GET"
+    assert captured["request"].data is None
+    assert captured["request"].full_url.endswith("/api/overview")
+
+
+def test_rabbit_management_wait_retries_connection_resets(monkeypatch):
+    attempts = 0
+
+    def fake_rabbit_request(base_url, method, path, payload):
+        nonlocal attempts
+        attempts += 1
+        assert (base_url, method, path, payload) == (
+            "http://127.0.0.1:15672", "GET", "/api/overview", None,
+        )
+        if attempts < 3:
+            raise ConnectionResetError("management listener is still starting")
+        return {"rabbitmq_version": "3.13"}
+
+    monkeypatch.setattr(sys.modules[__name__], "_rabbit_request", fake_rabbit_request)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+
+    _wait_for_rabbit_management("http://127.0.0.1:15672")
+
+    assert attempts == 3
 
 
 def _write_representative_source(root: Path) -> None:
