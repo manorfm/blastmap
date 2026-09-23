@@ -126,6 +126,10 @@ contracts (raised or explicitly mapped exception types and literal transport sta
 Error messages and stack traces are never indexed. Dynamic global handlers, proxies
 and gateways remain explicit unknowns rather than inferred behavior.
 
+When an indexed internal HTTP dependency exposes a source-proven 4xx error, OrbitKB
+can also flag that the caller has no same-type client-error mapping indexed. This is a
+low-confidence review signal, not proof that the caller returns HTTP 500.
+
 ## What OrbitKB knows
 
 OrbitKB keeps three kinds of information separate:

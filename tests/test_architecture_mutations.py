@@ -27,6 +27,7 @@ from orbitkb.generation.architecture import (
     find_overbroad_exception_handlers,
     find_read_entrypoint_side_effects,
     find_shared_database,
+    find_unmapped_downstream_errors,
 )
 
 EVIDENCE = [{"file": "main.py", "start_line": 1, "end_line": 5}]
@@ -154,6 +155,43 @@ def test_error_semantics_lost_disappears_when_a_conflict_is_mapped_to_409(tmp_pa
     flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[raised, preserved]))
 
     assert find_error_semantics_lost(conn) == []
+
+
+def test_unmapped_downstream_error_disappears_when_caller_maps_the_known_error(tmp_path: Path):
+    conn = open_db(tmp_path / "downstream-error.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    inventory = services_repo.ensure_service(conn, "inventory", "/tmp/inventory", "jvm-spring")
+    checkout_api = apis_repo.upsert_api(conn, checkout, "POST", "/orders", "", "", [], EVIDENCE)
+    service_calls_repo.replace_calls_for_api(
+        conn,
+        checkout,
+        checkout_api,
+        [{
+            "to_service_name": "inventory", "call_kind": "http", "reason": "reserve stock",
+            "data_needed": [], "purpose_kind": "validation", "confidence": 1.0,
+            "target_kind": "internal",
+        }],
+        EVIDENCE,
+    )
+    downstream = ErrorContract(
+        source="InventoryExceptionHandler.stock", role="maps", error_kind="conflict",
+        internal_type="InsufficientStockException", protocol="http", transport_code="409",
+        public_code="OUT_OF_STOCK", exposes_internal_detail=False, retryability="not_retryable",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, inventory, AnalysisResult(error_contracts=[downstream]))
+
+    assert _kinds(find_unmapped_downstream_errors(conn)) == {"possible_unmapped_downstream_error"}
+
+    caller_mapping = ErrorContract(
+        source="CheckoutExceptionHandler.stock", role="maps", error_kind="conflict",
+        internal_type="InsufficientStockException", protocol="http", transport_code="409",
+        public_code="OUT_OF_STOCK", exposes_internal_detail=False, retryability="not_retryable",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, checkout, AnalysisResult(error_contracts=[caller_mapping]))
+
+    assert find_unmapped_downstream_errors(conn) == []
 
 
 def _replace_calls(conn, service_id: int, api_id: int, targets: list[str]) -> None:

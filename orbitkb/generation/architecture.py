@@ -506,6 +506,77 @@ def find_error_semantics_lost(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_unmapped_downstream_errors(conn: sqlite3.Connection) -> list[dict]:
+    """Surface resolved internal HTTP calls whose downstream 4xx has no known caller mapping.
+
+    This is intentionally a low-confidence review signal. A service-level call
+    relation does not yet prove which client branch receives a status, and a caller
+    can translate the error into another local type. Those cases are stated as
+    unknowns instead of being reported as a definite 500 regression.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT sc.from_service_id, sc.to_service_id, a.method AS api_method,
+                  a.path AS api_path, downstream.source AS downstream_source,
+                  downstream.error_kind, downstream.internal_type,
+                  downstream.transport_code, downstream.public_code,
+                  downstream.file_path, downstream.start_line, downstream.end_line
+           FROM service_calls sc
+           JOIN apis a ON a.id = sc.from_api_id
+           JOIN static_error_contracts downstream ON downstream.service_id = sc.to_service_id
+           WHERE sc.call_kind = 'http'
+             AND sc.target_kind = 'internal'
+             AND sc.to_service_id IS NOT NULL
+             AND downstream.role IN ('raises', 'maps')
+             AND downstream.protocol = 'http'
+             AND CAST(downstream.transport_code AS INTEGER) BETWEEN 400 AND 499
+             AND downstream.internal_type IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM static_error_contracts caller
+                 WHERE caller.service_id = sc.from_service_id
+                   AND caller.role = 'maps'
+                   AND caller.internal_type = downstream.internal_type
+                   AND caller.protocol = 'http'
+                   AND CAST(caller.transport_code AS INTEGER) BETWEEN 400 AND 499
+             )
+           ORDER BY sc.from_service_id, sc.to_service_id, a.method, a.path,
+                    downstream.internal_type, downstream.source""",
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        findings.append({
+            "kind": "possible_unmapped_downstream_error", "severity": "info",
+            "services": [names[row["from_service_id"]], names[row["to_service_id"]]],
+            "reason": (
+                f"{names[row['from_service_id']]} {row['api_method']} {row['api_path']} calls "
+                f"{names[row['to_service_id']]}, which exposes {row['internal_type']} as HTTP "
+                f"{row['transport_code']}; no same-type client-error mapping is indexed in the caller."
+            ),
+            "detail": {
+                "caller": {
+                    "service": names[row["from_service_id"]], "method": row["api_method"], "path": row["api_path"],
+                },
+                "downstream": {
+                    "service": names[row["to_service_id"]], "symbol": row["downstream_source"],
+                    "error_type": row["internal_type"], "kind": row["error_kind"],
+                    "status": row["transport_code"], "public_code": row["public_code"],
+                },
+                "confidence": 0.35,
+                "evidence": [{
+                    "file": row["file_path"], "start_line": row["start_line"], "end_line": row["end_line"],
+                }],
+                "unknowns": [
+                    "The resolved service call does not prove which client branch receives this status.",
+                    "The caller may translate the downstream error to another local type or rely on a handler outside the indexed source.",
+                ],
+                "remediation": [
+                    "Review the client boundary and preserve, explicitly translate, or document this downstream client-error contract.",
+                ],
+            },
+        })
+    return findings
+
+
 def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> list[dict]:
     """Flag RabbitMQ consumers without a source-proven recovery mechanism.
 
@@ -879,6 +950,7 @@ _DETECTORS = (
     find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects, find_error_semantics_lost,
+    find_unmapped_downstream_errors,
     find_overbroad_exception_handlers,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
