@@ -175,6 +175,13 @@ to `1.0` and have empty remediation; hypotheses carry their specific uncertainty
 conservative review action. When names collide across repositories, `services` uses
 `repository/service` rather than an ambiguous bare name.
 
+When indexed Spring facts prove it, `find_architecture_smells` may also return
+`possible_overbroad_exception_handler` for an explicit mapping of `Exception`,
+`Throwable`, `Error` or `RuntimeException`, and `possible_error_semantics_lost` when
+the same source-proven client/domain exception is raised as a 4xx category and mapped
+to HTTP 5xx in one service. Both remain hypotheses: handlers, gateways or proxies
+outside the indexed source may intentionally alter the final response.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally

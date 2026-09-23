@@ -121,6 +121,11 @@ All MCP responses are structured JSON and use progressive disclosure. The detail
 tool contract, pagination, response examples and ambiguity rules are in
 [INTERFACE.md](INTERFACE.md).
 
+For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven error
+contracts (raised or explicitly mapped exception types and literal transport status).
+Error messages and stack traces are never indexed. Dynamic global handlers, proxies
+and gateways remain explicit unknowns rather than inferred behavior.
+
 ## What OrbitKB knows
 
 OrbitKB keeps three kinds of information separate:
