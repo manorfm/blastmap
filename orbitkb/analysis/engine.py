@@ -555,9 +555,19 @@ class _GoAnalyzer(_FileAnalyzer):
             message_contracts=[
                 contract
                 for function in functions
-                for contract in _go_amqp_publish_contracts(function, path, root, source)
+                for contract in (
+                    *_go_amqp_publish_contracts(function, path, root, source),
+                    *_go_kafka_publish_contracts(function, path, root, source),
+                )
             ],
         )
+        for function in functions:
+            entrypoint = _go_kafka_consumer_entrypoint(function, path, root, source)
+            if entrypoint is not None:
+                result.entrypoints.append(entrypoint)
+                result.contracts[function.symbol] = {
+                    "transport": "kafka", "direction": "consumes", "queue": entrypoint.name, "payload": None,
+                }
         by_last_name = {fn.name: fn for fn in functions}
         groups = _go_route_groups(tree, source)
         for node in _walk(tree):
@@ -640,6 +650,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
             qualifiers = _qualifiers(annotations)
             primary = "@Primary" in annotations
             publishers = _spring_amqp_publishers(_text(class_node, source))
+            kafka_publishers = _spring_kafka_publishers(_text(class_node, source))
             for parameter in (node for node in _walk(class_node) if node.type == "class_parameter"):
                 types = [node for node in _walk(parameter) if node.type == "user_type"]
                 if types:
@@ -667,6 +678,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(function_node, source), publishers, path, root, function_node, kotlin=True)
                 )
+                result.message_contracts.extend(
+                    _spring_kafka_publish_contracts(_text(function_node, source), kafka_publishers, path, root, function_node, kotlin=True)
+                )
                 modifiers = next((node for node in function_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
@@ -677,6 +691,10 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 if listener:
                     result.entrypoints.append(EntryPoint("message", "CONSUME", listener.group(1), symbol, _evidence(path, root, function_node)))
                     result.contracts[symbol] = _message_contract(listener.group(1), _text(function_node, source), "kotlin")
+                kafka_listener = re.search(r"@KafkaListener\s*\([^)]*\[\s*\"([^\"]+)\"", modifier_text)
+                if kafka_listener:
+                    result.entrypoints.append(EntryPoint("message", "CONSUME", kafka_listener.group(1), symbol, _evidence(path, root, function_node)))
+                    result.contracts[symbol] = _message_contract(kafka_listener.group(1), _text(function_node, source), "kotlin", transport="kafka")
         return result
 
 
@@ -697,6 +715,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
             qualifiers = _qualifiers(annotations)
             primary = "@Primary" in annotations
             publishers = _spring_amqp_publishers(_text(class_node, source))
+            kafka_publishers = _spring_kafka_publishers(_text(class_node, source))
             for field in (node for node in _walk(class_node) if node.type == "field_declaration"):
                 types = [node for node in _walk(field) if node.type == "type_identifier"]
                 names = [node for node in _walk(field) if node.type == "variable_declarator"]
@@ -726,6 +745,9 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(method_node, source), publishers, path, root, method_node)
                 )
+                result.message_contracts.extend(
+                    _spring_kafka_publish_contracts(_text(method_node, source), kafka_publishers, path, root, method_node)
+                )
                 modifiers = next((node for node in method_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
@@ -736,6 +758,10 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 if listener:
                     result.entrypoints.append(EntryPoint("message", "CONSUME", listener.group(1), symbol, _evidence(path, root, method_node)))
                     result.contracts[symbol] = _message_contract(listener.group(1), _text(method_node, source), "java")
+                kafka_listener = re.search(r"@KafkaListener\s*\([^)]*(?:topics\s*=\s*)?\"([^\"]+)\"", modifier_text)
+                if kafka_listener:
+                    result.entrypoints.append(EntryPoint("message", "CONSUME", kafka_listener.group(1), symbol, _evidence(path, root, method_node)))
+                    result.contracts[symbol] = _message_contract(kafka_listener.group(1), _text(method_node, source), "java", transport="kafka")
         return result
 
 
@@ -828,6 +854,21 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             result.cloud_facts.extend(function_cloud_facts)
             result.boundaries.extend(self._boundaries_for(function, path, root, source))
             result.contracts[symbol] = _message_contract(channel, _text(handler, source), "node")
+        result.message_contracts.extend(_node_kafka_publish_contracts(tree, source, path, root))
+        kafka_consumer = _node_kafka_consumer_handler(tree, source)
+        if kafka_consumer is not None:
+            topic, call_node, handler = kafka_consumer
+            symbol = f"message.consume:{topic}"
+            result.entrypoints.append(EntryPoint("message", "CONSUME", topic, symbol, _evidence(path, root, call_node)))
+            function = _Function(topic, symbol, handler, call_node)
+            result.symbols.append(_symbol(function, path, root, imports=imports))
+            function_edges, function_cloud_facts = self._edges_for_node(
+                function, path, root, source, mongoose_models, prisma_clients, client_declarations, command_imports,
+            )
+            result.edges.extend(function_edges)
+            result.cloud_facts.extend(function_cloud_facts)
+            result.boundaries.extend(self._boundaries_for(function, path, root, source))
+            result.contracts[symbol] = {"transport": "kafka", "direction": "consumes", "queue": topic, "payload": None}
         return result
 
     @staticmethod
@@ -995,7 +1036,7 @@ def _go_http_contract(declaration: str) -> dict:
     return contract
 
 
-def _message_contract(channel: str, declaration: str, language: str) -> dict:
+def _message_contract(channel: str, declaration: str, language: str, *, transport: str = "rabbitmq") -> dict:
     patterns = {
         "java": r"\(\s*([\w<>]+)\s+(\w+)",
         "kotlin": r"\(\s*(\w+)\s*:\s*([\w?]+)",
@@ -1010,7 +1051,7 @@ def _message_contract(channel: str, declaration: str, language: str) -> dict:
     else:
         name = type_name = None
     return {
-        "transport": "rabbitmq",
+        "transport": transport,
         "direction": "consumes",
         "queue": channel,
         "payload": {"name": name, "type": type_name.rstrip("?").lstrip("*") if type_name else None, "required": True} if type_name else None,
@@ -1034,6 +1075,78 @@ def _node_publish_contracts(tree: Node, source: bytes, path: Path, root: Path) -
             version = _message_header_version(_text(args[3], source)) if len(args) > 3 else None
             contracts.append(MessageContract("publishes", channel, routing_key, payload_type, _evidence(path, root, node), version))
     return contracts
+
+
+# kafkajs's producer `send({ topic, messages })` is an object-literal call,
+# not RabbitMQ's positional (channel, routingKey, payload) shape — `.send` alone
+# is far too generic a method name to gate on (many unrelated APIs share it,
+# e.g. Express's `res.send()`), so the literal presence of both `topic:` and
+# `messages:` keys in the same object argument is the real structural proof,
+# not the method name.
+_NODE_KAFKA_SEND_RE = re.compile(
+    r"\.\s*send\s*\(\s*\{[^{}]*?\btopic\s*:\s*['\"]([^'\"]+)['\"][^{}]*?\bmessages\s*:", re.DOTALL,
+)
+
+
+def _node_kafka_publish_contracts(tree: Node, source: bytes, path: Path, root: Path) -> list[MessageContract]:
+    contracts = []
+    for node in _walk(tree):
+        if node.type != "call_expression":
+            continue
+        callee = node.child_by_field_name("function")
+        if callee is None or not _text(callee, source).endswith(".send"):
+            continue
+        call_text = _text(node, source)
+        match = _NODE_KAFKA_SEND_RE.search(call_text)
+        if match is None:
+            continue
+        version = _message_header_version(call_text)
+        contracts.append(MessageContract("publishes", match.group(1), None, None, _evidence(path, root, node), version))
+    return contracts
+
+
+# A consumer's `subscribe({ topic: "orders" })` registers interest; the
+# actual handler is a *separate* `run({ eachMessage: async (...) => {...} })`
+# call — unlike RabbitMQ's Node `.consume(channel, handler)`, these two calls
+# aren't structurally linked by argument position. Only pairs them when
+# exactly one `.subscribe({topic})` exists in the file, so there is no
+# ambiguity about which topic a `.run()` handler belongs to — never a guess.
+_NODE_KAFKA_SUBSCRIBE_RE = re.compile(r"\.\s*subscribe\s*\(\s*\{[^{}]*?\btopic\s*:\s*['\"]([^'\"]+)['\"]", re.DOTALL)
+
+
+def _node_kafka_consumer_handler(tree: Node, source: bytes) -> tuple[str, Node, Node] | None:
+    """(topic, run_call_node, handler_node) for the file's single
+    `consumer.run({ eachMessage/eachBatch: handler })` call, paired with the
+    file's single `.subscribe({ topic })` — only when there is exactly one of
+    each, so the pairing is never ambiguous about which topic a handler
+    belongs to."""
+    topics = _NODE_KAFKA_SUBSCRIBE_RE.findall(source.decode("utf-8", errors="ignore"))
+    if len(topics) != 1:
+        return None
+    for node in _walk(tree):
+        if node.type != "call_expression":
+            continue
+        callee = node.child_by_field_name("function")
+        arguments = node.child_by_field_name("arguments")
+        if callee is None or arguments is None or not _text(callee, source).endswith(".run"):
+            continue
+        args = arguments.named_children
+        if not args or args[0].type != "object":
+            continue
+        handler_property = next(
+            (
+                child for child in args[0].named_children
+                if child.type == "pair" and _text(child.child_by_field_name("key"), source) in {"eachMessage", "eachBatch"}
+            ),
+            None,
+        )
+        if handler_property is None:
+            continue
+        handler = handler_property.child_by_field_name("value")
+        if handler is None or handler.type not in {"arrow_function", "function_expression"}:
+            continue
+        return topics[0], node, handler
+    return None
 
 
 def _node_payload_type(call: Node, payload: Node, source: bytes) -> str | None:
@@ -1086,6 +1199,63 @@ def _go_amqp_publish_contracts(function: _Function, path: Path, root: Path, sour
     return contracts
 
 
+def _go_kafka_publish_contracts(function: _Function, path: Path, root: Path, source: bytes) -> list[MessageContract]:
+    """`writer.WriteMessages(ctx, kafka.Message{Topic: "orders", ...})` —
+    segmentio/kafka-go's producer shape. Only the case where `Topic` is a
+    literal inside the message struct itself is resolved; a writer whose
+    topic instead comes from its own construction (`kafka.NewWriter(...)`)
+    with no per-call override is a known, documented gap, not a guess."""
+    declaration = _text(function.declaration, source)
+    writers = set(re.findall(r"\b(\w+)\s+\*?kafka\.Writer\b", declaration))
+    if not writers:
+        return []
+    parameter_types = _go_declared_parameter_types(declaration)
+    contracts = []
+    for node in _walk(function.body):
+        if node.type != "call_expression":
+            continue
+        callee = node.child_by_field_name("function")
+        arguments = node.child_by_field_name("arguments")
+        if callee is None or arguments is None:
+            continue
+        callee_text = _text(callee, source)
+        receiver, _separator, method = callee_text.rpartition(".")
+        if receiver not in writers or method != "WriteMessages":
+            continue
+        args = arguments.named_children
+        if not args:
+            continue
+        message_text = _text(args[-1], source)
+        topic_match = re.search(r'\bTopic\s*:\s*"([^"]+)"', message_text)
+        if topic_match is None:
+            continue
+        value_match = re.search(r"\bValue\s*:\s*(?:\[\]byte\()?(\w+)", message_text)
+        payload_type = parameter_types.get(value_match.group(1)) if value_match else None
+        version = _message_header_version(message_text)
+        contracts.append(MessageContract("publishes", topic_match.group(1), None, payload_type, _evidence(path, root, node), version))
+    return contracts
+
+
+def _go_kafka_consumer_entrypoint(function: _Function, path: Path, root: Path, source: bytes) -> EntryPoint | None:
+    """kafka-go has no callback-based consumer like RabbitMQ's `.Consume()` —
+    idiomatic usage constructs a `*kafka.Reader` bound to a literal `Topic`
+    and calls `.ReadMessage(...)` in a loop within the *same* function, so
+    that containing function itself is the entrypoint, not a synthesized
+    handler."""
+    declaration = _text(function.declaration, source)
+    reader_topics = dict(re.findall(
+        r'\b(\w+)\s*:?=\s*kafka\.NewReader\s*\(\s*kafka\.ReaderConfig\{[^}]*?\bTopic\s*:\s*"([^"]+)"',
+        declaration, re.DOTALL,
+    ))
+    if not reader_topics:
+        return None
+    body_text = _text(function.body, source)
+    for reader_var, topic in reader_topics.items():
+        if re.search(rf"\b{re.escape(reader_var)}\s*\.\s*ReadMessage\s*\(", body_text):
+            return EntryPoint("message", "CONSUME", topic, function.symbol, _evidence(path, root, function.declaration))
+    return None
+
+
 def _go_declared_parameter_types(declaration: str) -> dict[str, str]:
     parameters = re.search(r"func\s+(?:\([^)]*\)\s+)?\w+\s*\(([^)]*)\)", declaration, re.DOTALL)
     if parameters is None:
@@ -1135,6 +1305,42 @@ def _spring_amqp_publishers(class_source: str) -> set[str]:
     java_fields = re.findall(r"\b(?:RabbitTemplate|AmqpTemplate)\s+(\w+)", class_source)
     kotlin_properties = re.findall(r"\b(?:val|var)\s+(\w+)\s*:\s*(?:RabbitTemplate|AmqpTemplate)", class_source)
     return set(java_fields) | set(kotlin_properties)
+
+
+def _spring_kafka_publishers(class_source: str) -> set[str]:
+    java_fields = re.findall(r"\bKafkaTemplate\s*(?:<[^>]*>)?\s+(\w+)", class_source)
+    kotlin_properties = re.findall(r"\b(?:val|var)\s+(\w+)\s*:\s*KafkaTemplate\s*(?:<[^>]*>)?", class_source)
+    return set(java_fields) | set(kotlin_properties)
+
+
+def _spring_kafka_publish_contracts(
+    declaration: str,
+    publishers: set[str],
+    path: Path,
+    root: Path,
+    node: Node,
+    *,
+    kotlin: bool = False,
+) -> list[MessageContract]:
+    """`kafkaTemplate.send(topic, payload)` or `send(topic, key, payload)` —
+    the optional middle key argument is skipped, never captured, since only
+    the topic (routing) and payload matter for the contract. Unlike
+    RabbitMQ's convertAndSend, Kafka's send has no fixed arity, so the
+    pattern tolerates either shape rather than requiring exactly 3 args."""
+    if not publishers:
+        return []
+    receivers = "|".join(re.escape(name) for name in sorted(publishers))
+    pattern = rf'\b(?:{receivers})\s*\.\s*send\s*\(\s*"([^"]+)"\s*,(?:\s*[\w."\']+\s*,)?\s*(\w+)\s*\)'
+    parameter_types = _declared_parameter_types(declaration, kotlin)
+    contracts = []
+    for match in re.finditer(pattern, declaration):
+        topic, payload = match.groups()
+        contracts.append(MessageContract(
+            "publishes", topic, None, parameter_types.get(payload),
+            _declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+            _message_header_version(_call_text(declaration, match.start())),
+        ))
+    return contracts
 
 
 def _spring_publish_contracts(
