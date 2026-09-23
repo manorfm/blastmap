@@ -222,6 +222,45 @@ def test_unmapped_downstream_error_uses_a_proven_feign_client_call(tmp_path: Pat
     assert findings[0]["detail"]["confidence"] == 0.6
 
 
+def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):
+    conn = open_db(tmp_path / "endpoint-scoped-downstream-error.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    inventory = services_repo.ensure_service(conn, "inventory", "/tmp/inventory", "jvm-spring")
+    feign_call = StaticServiceCall(
+        source="CheckoutService.checkout", target_service="inventory", protocol="http",
+        target_method="POST", target_path="/reservations", evidence=STATIC_EVIDENCE,
+    )
+    reservation_error = ErrorContract(
+        source="InventoryService.reserve", role="raises", error_kind="conflict",
+        internal_type="InsufficientStockException", protocol="http", transport_code="409",
+        public_code="OUT_OF_STOCK", exposes_internal_detail=False, retryability="not_retryable",
+        evidence=STATIC_EVIDENCE,
+    )
+    unrelated_error = ErrorContract(
+        source="InventoryService.reconcile", role="raises", error_kind="not_found",
+        internal_type="SettlementNotFoundException", protocol="http", transport_code="404",
+        public_code=None, exposes_internal_detail=False, retryability="not_retryable",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, checkout, AnalysisResult(static_service_calls=[feign_call]))
+    flows_repo.replace_analysis(
+        conn,
+        inventory,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/reservations", "InventoryController.reserve", STATIC_EVIDENCE)],
+            edges=[FlowEdge("InventoryController.reserve", "InventoryService.reserve", "invokes", STATIC_EVIDENCE)],
+            error_contracts=[reservation_error, unrelated_error],
+        ),
+    )
+
+    findings = find_unmapped_downstream_errors(conn)
+
+    assert len(findings) == 1
+    assert findings[0]["detail"]["downstream"]["error_type"] == "InsufficientStockException"
+    assert findings[0]["detail"]["scope"] == "endpoint_flow"
+    assert findings[0]["detail"]["confidence"] == 0.75
+
+
 def _replace_calls(conn, service_id: int, api_id: int, targets: list[str]) -> None:
     service_calls_repo.replace_calls_for_api(
         conn,

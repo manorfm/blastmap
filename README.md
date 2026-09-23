@@ -134,7 +134,9 @@ and dynamic URLs remain unknown.
 
 When an indexed internal HTTP dependency exposes a source-proven 4xx error, OrbitKB
 can also flag that the caller has no same-type client-error mapping indexed. This is a
-low-confidence review signal, not proof that the caller returns HTTP 500.
+review signal, not proof that the caller returns HTTP 500. When a literal Feign route
+also resolves to an indexed downstream endpoint, only error contracts reachable from
+that endpoint's static flow are considered.
 
 ## What OrbitKB knows
 

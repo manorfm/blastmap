@@ -13,6 +13,7 @@ import sqlite3
 from collections import defaultdict
 
 from orbitkb.db.repositories import architecture as architecture_repo
+from orbitkb.db.repositories import flows as flows_repo
 
 # Starting heuristic, not a trained threshold: flag a service once its fan-in or
 # fan-out crosses this count. Low enough to catch small systems, high enough that a
@@ -514,34 +515,17 @@ def find_unmapped_downstream_errors(conn: sqlite3.Connection) -> list[dict]:
     signals instead of claims that an error will become HTTP 500.
     """
     names = _service_names(conn)
-    static_rows = conn.execute(
+    static_calls = conn.execute(
         """SELECT caller.id AS from_service_id, target.id AS to_service_id,
                   call.source AS caller_source, call.target_method AS api_method,
                   call.target_path AS api_path, call.file_path AS caller_file_path,
-                  call.start_line AS caller_start_line, call.end_line AS caller_end_line,
-                  downstream.source AS downstream_source, downstream.error_kind,
-                  downstream.internal_type, downstream.transport_code,
-                  downstream.public_code, downstream.file_path,
-                  downstream.start_line, downstream.end_line
+                  call.start_line AS caller_start_line, call.end_line AS caller_end_line
            FROM static_service_calls call
            JOIN services caller ON caller.id = call.service_id
            JOIN services target ON LOWER(target.name) = LOWER(call.target_service)
-           JOIN static_error_contracts downstream ON downstream.service_id = target.id
            WHERE call.protocol = 'http'
-             AND downstream.role IN ('raises', 'maps')
-             AND downstream.protocol = 'http'
-             AND CAST(downstream.transport_code AS INTEGER) BETWEEN 400 AND 499
-             AND downstream.internal_type IS NOT NULL
-             AND NOT EXISTS (
-                 SELECT 1 FROM static_error_contracts caller_mapping
-                 WHERE caller_mapping.service_id = caller.id
-                   AND caller_mapping.role = 'maps'
-                   AND caller_mapping.internal_type = downstream.internal_type
-                   AND caller_mapping.protocol = 'http'
-                   AND CAST(caller_mapping.transport_code AS INTEGER) BETWEEN 400 AND 499
-             )
            ORDER BY caller.id, target.id, call.source, call.target_method, call.target_path,
-                    downstream.internal_type, downstream.source""",
+                    call.file_path, call.start_line""",
     ).fetchall()
     rows = conn.execute(
         """SELECT sc.from_service_id, sc.to_service_id, a.method AS api_method,
@@ -578,44 +562,7 @@ def find_unmapped_downstream_errors(conn: sqlite3.Connection) -> list[dict]:
            ORDER BY sc.from_service_id, sc.to_service_id, a.method, a.path,
                     downstream.internal_type, downstream.source""",
     ).fetchall()
-    findings: list[dict] = []
-    for row in static_rows:
-        findings.append({
-            "kind": "possible_unmapped_downstream_error", "severity": "info",
-            "services": [names[row["from_service_id"]], names[row["to_service_id"]]],
-            "reason": (
-                f"{names[row['from_service_id']]} {row['api_method']} {row['api_path']} calls "
-                f"{names[row['to_service_id']]}, which exposes {row['internal_type']} as HTTP "
-                f"{row['transport_code']}; no same-type client-error mapping is indexed in the caller."
-            ),
-            "detail": {
-                "caller": {
-                    "service": names[row["from_service_id"]], "symbol": row["caller_source"],
-                    "method": row["api_method"], "path": row["api_path"],
-                },
-                "downstream": {
-                    "service": names[row["to_service_id"]], "symbol": row["downstream_source"],
-                    "error_type": row["internal_type"], "kind": row["error_kind"],
-                    "status": row["transport_code"], "public_code": row["public_code"],
-                },
-                "confidence": 0.6,
-                "evidence": [
-                    {
-                        "file": row["caller_file_path"], "start_line": row["caller_start_line"],
-                        "end_line": row["caller_end_line"],
-                    },
-                    _edge_evidence(row),
-                ],
-                "unknowns": [
-                    "The declared client call proves the target endpoint, but not which runtime response branch it receives.",
-                    "The downstream mapping may be global or may not apply to this endpoint.",
-                    "The caller may translate the downstream error to another local type or rely on a handler outside the indexed source.",
-                ],
-                "remediation": [
-                    "Review the client boundary and preserve, explicitly translate, or document this downstream client-error contract.",
-                ],
-            },
-        })
+    findings = _static_unmapped_downstream_error_findings(conn, static_calls, names)
     for row in rows:
         findings.append({
             "kind": "possible_unmapped_downstream_error", "severity": "info",
@@ -648,6 +595,127 @@ def find_unmapped_downstream_errors(conn: sqlite3.Connection) -> list[dict]:
             },
         })
     return findings
+
+
+def _static_unmapped_downstream_error_findings(
+    conn: sqlite3.Connection, calls: list[sqlite3.Row], names: dict[int, str],
+) -> list[dict]:
+    """Build client-error review findings from source-proven service calls.
+
+    When the remote endpoint is indexed, its bounded static flow scopes the error
+    contracts. Falling back to service-wide contracts preserves useful coverage for
+    partially indexed systems, but deliberately carries lower confidence.
+    """
+    caller_mappings: dict[int, set[str]] = {}
+    endpoint_contracts: dict[tuple[int, str, str], tuple[str, list[sqlite3.Row]]] = {}
+    findings: list[dict] = []
+    for call in calls:
+        caller_id = call["from_service_id"]
+        target_id = call["to_service_id"]
+        mapped_types = caller_mappings.get(caller_id)
+        if mapped_types is None:
+            mapped_types = _mapped_client_error_types(conn, caller_id)
+            caller_mappings[caller_id] = mapped_types
+        scope, contracts = _downstream_contract_scope(conn, call, endpoint_contracts)
+        for contract in contracts:
+            if not _is_client_error_contract(contract) or contract["internal_type"] in mapped_types:
+                continue
+            confidence = 0.75 if scope == "endpoint_flow" else 0.6
+            target_unknown = (
+                "The target endpoint flow proves this error source is reachable, but not which runtime response branch it receives."
+                if scope == "endpoint_flow"
+                else "The downstream mapping may be global or may not apply to this endpoint."
+            )
+            findings.append({
+                "kind": "possible_unmapped_downstream_error", "severity": "info",
+                "services": [names[caller_id], names[target_id]],
+                "reason": (
+                    f"{names[caller_id]} {call['api_method']} {call['api_path']} calls "
+                    f"{names[target_id]}, which exposes {contract['internal_type']} as HTTP "
+                    f"{contract['transport_code']}; no same-type client-error mapping is indexed in the caller."
+                ),
+                "detail": {
+                    "caller": {
+                        "service": names[caller_id], "symbol": call["caller_source"],
+                        "method": call["api_method"], "path": call["api_path"],
+                    },
+                    "downstream": {
+                        "service": names[target_id], "symbol": contract["source"],
+                        "error_type": contract["internal_type"], "kind": contract["error_kind"],
+                        "status": contract["transport_code"], "public_code": contract["public_code"],
+                    },
+                    "scope": scope,
+                    "confidence": confidence,
+                    "evidence": [
+                        {
+                            "file": call["caller_file_path"], "start_line": call["caller_start_line"],
+                            "end_line": call["caller_end_line"],
+                        },
+                        _edge_evidence(contract),
+                    ],
+                    "unknowns": [
+                        target_unknown,
+                        "The caller may translate the downstream error to another local type or rely on a handler outside the indexed source.",
+                    ],
+                    "remediation": [
+                        "Review the client boundary and preserve, explicitly translate, or document this downstream client-error contract.",
+                    ],
+                },
+            })
+    return findings
+
+
+def _downstream_contract_scope(
+    conn: sqlite3.Connection,
+    call: sqlite3.Row,
+    endpoint_contracts: dict[tuple[int, str, str], tuple[str, list[sqlite3.Row]]],
+) -> tuple[str, list[sqlite3.Row]]:
+    """Return endpoint-reachable contracts when the literal target is indexed."""
+    method = call["api_method"]
+    path = call["api_path"]
+    target_id = call["to_service_id"]
+    if not isinstance(method, str) or not isinstance(path, str):
+        return "service_contracts", flows_repo.list_static_error_contracts(conn, target_id)
+    key = (target_id, method, path)
+    if key not in endpoint_contracts:
+        entrypoint = flows_repo.get_entrypoint(conn, target_id, "http", method, path)
+        if entrypoint is None:
+            endpoint_contracts[key] = ("service_contracts", flows_repo.list_static_error_contracts(conn, target_id))
+        else:
+            edges = flows_repo.list_reachable_edges(conn, target_id, entrypoint["symbol"], max_edges=200)
+            symbols = {entrypoint["symbol"]}
+            for edge in edges:
+                symbols.add(edge["from_symbol"])
+                symbols.add(edge["to_symbol"])
+            endpoint_contracts[key] = (
+                "endpoint_flow",
+                flows_repo.list_static_error_contracts_for_sources(conn, target_id, symbols),
+            )
+    return endpoint_contracts[key]
+
+
+def _mapped_client_error_types(conn: sqlite3.Connection, service_id: int) -> set[str]:
+    rows = conn.execute(
+        """SELECT internal_type FROM static_error_contracts
+           WHERE service_id = ? AND role = 'maps' AND protocol = 'http'
+             AND internal_type IS NOT NULL
+             AND CAST(transport_code AS INTEGER) BETWEEN 400 AND 499""",
+        (service_id,),
+    ).fetchall()
+    return {row["internal_type"] for row in rows}
+
+
+def _is_client_error_contract(contract: sqlite3.Row) -> bool:
+    if (
+        contract["role"] not in {"raises", "maps"}
+        or contract["protocol"] != "http"
+        or contract["internal_type"] is None
+    ):
+        return False
+    try:
+        return 400 <= int(contract["transport_code"]) <= 499
+    except (TypeError, ValueError):
+        return False
 
 
 def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> list[dict]:
