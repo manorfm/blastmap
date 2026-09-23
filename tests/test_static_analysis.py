@@ -999,6 +999,39 @@ def test_spring_ignores_dynamic_or_unbounded_resilience_declarations(tmp_path: P
     assert result.resilience_policies == []
 
 
+def test_spring_extracts_explicit_timeout_fallbacks_as_handled_error_contracts(tmp_path: Path):
+    (tmp_path / "CheckoutClient.java").write_text(
+        '''class CheckoutClient {
+  private WebClient client;
+  Receipt reserve() {
+    try {
+      return client.post().uri("http://inventory/reservations").retrieve()
+          .bodyToMono(Receipt.class).timeout(Duration.ofSeconds(2));
+    } catch (TimeoutException error) { return Receipt.fallback(); }
+  }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "PaymentClient.kt").write_text(
+        '''class PaymentClient(private val client: WebClient) {
+  fun charge() = client.post().uri("http://payments/charges").retrieve()
+      .bodyToMono(Receipt::class.java).timeout(Duration.ofSeconds(2))
+      .onErrorResume(TimeoutException::class.java) { Mono.empty() }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(contract.source, contract.role, contract.error_kind, contract.internal_type)
+            for contract in result.error_contracts} == {
+        ("CheckoutClient.reserve", "handles", "timeout", "TimeoutException"),
+        ("PaymentClient.charge", "handles", "timeout", "TimeoutException"),
+    }
+
+
 def test_spring_exception_handler_emits_a_static_error_contract(tmp_path: Path):
     (tmp_path / "ApiExceptionHandler.java").write_text(
         '''@ControllerAdvice

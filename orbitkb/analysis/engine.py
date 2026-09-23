@@ -701,6 +701,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 result.error_contracts.extend(_spring_raised_error_contracts(
                     symbol, _text(function_node, source), path, root, function_node,
                 ))
+                result.error_contracts.extend(_spring_timeout_fallback_contracts(
+                    symbol, _text(function_node, source), path, root, function_node, kotlin=True,
+                ))
                 result.static_service_calls.extend(_spring_rest_template_service_calls(
                     symbol, _text(function_node, source), rest_template_receivers, path, root, function_node,
                 ))
@@ -785,6 +788,9 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.error_contracts.extend(_spring_raised_error_contracts(
                     symbol, _text(method_node, source), path, root, method_node,
+                ))
+                result.error_contracts.extend(_spring_timeout_fallback_contracts(
+                    symbol, _text(method_node, source), path, root, method_node, kotlin=False,
                 ))
                 result.static_service_calls.extend(_spring_rest_template_service_calls(
                     symbol, _text(method_node, source), rest_template_receivers, path, root, method_node,
@@ -1538,6 +1544,55 @@ def _spring_raised_error_contracts(
             retryability="retryable" if code == 429 else ("not_retryable" if code is not None else "unknown"),
             evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
         ))
+    return contracts
+
+
+_TIMEOUT_EXCEPTION_TYPES = frozenset({
+    "timeoutexception", "sockettimeoutexception", "connecttimeoutexception",
+    "readtimeoutexception", "webclientrequestexception",
+})
+
+
+def _spring_timeout_fallback_contracts(
+    symbol: str,
+    declaration: str,
+    path: Path,
+    root: Path,
+    node: Node,
+    *,
+    kotlin: bool,
+) -> list[ErrorContract]:
+    """Extract explicit local timeout handling without inferring generic fallbacks."""
+    catch_pattern = (
+        r'\bcatch\s*\(\s*\w+\s*:\s*(?P<type>[\w.]+)\s*\)'
+        if kotlin
+        else r'\bcatch\s*\(\s*(?P<type>[\w.]+)(?:\s+\w+)?\s*\)'
+    )
+    patterns = (
+        re.compile(catch_pattern),
+        re.compile(
+            r'\.onError(?:Resume|Return)\s*\(\s*(?P<type>[\w.]+)'
+            r'(?:\.class|::class\.java)\b',
+        ),
+    )
+    contracts: list[ErrorContract] = []
+    for pattern in patterns:
+        for match in pattern.finditer(declaration):
+            error_type = match.group("type").rsplit(".", 1)[-1]
+            if error_type.casefold() not in _TIMEOUT_EXCEPTION_TYPES:
+                continue
+            contracts.append(ErrorContract(
+                source=symbol,
+                role="handles",
+                error_kind="timeout",
+                internal_type=error_type,
+                protocol="internal",
+                transport_code=None,
+                public_code=None,
+                exposes_internal_detail=False,
+                retryability="unknown",
+                evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+            ))
     return contracts
 
 

@@ -124,9 +124,11 @@ tool contract, pagination, response examples and ambiguity rules are in
 [INTERFACE.md](INTERFACE.md).
 
 For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven error
-contracts (raised or explicitly mapped exception types and literal transport status).
-Error messages and stack traces are never indexed. Dynamic global handlers, proxies
-and gateways remain explicit unknowns rather than inferred behavior.
+contracts (raised or explicitly mapped exception types and explicit local timeout
+fallbacks). Timeout fallbacks require a typed `catch`, `onErrorResume` or
+`onErrorReturn`; generic callbacks are not guessed. Error messages and stack traces
+are never indexed. Dynamic global handlers, proxies and gateways remain explicit
+unknowns rather than inferred behavior.
 
 For Java/Kotlin Spring, the same bounded response includes `service_calls` when an
 entrypoint reaches a Feign client with a literal service name and HTTP route, or an

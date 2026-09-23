@@ -167,8 +167,10 @@ selected entrypoint, with a hard edge budget; unrelated service flow is omitted.
 `origin` is `static`, `codegraph` or `runtime`. The `error_contracts` list contains
 source-proven error metadata for symbols reachable from the selected entrypoint:
 whether a symbol raises, handles or maps an error, its category/type and any literal
-transport/public code. It never contains exception messages, response bodies or stack
-traces. Missing handlers and dynamic mappings are not inferred as failures. The
+transport/public code. A local timeout handler is recorded only for an explicit typed
+`catch`, Reactor `onErrorResume`, or `onErrorReturn`; generic callbacks are omitted.
+It never contains exception messages, response bodies or stack traces. Missing handlers
+and dynamic mappings are not inferred as failures. The
 `service_calls` list is similarly bounded to reachable symbols and contains only
 source-proven Java/Kotlin Feign calls with literal target service, method and route,
 or injected `RestTemplate`/`WebClient` calls with a literal single-label service host.
