@@ -22,17 +22,24 @@ from pathlib import Path
 
 from orbitkb.analysis.cloud_taxonomy import (
     AWS_SDK_GO_V2_METHODS,
+    AWS_SDK_JAVA_V1_FQN,
     AWS_SDK_JAVA_V1_TYPES,
+    AWS_SDK_JAVA_V2_FQN,
     AWS_SDK_JAVA_V2_TYPES,
     AWS_SDK_JS_V3_COMMANDS,
     AWS_SDK_JS_V3_MODULE_SERVICE,
     AWS_SDK_METHOD_TABLE,
     AWS_SERVICE_RESOURCE_TYPE,
     AZURE_BLOB_CLIENT_TYPES,
+    AZURE_BLOB_JAVA_FQN,
     AZURE_BLOB_METHOD_TABLE,
     BOTO3_SERVICE_LITERALS,
+    GO_CLOUD_IMPORT_PATHS,
 )
+from orbitkb.analysis.go_imports import parse_go_import_paths
+from orbitkb.analysis.jvm_imports import parse_jvm_imports
 from orbitkb.analysis.models import CloudFact, Evidence
+from orbitkb.analysis.node_imports import parse_node_named_imports
 
 # (provider, service_name, resource_type, sdk, operation lookup table) — what a
 # locally-declared client variable/parameter/field resolves to, shared by every
@@ -40,7 +47,6 @@ from orbitkb.analysis.models import CloudFact, Evidence
 _ClientKind = tuple[str, str, str, str, "dict[str, tuple[str, str]]"]
 
 _NODE_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx"}
-_NODE_IMPORT_RE = re.compile(r"import\s*\{([^}]+)\}\s*from\s*[\"']([^\"']+)[\"']")
 
 
 def _line(source: str, index: int) -> int:
@@ -49,20 +55,24 @@ def _line(source: str, index: int) -> int:
 
 def _node_command_imports(source: str) -> dict[str, tuple[str, str]]:
     """Local identifier -> (module basename, original Command class name), for
-    every named import from a recognized `@aws-sdk/client-*` package. Mirrors
-    `_node_named_imports` in engine.py, scoped down to only the imports this
-    detector cares about."""
-    mapping: dict[str, tuple[str, str]] = {}
-    for names, module in _NODE_IMPORT_RE.findall(source):
-        module_name = Path(module).name
-        if module_name not in AWS_SDK_JS_V3_MODULE_SERVICE:
-            continue
-        for item in names.split(","):
-            original, _as, local = item.strip().partition(" as ")
-            original = original.strip()
-            if original in AWS_SDK_JS_V3_COMMANDS:
-                mapping[(local or original).strip()] = (module_name, original)
-    return mapping
+    every named import from a recognized `@aws-sdk/client-*` package."""
+    return {
+        local_name: (module_name, original_name)
+        for local_name, module_name, original_name in parse_node_named_imports(source)
+        if module_name in AWS_SDK_JS_V3_MODULE_SERVICE and original_name in AWS_SDK_JS_V3_COMMANDS
+    }
+
+
+def _node_azure_import_names(source: str) -> set[str]:
+    """Local identifiers proven imported from `@azure/storage-blob` — the
+    same import-source check `_node_command_imports` already applies for AWS,
+    closing the gap where a project's own unrelated class happening to be
+    named `BlobServiceClient` would otherwise be mistaken for Azure's."""
+    return {
+        local_name
+        for local_name, module_name, original_name in parse_node_named_imports(source)
+        if module_name == "storage-blob" and original_name in AZURE_BLOB_CLIENT_TYPES
+    }
 
 
 _NODE_AZURE_BLOB_DECLARATION_RE = re.compile(
@@ -77,9 +87,11 @@ def _node_azure_client_declarations(source: str) -> dict[str, _ClientKind]:
     AWS SDK v3's stateless Command construction), so this needs the same
     "declared client -> later method call" resolution JVM/Go already use, not
     the Command-construction shortcut `_node_cloud_facts` takes for AWS."""
+    verified_types = _node_azure_import_names(source)
     return {
         identifier: ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
-        for identifier, _type_name in _NODE_AZURE_BLOB_DECLARATION_RE.findall(source)
+        for identifier, type_name in _NODE_AZURE_BLOB_DECLARATION_RE.findall(source)
+        if type_name in verified_types
     }
 
 
@@ -185,16 +197,22 @@ def _client_call_facts(source: str, rel_path: str, declarations: dict[str, _Clie
     return facts
 
 
-def _jvm_client_kind(type_name: str) -> _ClientKind | None:
-    if type_name in AWS_SDK_JAVA_V2_TYPES:
+def _jvm_client_kind(type_name: str, imports: dict[str, str]) -> _ClientKind | None:
+    """Only trusts `type_name` once its own import resolves to the exact FQN
+    the real SDK ships — a project's own unrelated `SqsClient` with no such
+    import (or a different one) resolves to None here, not a false positive."""
+    resolved_fqn = imports.get(type_name)
+    if resolved_fqn is None:
+        return None
+    if resolved_fqn == AWS_SDK_JAVA_V2_FQN.get(type_name):
         service_name = AWS_SDK_JAVA_V2_TYPES[type_name]
         resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
         return None if resource_type is None else ("aws", service_name, resource_type, "aws-sdk-java-v2", AWS_SDK_METHOD_TABLE)
-    if type_name in AWS_SDK_JAVA_V1_TYPES:
+    if resolved_fqn == AWS_SDK_JAVA_V1_FQN.get(type_name):
         service_name = AWS_SDK_JAVA_V1_TYPES[type_name]
         resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
         return None if resource_type is None else ("aws", service_name, resource_type, "aws-sdk-java-v1", AWS_SDK_METHOD_TABLE)
-    if type_name in AZURE_BLOB_CLIENT_TYPES:
+    if resolved_fqn == AZURE_BLOB_JAVA_FQN.get(type_name):
         return ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
     return None
 
@@ -214,13 +232,14 @@ _KOTLIN_FIELD_RE = re.compile(
 
 
 def _jvm_client_declarations(source: str) -> dict[str, _ClientKind]:
+    imports = parse_jvm_imports(source)
     declarations: dict[str, _ClientKind] = {}
     for match in _JAVA_FIELD_RE.finditer(source):
-        kind = _jvm_client_kind(match.group(1))
+        kind = _jvm_client_kind(match.group(1), imports)
         if kind is not None:
             declarations[match.group(2)] = kind
     for match in _KOTLIN_FIELD_RE.finditer(source):
-        kind = _jvm_client_kind(match.group(2))
+        kind = _jvm_client_kind(match.group(2), imports)
         if kind is not None:
             declarations[match.group(1)] = kind
     return declarations
@@ -230,18 +249,26 @@ def _jvm_cloud_facts(source: str, rel_path: str) -> list[CloudFact]:
     return _client_call_facts(source, rel_path, _jvm_client_declarations(source))
 
 
-_GO_AWS_CLIENT_RE = re.compile(r"\b(\w+)\s+\*(sqs|sns|s3|eventbridge)\.Client\b")
-_GO_AZBLOB_CLIENT_RE = re.compile(r"\b(\w+)\s+\*azblob\.Client\b")
+# Any package alias, not a fixed set — safety comes from verifying the
+# alias's own import path against GO_CLOUD_IMPORT_PATHS below, not from
+# constraining which alias spellings this regex will even consider.
+_GO_CLIENT_PARAMETER_RE = re.compile(r"\b(\w+)\s+\*(\w+)\.Client\b")
 
 
 def _go_client_declarations(source: str) -> dict[str, _ClientKind]:
+    import_paths = parse_go_import_paths(source)
     declarations: dict[str, _ClientKind] = {}
-    for identifier, package_name in _GO_AWS_CLIENT_RE.findall(source):
-        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(package_name)
+    for identifier, package_alias in _GO_CLIENT_PARAMETER_RE.findall(source):
+        resolved = GO_CLOUD_IMPORT_PATHS.get(import_paths.get(package_alias, ""))
+        if resolved is None:
+            continue
+        provider, service_name = resolved
+        if provider == "azure":
+            declarations[identifier] = ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
+            continue
+        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
         if resource_type is not None:
-            declarations[identifier] = ("aws", package_name, resource_type, "aws-sdk-go-v2", AWS_SDK_GO_V2_METHODS)
-    for match in _GO_AZBLOB_CLIENT_RE.finditer(source):
-        declarations[match.group(1)] = ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
+            declarations[identifier] = ("aws", service_name, resource_type, "aws-sdk-go-v2", AWS_SDK_GO_V2_METHODS)
     return declarations
 
 

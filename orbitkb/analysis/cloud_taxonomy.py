@@ -138,6 +138,28 @@ AWS_SDK_JAVA_V2_TYPES: dict[str, str] = {
     "EventBridgeClient": "eventbridge",
 }
 
+# Declared type name -> the exact fully-qualified name its import must resolve
+# to before a JVM type match is trusted — closes the gap where a project's own
+# unrelated class happening to share a name (e.g. a local `SqsClient`) would
+# otherwise be mistaken for AWS's. Keys mirror AWS_SDK_JAVA_V1_TYPES/V2_TYPES
+# exactly; every value is the SDK's own real, documented package path.
+AWS_SDK_JAVA_V1_FQN: dict[str, str] = {
+    "AmazonSQS": "com.amazonaws.services.sqs.AmazonSQS",
+    "AmazonSQSClient": "com.amazonaws.services.sqs.AmazonSQSClient",
+    "AmazonSNS": "com.amazonaws.services.sns.AmazonSNS",
+    "AmazonSNSClient": "com.amazonaws.services.sns.AmazonSNSClient",
+    "AmazonS3": "com.amazonaws.services.s3.AmazonS3",
+    "AmazonS3Client": "com.amazonaws.services.s3.AmazonS3Client",
+    "AmazonCloudWatchEvents": "com.amazonaws.services.cloudwatchevents.AmazonCloudWatchEvents",
+    "AmazonCloudWatchEventsClient": "com.amazonaws.services.cloudwatchevents.AmazonCloudWatchEventsClient",
+}
+AWS_SDK_JAVA_V2_FQN: dict[str, str] = {
+    "SqsClient": "software.amazon.awssdk.services.sqs.SqsClient",
+    "SnsClient": "software.amazon.awssdk.services.sns.SnsClient",
+    "S3Client": "software.amazon.awssdk.services.s3.S3Client",
+    "EventBridgeClient": "software.amazon.awssdk.services.eventbridge.EventBridgeClient",
+}
+
 # The literal string boto3.client(<literal>)/boto3.resource(<literal>) is called
 # with is itself the proof of which service it talks to.
 BOTO3_SERVICE_LITERALS: dict[str, str] = {
@@ -151,6 +173,24 @@ AZURE_BLOB_METHOD_TABLE: dict[str, tuple[str, str]] = {
     "upload": ("write", "Upload"), "uploadData": ("write", "Upload"), "upload_blob": ("write", "Upload"),
     "download": ("read", "Download"), "downloadToBuffer": ("read", "Download"), "download_blob": ("read", "Download"),
     "delete": ("write", "Delete"), "deleteBlob": ("write", "Delete"), "delete_blob": ("write", "Delete"),
+}
+# Java's real package for the same three types, for import verification.
+AZURE_BLOB_JAVA_FQN: dict[str, str] = {
+    "BlobServiceClient": "com.azure.storage.blob.BlobServiceClient",
+    "BlobContainerClient": "com.azure.storage.blob.BlobContainerClient",
+    "BlobClient": "com.azure.storage.blob.BlobClient",
+}
+
+# Full Go import path -> (provider, service_name), for verifying a package
+# alias like `sqs` in `*sqs.Client` really came from AWS's/Azure's own SDK
+# module rather than an unrelated package that happens to share the same
+# default alias (Go's default import alias is the path's last segment).
+GO_CLOUD_IMPORT_PATHS: dict[str, tuple[str, str]] = {
+    "github.com/aws/aws-sdk-go-v2/service/sqs": ("aws", "sqs"),
+    "github.com/aws/aws-sdk-go-v2/service/sns": ("aws", "sns"),
+    "github.com/aws/aws-sdk-go-v2/service/s3": ("aws", "s3"),
+    "github.com/aws/aws-sdk-go-v2/service/eventbridge": ("aws", "eventbridge"),
+    "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob": ("azure", "blob_storage"),
 }
 
 _INTERPOLATION_RE = re.compile(r"\$\{.*\}")

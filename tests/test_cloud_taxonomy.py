@@ -1,15 +1,19 @@
 from orbitkb.analysis.cloud_taxonomy import (
     AWS_SDK_GO_V2_METHODS,
+    AWS_SDK_JAVA_V1_FQN,
     AWS_SDK_JAVA_V1_TYPES,
+    AWS_SDK_JAVA_V2_FQN,
     AWS_SDK_JAVA_V2_TYPES,
     AWS_SDK_JS_V3_COMMANDS,
     AWS_SDK_JS_V3_MODULE_SERVICE,
     AWS_SDK_METHOD_TABLE,
     AZURE_BLOB_CLIENT_TYPES,
+    AZURE_BLOB_JAVA_FQN,
     AZURE_BLOB_METHOD_TABLE,
     BOTO3_SERVICE_LITERALS,
     CLOUD_PROVIDERS,
     CLOUD_RESOURCE_TYPES,
+    GO_CLOUD_IMPORT_PATHS,
     IAC_NAME_ATTRIBUTES,
     IAC_RESOURCE_TYPE_TABLE,
     is_unresolved_literal,
@@ -111,3 +115,20 @@ def test_otel_messaging_system_is_none_for_non_messaging_resource_kinds():
     assert otel_messaging_system("aws", "eventbridge") is None
     assert otel_messaging_system("aws", "s3") is None
     assert otel_messaging_system("azure", "blob_storage") is None
+
+
+def test_java_fqn_tables_cover_every_type_key():
+    assert set(AWS_SDK_JAVA_V1_FQN) == set(AWS_SDK_JAVA_V1_TYPES)
+    assert set(AWS_SDK_JAVA_V2_FQN) == set(AWS_SDK_JAVA_V2_TYPES)
+    assert AWS_SDK_JAVA_V2_FQN["SqsClient"] == "software.amazon.awssdk.services.sqs.SqsClient"
+    assert AWS_SDK_JAVA_V1_FQN["AmazonSQSClient"] == "com.amazonaws.services.sqs.AmazonSQSClient"
+
+
+def test_azure_blob_java_fqn_covers_every_client_type():
+    assert set(AZURE_BLOB_JAVA_FQN) == set(AZURE_BLOB_CLIENT_TYPES)
+    assert AZURE_BLOB_JAVA_FQN["BlobServiceClient"] == "com.azure.storage.blob.BlobServiceClient"
+
+
+def test_go_cloud_import_paths_resolve_provider_and_service():
+    assert GO_CLOUD_IMPORT_PATHS["github.com/aws/aws-sdk-go-v2/service/sqs"] == ("aws", "sqs")
+    assert GO_CLOUD_IMPORT_PATHS["github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"] == ("azure", "blob_storage")

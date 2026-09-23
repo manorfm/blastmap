@@ -21,6 +21,7 @@ from tree_sitter import Language, Node, Parser
 
 from orbitkb.analysis.cloud_detection import detect_cloud_facts
 from orbitkb.analysis.depth import DepthProvider, NoopDepthProvider
+from orbitkb.analysis.go_imports import parse_go_import_declarations
 from orbitkb.analysis.models import (
     AnalysisResult,
     EntryPoint,
@@ -32,6 +33,7 @@ from orbitkb.analysis.models import (
     PersistenceFact,
     Symbol,
 )
+from orbitkb.analysis.node_imports import parse_node_named_imports
 from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
@@ -1202,15 +1204,8 @@ def _go_package_name(source: str, path: Path) -> str:
 
 
 def _go_imports(source: str) -> tuple[tuple[str, str], ...]:
-    blocks = re.findall(r"(?ms)^\s*import\s*\((.*?)^\s*\)", source)
-    single_imports = re.findall(r'(?m)^\s*import\s+(?:(\w+)\s+)?"([^"]+)"', source)
-    declarations = [
-        item
-        for block in blocks
-        for item in re.findall(r'(?m)^\s*(?:(\w+)\s+)?"([^"]+)"', block)
-    ]
     imports = []
-    for alias, module in [*single_imports, *declarations]:
+    for alias, module in parse_go_import_declarations(source):
         package = module.rstrip("/").rsplit("/", 1)[-1]
         local_name = alias or package
         if local_name not in {"_", "."}:
@@ -1236,13 +1231,10 @@ def _join_route(prefix: str | None, route: str | None) -> str | None:
 
 
 def _node_named_imports(source: str) -> tuple[tuple[str, str], ...]:
-    imports = []
-    for names, module in re.findall(r"import\s*\{([^}]+)\}\s*from\s*[\"']([^\"']+)[\"']", source):
-        module_name = Path(module).name
-        for item in names.split(","):
-            original, _as, local = item.strip().partition(" as ")
-            imports.append(((local or original).strip(), f"{module_name}.{original.strip()}"))
-    return tuple(imports)
+    return tuple(
+        (local_name, f"{module_name}.{original_name}")
+        for local_name, module_name, original_name in parse_node_named_imports(source)
+    )
 
 
 class StaticAnalysisEngine:

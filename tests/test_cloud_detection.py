@@ -109,6 +109,7 @@ def test_irrelevant_file_extensions_are_skipped(tmp_path: Path):
 
 def test_java_field_declared_with_sdk_v2_client_type_is_detected(tmp_path: Path):
     (tmp_path / "OrderPublisher.java").write_text(
+        "import software.amazon.awssdk.services.sqs.SqsClient;\n\n"
         "public class OrderPublisher {\n"
         "    private final SqsClient sqsClient;\n\n"
         "    void publish(String body) {\n"
@@ -129,6 +130,7 @@ def test_java_field_declared_with_sdk_v2_client_type_is_detected(tmp_path: Path)
 
 def test_java_field_declared_with_sdk_v1_client_type_is_detected(tmp_path: Path):
     (tmp_path / "OrderPublisher.java").write_text(
+        "import com.amazonaws.services.sqs.AmazonSQSClient;\n\n"
         "public class OrderPublisher {\n"
         "    private AmazonSQSClient sqsClient;\n\n"
         "    void publish(String body) {\n"
@@ -146,6 +148,7 @@ def test_java_field_declared_with_sdk_v1_client_type_is_detected(tmp_path: Path)
 
 def test_kotlin_field_declared_with_sdk_v2_client_type_is_detected(tmp_path: Path):
     (tmp_path / "OrderPublisher.kt").write_text(
+        "import software.amazon.awssdk.services.sqs.SqsClient\n\n"
         "class OrderPublisher(private val sqsClient: SqsClient) {\n"
         "    fun publish(body: String) {\n"
         "        sqsClient.sendMessage(SendMessageRequest.builder().build())\n"
@@ -160,9 +163,40 @@ def test_kotlin_field_declared_with_sdk_v2_client_type_is_detected(tmp_path: Pat
     assert facts[0].sdk == "aws-sdk-java-v2"
 
 
+def test_jvm_type_with_the_right_name_but_no_matching_import_is_ignored(tmp_path: Path):
+    """A local class that happens to be named SqsClient, with no relation to
+    the AWS SDK, must not be mistaken for one — the false positive bare
+    type-name matching alone would produce."""
+    (tmp_path / "OrderPublisher.java").write_text(
+        "public class OrderPublisher {\n"
+        "    private final SqsClient sqsClient;\n\n"
+        "    void publish(String body) {\n"
+        "        sqsClient.sendMessage(body);\n"
+        "    }\n"
+        "}\n"
+    )
+
+    assert detect_cloud_facts([tmp_path / "OrderPublisher.java"], tmp_path) == []
+
+
+def test_jvm_type_with_the_right_name_but_wrong_import_is_ignored(tmp_path: Path):
+    (tmp_path / "OrderPublisher.java").write_text(
+        "import com.example.internal.SqsClient;\n\n"
+        "public class OrderPublisher {\n"
+        "    private final SqsClient sqsClient;\n\n"
+        "    void publish(String body) {\n"
+        "        sqsClient.sendMessage(body);\n"
+        "    }\n"
+        "}\n"
+    )
+
+    assert detect_cloud_facts([tmp_path / "OrderPublisher.java"], tmp_path) == []
+
+
 def test_go_parameter_typed_as_sqs_client_is_detected(tmp_path: Path):
     (tmp_path / "publisher.go").write_text(
         "package publisher\n\n"
+        'import "github.com/aws/aws-sdk-go-v2/service/sqs"\n\n'
         "func Publish(client *sqs.Client, body string) {\n"
         "\tclient.SendMessage(ctx, &sqs.SendMessageInput{})\n"
         "}\n"
@@ -178,8 +212,21 @@ def test_go_parameter_typed_as_sqs_client_is_detected(tmp_path: Path):
     assert fact.sdk == "aws-sdk-go-v2"
 
 
+def test_go_package_alias_with_the_right_name_but_wrong_import_is_ignored(tmp_path: Path):
+    (tmp_path / "publisher.go").write_text(
+        "package publisher\n\n"
+        'import "example.com/internal/sqs"\n\n'
+        "func Publish(client *sqs.Client, body string) {\n"
+        "\tclient.SendMessage(ctx, &sqs.SendMessageInput{})\n"
+        "}\n"
+    )
+
+    assert detect_cloud_facts([tmp_path / "publisher.go"], tmp_path) == []
+
+
 def test_azure_blob_client_in_java_is_detected(tmp_path: Path):
     (tmp_path / "AssetsUploader.java").write_text(
+        "import com.azure.storage.blob.BlobContainerClient;\n\n"
         "public class AssetsUploader {\n"
         "    private final BlobContainerClient containerClient;\n\n"
         "    void upload(byte[] data) {\n"
@@ -201,6 +248,7 @@ def test_azure_blob_client_in_java_is_detected(tmp_path: Path):
 def test_azure_blob_client_in_go_is_detected(tmp_path: Path):
     (tmp_path / "uploader.go").write_text(
         "package uploader\n\n"
+        'import "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"\n\n'
         "func Upload(client *azblob.Client, data []byte) {\n"
         "\tclient.upload(data)\n"
         "}\n"
@@ -235,6 +283,28 @@ def test_azure_blob_client_in_node_is_detected(tmp_path: Path):
 def test_node_variable_not_constructed_from_an_azure_blob_type_is_ignored(tmp_path: Path):
     (tmp_path / "unrelated.ts").write_text(
         "const client = new SomeOtherClient(url);\n\n"
+        "client.upload(data);\n"
+    )
+
+    assert detect_cloud_facts([tmp_path / "unrelated.ts"], tmp_path) == []
+
+
+def test_node_type_with_the_right_name_but_no_matching_import_is_ignored(tmp_path: Path):
+    """A local class named BlobServiceClient with no relation to Azure's SDK
+    (no import from @azure/storage-blob at all) must not be mistaken for
+    one."""
+    (tmp_path / "unrelated.ts").write_text(
+        "const client = new BlobServiceClient(url, credential);\n\n"
+        "client.upload(data);\n"
+    )
+
+    assert detect_cloud_facts([tmp_path / "unrelated.ts"], tmp_path) == []
+
+
+def test_node_type_with_the_right_name_but_wrong_import_is_ignored(tmp_path: Path):
+    (tmp_path / "unrelated.ts").write_text(
+        'import { BlobServiceClient } from "./local-fake-azure";\n\n'
+        "const client = new BlobServiceClient(url, credential);\n\n"
         "client.upload(data);\n"
     )
 
@@ -279,6 +349,7 @@ def test_static_analysis_engine_surfaces_cloud_facts_for_python(tmp_path: Path):
 
 def test_static_analysis_engine_surfaces_cloud_facts_for_jvm_spring(tmp_path: Path):
     (tmp_path / "OrderPublisher.java").write_text(
+        "import software.amazon.awssdk.services.sqs.SqsClient;\n\n"
         "public class OrderPublisher {\n"
         "    private final SqsClient sqsClient;\n\n"
         "    void publish(String body) {\n"
@@ -296,6 +367,7 @@ def test_static_analysis_engine_surfaces_cloud_facts_for_jvm_spring(tmp_path: Pa
 def test_static_analysis_engine_surfaces_cloud_facts_for_go(tmp_path: Path):
     (tmp_path / "publisher.go").write_text(
         "package publisher\n\n"
+        'import "github.com/aws/aws-sdk-go-v2/service/sqs"\n\n'
         "func Publish(client *sqs.Client, body string) {\n"
         "\tclient.SendMessage(ctx, &sqs.SendMessageInput{})\n"
         "}\n"
