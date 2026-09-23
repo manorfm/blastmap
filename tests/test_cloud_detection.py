@@ -213,6 +213,34 @@ def test_azure_blob_client_in_go_is_detected(tmp_path: Path):
     assert facts[0].sdk == "azure-storage-blob"
 
 
+def test_azure_blob_client_in_node_is_detected(tmp_path: Path):
+    (tmp_path / "uploader.ts").write_text(
+        'import { BlobServiceClient } from "@azure/storage-blob";\n\n'
+        "const client = new BlobServiceClient(url, credential);\n\n"
+        "export async function upload(data: Buffer) {\n"
+        "  await client.upload(data);\n"
+        "}\n"
+    )
+
+    facts = detect_cloud_facts([tmp_path / "uploader.ts"], tmp_path)
+
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact.provider == "azure"
+    assert fact.resource_type == "object_storage"
+    assert fact.service_name == "blob_storage"
+    assert fact.sdk == "azure-storage-blob"
+
+
+def test_node_variable_not_constructed_from_an_azure_blob_type_is_ignored(tmp_path: Path):
+    (tmp_path / "unrelated.ts").write_text(
+        "const client = new SomeOtherClient(url);\n\n"
+        "client.upload(data);\n"
+    )
+
+    assert detect_cloud_facts([tmp_path / "unrelated.ts"], tmp_path) == []
+
+
 def test_unrelated_java_field_type_is_ignored(tmp_path: Path):
     (tmp_path / "Unrelated.java").write_text(
         "public class Unrelated {\n"

@@ -65,8 +65,26 @@ def _node_command_imports(source: str) -> dict[str, tuple[str, str]]:
     return mapping
 
 
+_NODE_AZURE_BLOB_DECLARATION_RE = re.compile(
+    r"\b(?:const|let|var)\s+(\w+)\s*=\s*new\s+("
+    + "|".join(re.escape(t) for t in sorted(AZURE_BLOB_CLIENT_TYPES))
+    + r")\s*\("
+)
+
+
+def _node_azure_client_declarations(source: str) -> dict[str, _ClientKind]:
+    """Azure Blob's Node SDK is a stateful client bound to a variable (unlike
+    AWS SDK v3's stateless Command construction), so this needs the same
+    "declared client -> later method call" resolution JVM/Go already use, not
+    the Command-construction shortcut `_node_cloud_facts` takes for AWS."""
+    return {
+        identifier: ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
+        for identifier, _type_name in _NODE_AZURE_BLOB_DECLARATION_RE.findall(source)
+    }
+
+
 def _node_cloud_facts(source: str, rel_path: str) -> list[CloudFact]:
-    facts: list[CloudFact] = []
+    facts: list[CloudFact] = list(_client_call_facts(source, rel_path, _node_azure_client_declarations(source)))
     for local_name, (module_name, original) in _node_command_imports(source).items():
         service_name = AWS_SDK_JS_V3_MODULE_SERVICE[module_name]
         resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
