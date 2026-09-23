@@ -18,6 +18,7 @@ from pathlib import Path
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
 from orbitkb.db.repositories import embeddings as embeddings_repo
+from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
@@ -243,6 +244,33 @@ def _derive_dependency_hints(
     return out
 
 
+def _derive_cloud_dependency_hints(
+    conn: sqlite3.Connection, service_names: set[str], repository_id: int | None = None,
+) -> list[dict]:
+    """The deterministic counterpart to _derive_dependency_hints' service_calls-
+    sourced external_integrations: a relevant service's own proven cloud SDK call
+    sites (see describe_cloud_dependencies), reshaped into the same generic
+    {service, via_service, reason, confidence, evidence} shape so an agent reading
+    external_integrations sees both kinds of dependency without needing to know
+    they come from two different tables."""
+    out: list[dict] = []
+    for name in sorted(service_names):
+        row = services_repo.get_service_by_name(conn, name, repository_id=repository_id)
+        if row is None:
+            continue
+        for fact in flows_repo.list_static_cloud_facts(conn, row["id"]):
+            out.append({
+                "service": f"{fact['provider']}:{fact['service_name']}",
+                "via_service": name,
+                "reason": f"static {fact['operation']} ({fact['operation_kind']})",
+                "confidence": 1.0,
+                "evidence": [{
+                    "file": fact["file_path"], "start_line": fact["start_line"], "end_line": fact["end_line"],
+                }],
+            })
+    return out
+
+
 def _compute_freshness_for(
     conn: sqlite3.Connection, service_names: set[str], repository_id: int | None = None,
 ) -> dict[str, dict]:
@@ -463,9 +491,12 @@ def analyze_change_surface(
         ChangeSurfaceBuilder()
         .with_findings(primary, secondary, no_change)
         .with_flow(_derive_flow(conn, relevant, repository_id))
-        .with_external_integrations(_derive_dependency_hints(
-            conn, relevant, service_calls_repo.list_external_integration_calls, repository_id,
-        ))
+        .with_external_integrations(
+            _derive_dependency_hints(
+                conn, relevant, service_calls_repo.list_external_integration_calls, repository_id,
+            )
+            + _derive_cloud_dependency_hints(conn, relevant, repository_id)
+        )
         .with_unmapped_internal_hint(unmapped_internal_hint)
         .with_contracts_at_risk(_derive_contracts_at_risk(conn, relevant, repository_id))
         .with_persistence_affected(_derive_persistence_for(conn, relevant, repository_id))

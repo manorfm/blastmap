@@ -6,9 +6,11 @@ deterministically without a real subprocess call — matching the harness's own
 from pathlib import Path
 
 from benchmark.fixtures import build_pix_fixture
+from orbitkb.analysis.models import AnalysisResult, CloudFact, Evidence
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import change_surface as change_surface_repo
 from orbitkb.db.repositories import embeddings as embeddings_repo
+from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation import change_surface
@@ -237,6 +239,30 @@ def test_external_and_unmapped_internal_buckets_are_populated(tmp_path: Path):
     shipping_unknown = next(u for u in result["unknowns"] if u["service"] == "shipping-service")
     assert shipping_unknown["status"] == "unknown"
     assert "suggestion" in shipping_unknown
+
+
+def test_external_integrations_include_deterministic_cloud_facts(tmp_path: Path):
+    conn = _build_pix_fixture(tmp_path / "pix-cloud.db")
+    payments_id = services_repo.get_service_by_name(conn, "payments-service")["id"]
+    flows_repo.replace_analysis(conn, payments_id, AnalysisResult(cloud_facts=[
+        CloudFact(
+            "aws", "queue", "sqs", "SendMessage", "publish", "aws-sdk-js-v3", None,
+            Evidence("publisher.ts", 4, 4),
+        ),
+    ]))
+    backend = FakeBackend({
+        "primary": [
+            {"service": "payments-service", "reason": "owns payment method resolution", "confidence": 0.9},
+        ],
+        "secondary": [], "no_change": [],
+    })
+
+    result = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", backend)
+
+    cloud_finding = next(f for f in result["external_integrations"] if f["service"] == "aws:sqs")
+    assert cloud_finding["via_service"] == "payments-service"
+    assert cloud_finding["confidence"] == 1.0
+    assert cloud_finding["evidence"] == [{"file": "publisher.ts", "start_line": 4, "end_line": 4}]
 
 
 def test_persistence_affected_lists_entities_owned_by_relevant_services(tmp_path: Path):
