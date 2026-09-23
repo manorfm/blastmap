@@ -128,8 +128,9 @@ and gateways remain explicit unknowns rather than inferred behavior.
 
 For Java/Kotlin Spring, the same bounded response includes `service_calls` when an
 entrypoint reaches a Feign client with a literal service name and HTTP route. This
-gives an agent the target service and endpoint without scanning source; placeholder
-configuration and dynamic URLs remain unknown.
+includes a literal interface `@RequestMapping` prefix when present, giving an agent
+the target service and endpoint without scanning source; placeholder configuration
+and dynamic URLs remain unknown.
 
 When an indexed internal HTTP dependency exposes a source-proven 4xx error, OrbitKB
 can also flag that the caller has no same-type client-error mapping indexed. This is a

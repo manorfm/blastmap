@@ -1655,6 +1655,7 @@ class StaticAnalysisEngine:
 
 _FEIGN_CLIENT_PATTERN = re.compile(
     r'@FeignClient\s*\(\s*(?:name|value)\s*=\s*"(?P<service>[^"]+)"[^)]*\)\s*'
+    r'(?P<annotations>(?:@\w+(?:\s*\([^)]*\))?\s*)*)'
     r'(?:public\s+)?interface\s+(?P<client>\w+)\s*\{(?P<body>.*?)\}',
     re.DOTALL,
 )
@@ -1720,11 +1721,12 @@ def _feign_endpoints(files: list[Path]) -> dict[tuple[str, str], tuple[str, str,
         for client_match in _FEIGN_CLIENT_PATTERN.finditer(source):
             service = client_match.group("service")
             client = client_match.group("client")
+            route_prefix = _spring_route_prefix(client_match.group("annotations"))
             for method_match in _FEIGN_METHOD_PATTERN.finditer(client_match.group("body")):
                 endpoints[(client, method_match.group("method"))] = (
                     service,
                     _JavaSpringAnalyzer.ROUTES[method_match.group("mapping")],
-                    method_match.group("path"),
+                    _join_route(route_prefix, method_match.group("path")),
                 )
     return endpoints
 

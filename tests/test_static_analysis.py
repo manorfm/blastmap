@@ -154,6 +154,35 @@ interface InventoryClient {
     ]
 
 
+def test_jvm_spring_analyzer_composes_a_feign_route_prefix(tmp_path: Path):
+    (tmp_path / "InventoryClient.java").write_text(
+        '''@FeignClient(name = "inventory")
+@RequestMapping("/v1")
+interface InventoryClient {
+  @PostMapping("/reservations")
+  Reservation reserve(ReserveRequest request);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "CheckoutService.java").write_text(
+        '''class CheckoutService {
+  private InventoryClient inventoryClient;
+  Receipt checkout(ReserveRequest request) {
+    return new Receipt(inventoryClient.reserve(request));
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(call.target_service, call.target_method, call.target_path) for call in result.static_service_calls] == [
+        ("inventory", "POST", "/v1/reservations"),
+    ]
+
+
 def test_native_literal_route_prefixes_are_composed(tmp_path: Path):
     (tmp_path / "OrdersController.java").write_text(
         '''@RequestMapping("/api") class OrdersController {

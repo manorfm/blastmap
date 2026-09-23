@@ -160,7 +160,8 @@ transport/public code. It never contains exception messages, response bodies or 
 traces. Missing handlers and dynamic mappings are not inferred as failures. The
 `service_calls` list is similarly bounded to reachable symbols and contains only
 source-proven Java/Kotlin Feign calls with literal target service, method and route;
-dynamic URLs and placeholder configuration are omitted. The optional `smells` list
+an interface-level literal `@RequestMapping` prefix is composed with the method route.
+Dynamic URLs and placeholder configuration are omitted. The optional `smells` list
 contains explicit hypotheses, never a conclusive architecture classification; for example, a
 GraphQL mutation that directly writes state is flagged
 optional `smells` list contains explicit hypotheses, never a conclusive architecture
