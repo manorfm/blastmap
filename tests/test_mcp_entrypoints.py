@@ -8,7 +8,7 @@ from orbitkb.analysis.models import (
     StaticServiceCall,
 )
 from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import flows, services
+from orbitkb.db.repositories import flows, repositories, services
 from orbitkb.mcp import queries
 
 
@@ -139,6 +139,14 @@ def test_describe_entrypoint_includes_only_reachable_static_service_calls(tmp_pa
             ],
         ),
     )
+    inventory_id = services.ensure_service(conn, "inventory", "/repos/inventory", "jvm-spring")
+    flows.replace_analysis(
+        conn,
+        inventory_id,
+        AnalysisResult(entrypoints=[
+            EntryPoint("http", "POST", "/reservations", "InventoryController.reserve", evidence),
+        ]),
+    )
 
     detail = queries.describe_entrypoint(conn, "checkout", "http", "post", "/orders")
 
@@ -146,7 +154,75 @@ def test_describe_entrypoint_includes_only_reachable_static_service_calls(tmp_pa
         "source": "CheckoutService.checkout", "target_service": "inventory", "protocol": "http",
         "method": "POST", "path": "/reservations",
         "evidence": {"file": "CheckoutService.java", "start_line": 12, "end_line": 15},
+        "resolved_target": {
+            "status": "endpoint_indexed", "service": "inventory", "repository": None,
+            "entrypoint": {
+                "kind": "http", "method": "POST", "name": "/reservations",
+                "symbol": "InventoryController.reserve",
+                "evidence": {"file": "CheckoutService.java", "start_line": 12, "end_line": 15},
+            },
+        },
     }]
+
+
+def test_describe_entrypoint_reports_an_ambiguous_static_service_call_target(tmp_path):
+    conn = open_db(tmp_path / "ambiguous-service-call.db")
+    checkout = services.ensure_service(conn, "checkout", "/repos/checkout", "jvm-spring")
+    evidence = Evidence("CheckoutService.java", 12, 15)
+    flows.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "CheckoutController.create", evidence)],
+            static_service_calls=[
+                StaticServiceCall(
+                    source="CheckoutController.create", target_service="inventory", protocol="http",
+                    target_method="POST", target_path="/reservations", evidence=evidence,
+                ),
+            ],
+        ),
+    )
+    first_repository = repositories.ensure_repository(conn, "first", "/repos/first")
+    second_repository = repositories.ensure_repository(conn, "second", "/repos/second")
+    services.ensure_service(conn, "inventory", "/repos/first/inventory", "jvm-spring", first_repository)
+    services.ensure_service(conn, "inventory", "/repos/second/inventory", "jvm-spring", second_repository)
+
+    detail = queries.describe_entrypoint(conn, "checkout", "http", "post", "/orders")
+
+    assert detail["service_calls"][0]["resolved_target"] == {
+        "status": "ambiguous", "repositories": ["first", "second"],
+    }
+
+
+def test_describe_entrypoint_prefers_a_static_service_call_target_in_its_repository(tmp_path):
+    conn = open_db(tmp_path / "same-repository-service-call.db")
+    shop_repository = repositories.ensure_repository(conn, "shop", "/repos/shop")
+    other_repository = repositories.ensure_repository(conn, "other", "/repos/other")
+    checkout = services.ensure_service(
+        conn, "checkout", "/repos/shop/checkout", "jvm-spring", shop_repository,
+    )
+    evidence = Evidence("CheckoutService.java", 12, 15)
+    flows.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "CheckoutController.create", evidence)],
+            static_service_calls=[
+                StaticServiceCall(
+                    source="CheckoutController.create", target_service="inventory", protocol="http",
+                    target_method="POST", target_path="/reservations", evidence=evidence,
+                ),
+            ],
+        ),
+    )
+    services.ensure_service(conn, "inventory", "/repos/shop/inventory", "jvm-spring", shop_repository)
+    services.ensure_service(conn, "inventory", "/repos/other/inventory", "jvm-spring", other_repository)
+
+    detail = queries.describe_entrypoint(conn, "checkout", "http", "post", "/orders", repository="shop")
+
+    assert detail["service_calls"][0]["resolved_target"] == {
+        "status": "service_indexed", "service": "inventory", "repository": "shop",
+    }
 
 
 def test_describe_entrypoint_bounds_flow_context_and_reports_truncation(tmp_path):

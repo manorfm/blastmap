@@ -161,9 +161,13 @@ traces. Missing handlers and dynamic mappings are not inferred as failures. The
 `service_calls` list is similarly bounded to reachable symbols and contains only
 source-proven Java/Kotlin Feign calls with literal target service, method and route;
 an interface-level literal `@RequestMapping` prefix is composed with the method route.
-Dynamic URLs and placeholder configuration are omitted. The optional `smells` list
-contains explicit hypotheses, never a conclusive architecture classification; for example, a
-GraphQL mutation that directly writes state is flagged
+Each call includes `resolved_target`: `endpoint_indexed` with an entrypoint link,
+`service_indexed` without a matching route, `not_indexed`, or `ambiguous` with
+repository candidates. A unique target in the caller's repository is preferred over
+same-named external-repository candidates. Dynamic URLs and placeholder configuration
+are omitted. The optional `smells` list contains explicit hypotheses, never a
+conclusive architecture classification; for example, a GraphQL mutation that directly
+writes state is flagged
 optional `smells` list contains explicit hypotheses, never a conclusive architecture
 classification; for example, a GraphQL mutation that directly writes state is flagged
 as possible BFF domain-policy leakage for human validation. A flow that both writes

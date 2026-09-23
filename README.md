@@ -132,6 +132,12 @@ includes a literal interface `@RequestMapping` prefix when present, giving an ag
 the target service and endpoint without scanning source; placeholder configuration
 and dynamic URLs remain unknown.
 
+Each returned static service call also carries `resolved_target`: it links to the
+indexed remote endpoint when the target is unique (or uniquely belongs to the caller's
+repository), reports an indexed service when only the route is absent, and reports
+repository candidates when the name is ambiguous. OrbitKB never picks among duplicate
+service names automatically.
+
 When an indexed internal HTTP dependency exposes a source-proven 4xx error, OrbitKB
 can also flag that the caller has no same-type client-error mapping indexed. This is a
 review signal, not proof that the caller returns HTTP 500. When a literal Feign route

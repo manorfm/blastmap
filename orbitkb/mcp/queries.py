@@ -96,6 +96,62 @@ def _resolve_service(
     return candidates[0], None
 
 
+def _resolve_static_service_call_target(
+    conn: sqlite3.Connection,
+    caller: sqlite3.Row,
+    call: sqlite3.Row,
+    cache: dict[tuple[object, ...], dict],
+) -> dict:
+    """Resolve a literal static target without choosing among repository peers."""
+    key = (
+        caller["repository_id"], call["target_service"], call["protocol"],
+        call["target_method"], call["target_path"],
+    )
+    if key in cache:
+        return cache[key]
+    candidates = services_repo.list_service_candidates_by_name(conn, call["target_service"])
+    target = candidates[0] if len(candidates) == 1 else None
+    if target is None and caller["repository_id"] is not None:
+        same_repository = [
+            candidate for candidate in candidates
+            if candidate["repository_id"] == caller["repository_id"]
+        ]
+        if len(same_repository) == 1:
+            target = same_repository[0]
+    if target is None:
+        resolution = (
+            {"status": "not_indexed"}
+            if not candidates
+            else {
+                "status": "ambiguous",
+                "repositories": sorted({candidate["repository_name"] or "standalone" for candidate in candidates}),
+            }
+        )
+        cache[key] = resolution
+        return resolution
+
+    resolution: dict = {
+        "status": "service_indexed", "service": target["name"],
+        "repository": target["repository_name"],
+    }
+    if call["protocol"] == "http" and isinstance(call["target_method"], str) and isinstance(call["target_path"], str):
+        entrypoint = flows_repo.get_entrypoint(
+            conn, target["id"], "http", call["target_method"], call["target_path"],
+        )
+        if entrypoint is not None:
+            resolution["status"] = "endpoint_indexed"
+            resolution["entrypoint"] = {
+                "kind": entrypoint["kind"], "method": entrypoint["method"],
+                "name": entrypoint["name"], "symbol": entrypoint["symbol"],
+                "evidence": {
+                    "file": entrypoint["file_path"], "start_line": entrypoint["start_line"],
+                    "end_line": entrypoint["end_line"],
+                },
+            }
+    cache[key] = resolution
+    return resolution
+
+
 def list_repositories(conn: sqlite3.Connection) -> dict:
     rows = repositories_repo.list_repositories(conn)
     return {
@@ -273,6 +329,8 @@ def describe_entrypoint(
     truncated = len(bounded_edges) > effective_max_edges
     edges = bounded_edges[:effective_max_edges]
     flow_symbols = {entrypoint["symbol"]} | {edge["from_symbol"] for edge in edges} | {edge["to_symbol"] for edge in edges}
+    static_service_calls = flows_repo.list_static_service_calls_for_sources(conn, row["id"], flow_symbols)
+    target_cache: dict[tuple[object, ...], dict] = {}
     return {
         "service": row["name"], "repository": row["repository_name"],
         "entrypoint": {
@@ -326,8 +384,9 @@ def describe_entrypoint(
                     "file": item["file_path"], "start_line": item["start_line"],
                     "end_line": item["end_line"],
                 },
+                "resolved_target": _resolve_static_service_call_target(conn, row, item, target_cache),
             }
-            for item in flows_repo.list_static_service_calls_for_sources(conn, row["id"], flow_symbols)
+            for item in static_service_calls
         ],
         "contract": flows_repo.get_entrypoint_contract(conn, entrypoint["id"]),
         "smells": find_entrypoint_smells(entrypoint, edges),
