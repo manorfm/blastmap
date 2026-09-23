@@ -25,8 +25,8 @@ from orbitkb.analysis.cloud_detection import (
     detect_cloud_facts,
     go_client_declarations,
     jvm_client_declarations,
-    node_azure_client_declarations,
     node_command_imports,
+    node_stateful_client_declarations,
 )
 from orbitkb.analysis.cloud_taxonomy import (
     AWS_SDK_JS_V3_COMMANDS,
@@ -763,7 +763,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         imports = _node_named_imports(source_text)
         mongoose_models = _mongoose_model_variables(source_text)
         prisma_clients = _prisma_client_variables(source_text)
-        client_declarations = node_azure_client_declarations(source_text)
+        client_declarations = node_stateful_client_declarations(source_text)
         command_imports = node_command_imports(source_text)
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
         for node in _walk(tree):

@@ -11,11 +11,18 @@ from orbitkb.analysis.cloud_taxonomy import (
     AZURE_BLOB_CLIENT_TYPES,
     AZURE_BLOB_JAVA_FQN,
     AZURE_BLOB_METHOD_TABLE,
+    AZURE_EVENTHUB_JAVA_FQN,
+    AZURE_EVENTHUB_JAVA_TYPES,
     AZURE_EVENTHUB_METHOD_TABLE,
+    AZURE_SERVICEBUS_JAVA_FQN,
+    AZURE_SERVICEBUS_JAVA_TYPES,
     AZURE_SERVICEBUS_METHOD_TABLE,
     BOTO3_SERVICE_LITERALS,
+    CLOUD_FACTORY_METHOD_NAMES,
     CLOUD_PROVIDERS,
     CLOUD_RESOURCE_TYPES,
+    GCP_PUBSUB_JAVA_FQN,
+    GCP_PUBSUB_JAVA_TYPES,
     GCP_PUBSUB_METHOD_TABLE,
     GCS_METHOD_TABLE,
     GO_CLOUD_IMPORT_PATHS,
@@ -23,6 +30,8 @@ from orbitkb.analysis.cloud_taxonomy import (
     IAC_PRESENCE_ATTRIBUTES,
     IAC_RESOURCE_TYPE_TABLE,
     IAC_VALUE_ATTRIBUTES,
+    NODE_STATEFUL_CLIENT_MODULES,
+    NON_AWS_SERVICE_RESOURCE_TYPE,
     is_unresolved_literal,
     otel_messaging_system,
 )
@@ -214,3 +223,46 @@ def test_iac_value_attributes_track_public_access_controls():
     assert IAC_VALUE_ATTRIBUTES["aws_s3_bucket"] == ("acl",)
     assert IAC_VALUE_ATTRIBUTES["AWS::S3::Bucket"] == ("AccessControl",)
     assert IAC_VALUE_ATTRIBUTES["azurerm_storage_container"] == ("container_access_type",)
+
+
+def test_kinesis_is_a_boto3_service_literal():
+    assert BOTO3_SERVICE_LITERALS["kinesis"] == "kinesis"
+
+
+def test_gcp_pubsub_java_types_and_fqn():
+    assert GCP_PUBSUB_JAVA_TYPES["Publisher"] == "pubsub"
+    assert GCP_PUBSUB_JAVA_FQN["Publisher"] == "com.google.cloud.pubsub.v1.Publisher"
+    assert GCP_PUBSUB_JAVA_TYPES["Subscriber"] == "pubsub"
+    assert GCP_PUBSUB_JAVA_FQN["Subscriber"] == "com.google.cloud.pubsub.v1.Subscriber"
+
+
+def test_azure_servicebus_java_types_and_fqn():
+    assert AZURE_SERVICEBUS_JAVA_TYPES["ServiceBusSenderClient"] == "service_bus"
+    assert AZURE_SERVICEBUS_JAVA_FQN["ServiceBusSenderClient"] == "com.azure.messaging.servicebus.ServiceBusSenderClient"
+
+
+def test_azure_eventhub_java_types_and_client_types():
+    assert AZURE_EVENTHUB_JAVA_TYPES["EventHubProducerClient"] == "event_hub"
+    assert AZURE_EVENTHUB_JAVA_FQN["EventHubProducerClient"] == "com.azure.messaging.eventhubs.EventHubProducerClient"
+
+
+def test_non_aws_service_resource_type_defaults_service_bus_to_queue():
+    # Documented approximation, not a proof: the SDK's own sender/receiver
+    # client type is identical for queues and topics, so a topic operation
+    # is mis-tagged as a queue by this default. See the table's own comment.
+    assert NON_AWS_SERVICE_RESOURCE_TYPE["service_bus"] == "queue"
+    assert NON_AWS_SERVICE_RESOURCE_TYPE["pubsub"] == "pubsub"
+    assert NON_AWS_SERVICE_RESOURCE_TYPE["event_hub"] == "stream"
+
+
+def test_node_stateful_client_modules_cover_every_recognized_type():
+    assert NODE_STATEFUL_CLIENT_MODULES["PubSub"] == "pubsub"
+    assert NODE_STATEFUL_CLIENT_MODULES["ServiceBusClient"] == "service-bus"
+    assert NODE_STATEFUL_CLIENT_MODULES["EventHubProducerClient"] == "event-hubs"
+    assert NODE_STATEFUL_CLIENT_MODULES["BlobServiceClient"] == "storage-blob"
+
+
+def test_cloud_factory_method_names_cover_pubsub_and_servicebus():
+    assert CLOUD_FACTORY_METHOD_NAMES[("gcp", "pubsub")] == frozenset({"topic", "subscription", "Topic", "Subscription"})
+    assert "createSender" in CLOUD_FACTORY_METHOD_NAMES[("azure", "service_bus")]
+    assert "create_sender" in CLOUD_FACTORY_METHOD_NAMES[("azure", "service_bus")]

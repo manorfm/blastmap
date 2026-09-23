@@ -36,8 +36,20 @@ from orbitkb.analysis.cloud_taxonomy import (
     AZURE_BLOB_CLIENT_TYPES,
     AZURE_BLOB_JAVA_FQN,
     AZURE_BLOB_METHOD_TABLE,
+    AZURE_EVENTHUB_JAVA_FQN,
+    AZURE_EVENTHUB_JAVA_TYPES,
+    AZURE_EVENTHUB_METHOD_TABLE,
+    AZURE_SERVICEBUS_JAVA_FQN,
+    AZURE_SERVICEBUS_JAVA_TYPES,
+    AZURE_SERVICEBUS_METHOD_TABLE,
     BOTO3_SERVICE_LITERALS,
+    CLOUD_FACTORY_METHOD_NAMES,
+    GCP_PUBSUB_JAVA_FQN,
+    GCP_PUBSUB_JAVA_TYPES,
+    GCP_PUBSUB_METHOD_TABLE,
     GO_CLOUD_IMPORT_PATHS,
+    NODE_STATEFUL_CLIENT_MODULES,
+    NON_AWS_SERVICE_RESOURCE_TYPE,
 )
 from orbitkb.analysis.go_imports import parse_go_import_paths
 from orbitkb.analysis.jvm_imports import parse_jvm_imports
@@ -100,35 +112,83 @@ def node_command_imports(source: str) -> dict[str, tuple[str, str]]:
     }
 
 
-def _node_azure_import_names(source: str) -> set[str]:
-    """Local identifiers proven imported from `@azure/storage-blob` — the
-    same import-source check `node_command_imports` already applies for AWS,
-    closing the gap where a project's own unrelated class happening to be
-    named `BlobServiceClient` would otherwise be mistaken for Azure's."""
+# Local identifier -> the exact exported symbol name its own import resolved
+# to, restricted to the module each type is really shipped from
+# (NODE_STATEFUL_CLIENT_MODULES) — same "right name, verified import" gate
+# node_command_imports already applies for AWS Commands, closing the same gap
+# for every stateful client type this taxonomy recognizes.
+def _node_stateful_client_import_names(source: str) -> dict[str, str]:
     return {
-        local_name
+        local_name: original_name
         for local_name, module_name, original_name in parse_node_named_imports(source)
-        if module_name == "storage-blob" and original_name in AZURE_BLOB_CLIENT_TYPES
+        if NODE_STATEFUL_CLIENT_MODULES.get(original_name) == module_name
     }
 
 
-_NODE_AZURE_BLOB_DECLARATION_RE = re.compile(
-    r"\b(?:const|let|var)\s+(\w+)\s*=\s*new\s+("
-    + "|".join(re.escape(t) for t in sorted(AZURE_BLOB_CLIENT_TYPES))
-    + r")\s*\("
-)
+# type_name (the exported symbol, not a local alias) -> ClientKind, for every
+# stateful client Node exposes directly. Azure Blob/Event Hub are called on
+# directly once constructed; GCP Pub/Sub's `PubSub`/Azure `ServiceBusClient`
+# are base clients whose *child* topic/sender reference (see
+# _node_factory_chain_declarations below) is where the operation is actually
+# called — both shapes start from the same "declared client" proof here.
+_NODE_STATEFUL_CLIENT_KIND: dict[str, ClientKind] = {
+    "BlobServiceClient": ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE),
+    "BlobContainerClient": ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE),
+    "BlobClient": ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE),
+    "EventHubProducerClient": (
+        "azure", "event_hub", NON_AWS_SERVICE_RESOURCE_TYPE["event_hub"], "azure-eventhub", AZURE_EVENTHUB_METHOD_TABLE,
+    ),
+    "PubSub": ("gcp", "pubsub", NON_AWS_SERVICE_RESOURCE_TYPE["pubsub"], "gcp-pubsub", GCP_PUBSUB_METHOD_TABLE),
+    "ServiceBusClient": (
+        "azure", "service_bus", NON_AWS_SERVICE_RESOURCE_TYPE["service_bus"], "azure-servicebus", AZURE_SERVICEBUS_METHOD_TABLE,
+    ),
+}
+
+_NODE_STATEFUL_CLIENT_DECLARATION_RE = re.compile(r"\b(?:const|let|var)\s+(\w+)\s*=\s*new\s+(\w+)\s*\(")
 
 
-def node_azure_client_declarations(source: str) -> dict[str, ClientKind]:
-    """Azure Blob's Node SDK is a stateful client bound to a variable (unlike
-    AWS SDK v3's stateless Command construction), so it fits the same
-    "declared client -> later method call" resolution JVM/Go use."""
-    verified_types = _node_azure_import_names(source)
-    return {
-        identifier: ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
-        for identifier, type_name in _NODE_AZURE_BLOB_DECLARATION_RE.findall(source)
-        if type_name in verified_types
-    }
+def _node_direct_stateful_client_declarations(source: str) -> dict[str, ClientKind]:
+    verified = _node_stateful_client_import_names(source)
+    declarations: dict[str, ClientKind] = {}
+    for identifier, local_type_name in _NODE_STATEFUL_CLIENT_DECLARATION_RE.findall(source):
+        original_name = verified.get(local_type_name)
+        kind = _NODE_STATEFUL_CLIENT_KIND.get(original_name) if original_name else None
+        if kind is not None:
+            declarations[identifier] = kind
+    return declarations
+
+
+# `const topic = pubsub.topic('orders')` / `const sender =
+# serviceBusClient.createSender('q')` — a base client already resolved by
+# _node_direct_stateful_client_declarations producing a *child* reference.
+# Same propagation rule as Go's _go_factory_chain_declarations: only when the
+# base identifier is already proven and the method is a known factory method
+# for its (provider, service_name).
+_NODE_FACTORY_CHAIN_RE = re.compile(r"\b(?:const|let|var)\s+(\w+)\s*=\s*(\w+)\.(\w+)\(")
+
+
+def _node_factory_chain_declarations(source: str, base_declarations: dict[str, ClientKind]) -> dict[str, ClientKind]:
+    chained: dict[str, ClientKind] = {}
+    for new_identifier, base_identifier, method in _NODE_FACTORY_CHAIN_RE.findall(source):
+        kind = base_declarations.get(base_identifier)
+        if kind is None:
+            continue
+        provider, service_name = kind[0], kind[1]
+        if method in CLOUD_FACTORY_METHOD_NAMES.get((provider, service_name), frozenset()):
+            chained[new_identifier] = kind
+    return chained
+
+
+def node_stateful_client_declarations(source: str) -> dict[str, ClientKind]:
+    """Every locally resolvable "declared client -> method call" cloud
+    binding in a Node/TS file: direct stateful clients (Azure Blob/Event Hub)
+    plus, for GCP Pub/Sub and Azure Service Bus, the base client merged with
+    its one-level factory-chained child references — the same "declared
+    type -> method call" resolution JVM/Go use, just with an extra hop for
+    the SDKs that need it."""
+    declarations = dict(_node_direct_stateful_client_declarations(source))
+    declarations.update(_node_factory_chain_declarations(source, declarations))
+    return declarations
 
 
 def _jvm_client_kind(type_name: str, imports: dict[str, str]) -> ClientKind | None:
@@ -148,11 +208,23 @@ def _jvm_client_kind(type_name: str, imports: dict[str, str]) -> ClientKind | No
         return None if resource_type is None else ("aws", service_name, resource_type, "aws-sdk-java-v1", AWS_SDK_METHOD_TABLE)
     if resolved_fqn == AZURE_BLOB_JAVA_FQN.get(type_name):
         return ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
+    if resolved_fqn == GCP_PUBSUB_JAVA_FQN.get(type_name):
+        return ("gcp", "pubsub", NON_AWS_SERVICE_RESOURCE_TYPE["pubsub"], "gcp-pubsub", GCP_PUBSUB_METHOD_TABLE)
+    if resolved_fqn == AZURE_SERVICEBUS_JAVA_FQN.get(type_name):
+        return ("azure", "service_bus", NON_AWS_SERVICE_RESOURCE_TYPE["service_bus"], "azure-servicebus", AZURE_SERVICEBUS_METHOD_TABLE)
+    if resolved_fqn == AZURE_EVENTHUB_JAVA_FQN.get(type_name):
+        return ("azure", "event_hub", NON_AWS_SERVICE_RESOURCE_TYPE["event_hub"], "azure-eventhub", AZURE_EVENTHUB_METHOD_TABLE)
     return None
 
 
 _JVM_CLIENT_TYPE_ALTERNATION = "|".join(
-    re.escape(t) for t in sorted({*AWS_SDK_JAVA_V1_TYPES, *AWS_SDK_JAVA_V2_TYPES, *AZURE_BLOB_CLIENT_TYPES}, key=len, reverse=True)
+    re.escape(t) for t in sorted(
+        {
+            *AWS_SDK_JAVA_V1_TYPES, *AWS_SDK_JAVA_V2_TYPES, *AZURE_BLOB_CLIENT_TYPES,
+            *GCP_PUBSUB_JAVA_TYPES, *AZURE_SERVICEBUS_JAVA_TYPES, *AZURE_EVENTHUB_JAVA_TYPES,
+        },
+        key=len, reverse=True,
+    )
 )
 # Java: `TYPE name;` / Kotlin: `val name: TYPE` — declaration order is reversed
 # between the two languages, so each gets its own pattern rather than one
@@ -184,6 +256,25 @@ def jvm_client_declarations(source: str) -> dict[str, ClientKind]:
 # constraining which alias spellings this regex will even consider.
 _GO_CLIENT_PARAMETER_RE = re.compile(r"\b(\w+)\s+\*(\w+)\.Client\b")
 
+# `topic := client.Topic("orders")` — a base client already resolved by
+# _GO_CLIENT_PARAMETER_RE producing a *child* reference. Only propagates a
+# ClientKind when `client` is already a proven declaration and `method` is a
+# known factory method for its (provider, service_name) — an unrelated
+# `x := y.Foo()` never matches since `y` won't be in the base declarations.
+_GO_FACTORY_CHAIN_RE = re.compile(r"\b(\w+)\s*:?=\s*(\w+)\.(\w+)\(")
+
+
+def _go_factory_chain_declarations(source: str, base_declarations: dict[str, ClientKind]) -> dict[str, ClientKind]:
+    chained: dict[str, ClientKind] = {}
+    for new_identifier, base_identifier, method in _GO_FACTORY_CHAIN_RE.findall(source):
+        kind = base_declarations.get(base_identifier)
+        if kind is None:
+            continue
+        provider, service_name = kind[0], kind[1]
+        if method in CLOUD_FACTORY_METHOD_NAMES.get((provider, service_name), frozenset()):
+            chained[new_identifier] = kind
+    return chained
+
 
 def go_client_declarations(source: str) -> dict[str, ClientKind]:
     import_paths = parse_go_import_paths(source)
@@ -195,10 +286,15 @@ def go_client_declarations(source: str) -> dict[str, ClientKind]:
         provider, service_name = resolved
         if provider == "azure":
             declarations[identifier] = ("azure", "blob_storage", "object_storage", "azure-storage-blob", AZURE_BLOB_METHOD_TABLE)
-            continue
-        resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
-        if resource_type is not None:
-            declarations[identifier] = ("aws", service_name, resource_type, "aws-sdk-go-v2", AWS_SDK_GO_V2_METHODS)
+        elif provider == "gcp" and service_name == "pubsub":
+            declarations[identifier] = (
+                "gcp", "pubsub", NON_AWS_SERVICE_RESOURCE_TYPE["pubsub"], "gcp-pubsub-go", GCP_PUBSUB_METHOD_TABLE,
+            )
+        else:
+            resource_type = AWS_SERVICE_RESOURCE_TYPE.get(service_name)
+            if resource_type is not None:
+                declarations[identifier] = ("aws", service_name, resource_type, "aws-sdk-go-v2", AWS_SDK_GO_V2_METHODS)
+    declarations.update(_go_factory_chain_declarations(source, declarations))
     return declarations
 
 

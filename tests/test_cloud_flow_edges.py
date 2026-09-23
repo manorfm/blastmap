@@ -166,3 +166,76 @@ def test_node_azure_blob_call_produces_both_a_cloud_fact_and_a_flow_edge(tmp_pat
     assert len(cloud_edges) == 1
     assert cloud_edges[0].source == "uploader.upload"
     assert cloud_edges[0].kind == "writes"
+
+
+# WP13 — factory-chained cloud calls also produce a real FlowEdge, same as
+# the direct-call cases above. No engine.py change was needed for this: the
+# factory-chain propagation lives entirely in go_client_declarations/
+# node_stateful_client_declarations, whose merged output already flows
+# through the same cloud_edge_kind_and_fact integration point WP12 set up.
+
+def test_go_gcp_pubsub_factory_chain_call_produces_a_flow_edge(tmp_path: Path):
+    # Named PublishOrder, not Publish: a local function sharing the exact SDK
+    # method name would collide with BoundedFlowResolver's own "unique local
+    # symbol named .Publish" fallback, which runs after cloud classification
+    # and would rewrite the edge's target to the local symbol — a real,
+    # separate resolver interaction, not something to work around here.
+    (tmp_path / "publisher.go").write_text(
+        "package publisher\n\n"
+        'import "cloud.google.com/go/pubsub"\n\n'
+        "func PublishOrder(client *pubsub.Client, body string) {\n"
+        '\ttopic := client.Topic("orders")\n'
+        "\ttopic.Publish(ctx, &pubsub.Message{})\n"
+        "}\n"
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert len(result.cloud_facts) == 1
+    assert result.cloud_facts[0].provider == "gcp"
+    cloud_edges = [e for e in result.edges if e.target == "topic.Publish"]
+    assert len(cloud_edges) == 1
+    assert cloud_edges[0].source == "publisher.PublishOrder"
+    assert cloud_edges[0].kind == "publishes"
+
+
+def test_node_azure_servicebus_factory_chain_call_produces_a_flow_edge(tmp_path: Path):
+    (tmp_path / "publisher.ts").write_text(
+        'import { ServiceBusClient } from "@azure/service-bus";\n\n'
+        "const serviceBusClient = new ServiceBusClient(connectionString);\n\n"
+        "export async function publish(body: string) {\n"
+        '  const sender = serviceBusClient.createSender("orders-queue");\n'
+        "  await sender.sendMessages(body);\n"
+        "}\n"
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert len(result.cloud_facts) == 1
+    assert result.cloud_facts[0].service_name == "service_bus"
+    cloud_edges = [e for e in result.edges if e.target == "sender.sendMessages"]
+    assert len(cloud_edges) == 1
+    assert cloud_edges[0].source == "publisher.publish"
+    assert cloud_edges[0].kind == "publishes"
+
+
+def test_java_azure_eventhub_call_produces_both_a_cloud_fact_and_a_flow_edge(tmp_path: Path):
+    (tmp_path / "TelemetryPublisher.java").write_text(
+        "import com.azure.messaging.eventhubs.EventHubProducerClient;\n\n"
+        "public class TelemetryPublisher {\n"
+        "    private final EventHubProducerClient producer;\n\n"
+        "    void publish(Object batch) {\n"
+        "        producer.sendBatch(batch);\n"
+        "    }\n"
+        "}\n"
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert len(result.cloud_facts) == 1
+    assert result.cloud_facts[0].provider == "azure"
+    assert result.cloud_facts[0].resource_type == "stream"
+    cloud_edges = [e for e in result.edges if e.target == "producer.sendBatch"]
+    assert len(cloud_edges) == 1
+    assert cloud_edges[0].source == "TelemetryPublisher.publish"
+    assert cloud_edges[0].kind == "publishes"

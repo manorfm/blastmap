@@ -211,7 +211,7 @@ AWS_SDK_JAVA_V2_FQN: dict[str, str] = {
 # The literal string boto3.client(<literal>)/boto3.resource(<literal>) is called
 # with is itself the proof of which service it talks to.
 BOTO3_SERVICE_LITERALS: dict[str, str] = {
-    "sqs": "sqs", "sns": "sns", "s3": "s3", "events": "eventbridge",
+    "sqs": "sqs", "sns": "sns", "s3": "s3", "events": "eventbridge", "kinesis": "kinesis",
 }
 
 # Azure's Blob Storage SDKs use identical class/method names across languages by
@@ -240,6 +240,65 @@ GO_CLOUD_IMPORT_PATHS: dict[str, tuple[str, str]] = {
     "github.com/aws/aws-sdk-go-v2/service/eventbridge": ("aws", "eventbridge"),
     "github.com/aws/aws-sdk-go-v2/service/kinesis": ("aws", "kinesis"),
     "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob": ("azure", "blob_storage"),
+    "cloud.google.com/go/pubsub": ("gcp", "pubsub"),
+}
+
+# service_name -> resource_type, for the non-AWS services whose code-level
+# detection resolves to a single value regardless of which entity the client
+# ends up bound to at runtime. Azure Service Bus is the one documented
+# approximation here: its SDK client type (ServiceBusSenderClient/
+# ServiceBusReceiverClient) is identical for both queues and topics — only the
+# entity *name* passed at runtime distinguishes them, which isn't statically
+# provable — so every Service Bus code fact defaults to 'queue' (the more
+# common case). A topic operation is mis-tagged as a queue by this default;
+# IaC-side detection (WP10) does not have this limitation, since Terraform
+# declares `azurerm_servicebus_queue`/`_topic` as distinct resource types.
+NON_AWS_SERVICE_RESOURCE_TYPE: dict[str, str] = {
+    "blob_storage": "object_storage",
+    "pubsub": "pubsub",
+    "service_bus": "queue",
+    "event_hub": "stream",
+}
+
+# Declared client type name -> service_name, for GCP Pub/Sub and Azure Service
+# Bus/Event Hub's direct-call JVM types (Python/JS mirror this same
+# vocabulary but resolve it through import verification + regex, not this
+# table — see node_*/jvm_client_declarations in cloud_detection.py).
+GCP_PUBSUB_JAVA_TYPES: dict[str, str] = {"Publisher": "pubsub", "Subscriber": "pubsub"}
+GCP_PUBSUB_JAVA_FQN: dict[str, str] = {
+    "Publisher": "com.google.cloud.pubsub.v1.Publisher",
+    "Subscriber": "com.google.cloud.pubsub.v1.Subscriber",
+}
+AZURE_SERVICEBUS_JAVA_TYPES: dict[str, str] = {
+    "ServiceBusSenderClient": "service_bus", "ServiceBusReceiverClient": "service_bus",
+}
+AZURE_SERVICEBUS_JAVA_FQN: dict[str, str] = {
+    "ServiceBusSenderClient": "com.azure.messaging.servicebus.ServiceBusSenderClient",
+    "ServiceBusReceiverClient": "com.azure.messaging.servicebus.ServiceBusReceiverClient",
+}
+AZURE_EVENTHUB_JAVA_TYPES: dict[str, str] = {"EventHubProducerClient": "event_hub"}
+AZURE_EVENTHUB_JAVA_FQN: dict[str, str] = {
+    "EventHubProducerClient": "com.azure.messaging.eventhubs.EventHubProducerClient",
+}
+
+# Node package basename (parse_node_named_imports' module_basename) for each
+# stateful client type this taxonomy recognizes, direct or factory-base alike.
+NODE_STATEFUL_CLIENT_MODULES: dict[str, str] = {
+    "BlobServiceClient": "storage-blob", "BlobContainerClient": "storage-blob", "BlobClient": "storage-blob",
+    "EventHubProducerClient": "event-hubs",
+    "PubSub": "pubsub",
+    "ServiceBusClient": "service-bus",
+}
+
+# (provider, service_name) -> the base client's own method name(s) that
+# return a *child* reference (topic/sender/receiver) rather than performing
+# an operation themselves — the "factory chain" shape GCP Pub/Sub and Azure
+# Service Bus use instead of a direct method call on the base client. Method
+# names are each SDK's own documented API, both casing conventions where the
+# language differs (Node camelCase, Python snake_case, Go PascalCase).
+CLOUD_FACTORY_METHOD_NAMES: dict[tuple[str, str], frozenset[str]] = {
+    ("gcp", "pubsub"): frozenset({"topic", "subscription", "Topic", "Subscription"}),
+    ("azure", "service_bus"): frozenset({"createSender", "createReceiver", "create_sender", "create_receiver"}),
 }
 
 # Operation vocabulary for SDKs whose idiomatic usage is a *direct* call on a
