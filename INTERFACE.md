@@ -236,6 +236,13 @@ the precise retry policies and both policy/call evidence. It is a repeat-safety 
 not proof that an operation lacks an idempotency key or server-side de-duplication;
 those controls may be configured or implemented outside indexed source.
 
+`possible_retry_on_downstream_client_error` combines a literal retry, an unambiguous
+static HTTP target and a source-proven downstream 4xx contract. It scopes to the target
+endpoint's reachable flow when its literal route is indexed (`scope: endpoint_flow`),
+or falls back to target-service contracts at lower confidence. It does not claim the
+runtime retry predicate accepts that response; rate limits and other documented
+transient 4xx contracts can be intentional exceptions.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally

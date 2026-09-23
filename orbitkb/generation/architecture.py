@@ -581,15 +581,7 @@ def find_retries_on_potentially_non_idempotent_http_calls(conn: sqlite3.Connecti
                     file_path, start_line""",
         methods,
     ).fetchall()
-    policies_by_source: dict[tuple[int, str], list[sqlite3.Row]] = defaultdict(list)
-    for policy in conn.execute(
-        """SELECT service_id, source, mechanism, value, unit,
-                  file_path, start_line, end_line
-           FROM static_resilience_policies
-           WHERE kind = 'retry'
-           ORDER BY service_id, source, mechanism, value, unit, file_path, start_line""",
-    ).fetchall():
-        policies_by_source[(policy["service_id"], policy["source"])].append(policy)
+    policies_by_source = _retry_policies_by_source(conn)
 
     findings: list[dict] = []
     for call in calls:
@@ -629,6 +621,112 @@ def find_retries_on_potentially_non_idempotent_http_calls(conn: sqlite3.Connecti
                 ],
             },
         })
+    return findings
+
+
+def _retry_policies_by_source(conn: sqlite3.Connection) -> dict[tuple[int, str], list[sqlite3.Row]]:
+    """Group literal retry declarations by their local source symbol."""
+    policies_by_source: dict[tuple[int, str], list[sqlite3.Row]] = defaultdict(list)
+    for policy in conn.execute(
+        """SELECT service_id, source, mechanism, value, unit,
+                  file_path, start_line, end_line
+           FROM static_resilience_policies
+           WHERE kind = 'retry'
+           ORDER BY service_id, source, mechanism, value, unit, file_path, start_line""",
+    ).fetchall():
+        policies_by_source[(policy["service_id"], policy["source"])].append(policy)
+    return policies_by_source
+
+
+def find_retries_on_downstream_client_errors(conn: sqlite3.Connection) -> list[dict]:
+    """Flag retries whose resolved HTTP target exposes a source-proven 4xx.
+
+    The facts establish that retry and an HTTP call share a local source, not that a
+    retry predicate handles every downstream response. Ambiguous target service names
+    are excluded rather than joined to an arbitrary repository.
+    """
+    names = _service_names(conn)
+    calls = conn.execute(
+        """SELECT call.service_id AS from_service_id, target.id AS to_service_id,
+                  call.source AS caller_source, call.target_method AS api_method,
+                  call.target_path AS api_path, call.file_path AS caller_file_path,
+                  call.start_line AS caller_start_line, call.end_line AS caller_end_line
+           FROM static_service_calls call
+           JOIN services caller ON caller.id = call.service_id
+           JOIN services target ON LOWER(target.name) = LOWER(call.target_service)
+           WHERE call.protocol = 'http'
+             AND (
+                 (SELECT COUNT(*) FROM services candidate
+                  WHERE LOWER(candidate.name) = LOWER(call.target_service)) = 1
+                 OR (
+                     caller.repository_id IS NOT NULL
+                     AND target.repository_id = caller.repository_id
+                     AND (SELECT COUNT(*) FROM services candidate
+                          WHERE LOWER(candidate.name) = LOWER(call.target_service)
+                            AND candidate.repository_id = caller.repository_id) = 1
+                 )
+             )
+           ORDER BY call.service_id, target.id, call.source, call.target_method,
+                    call.target_path, call.file_path, call.start_line""",
+    ).fetchall()
+    policies_by_source = _retry_policies_by_source(conn)
+    endpoint_contracts: dict[tuple[int, str, str], tuple[str, list[sqlite3.Row]]] = {}
+    findings: list[dict] = []
+    for call in calls:
+        policies = policies_by_source.get((call["from_service_id"], call["caller_source"]))
+        if not policies:
+            continue
+        scope, contracts = _downstream_contract_scope(conn, call, endpoint_contracts)
+        for contract in contracts:
+            if not _is_client_error_contract(contract):
+                continue
+            confidence = 0.8 if scope == "endpoint_flow" else 0.65
+            findings.append({
+                "kind": "possible_retry_on_downstream_client_error", "severity": "warning",
+                "services": [names[call["from_service_id"]], names[call["to_service_id"]]],
+                "reason": (
+                    f"{call['caller_source']} declares retry and calls {names[call['to_service_id']]} "
+                    f"{call['api_method']} {call['api_path']}, whose indexed contract exposes "
+                    f"HTTP {contract['transport_code']} ({contract['internal_type']})."
+                ),
+                "detail": {
+                    "caller": {
+                        "service": names[call["from_service_id"]], "symbol": call["caller_source"],
+                        "method": call["api_method"], "path": call["api_path"],
+                    },
+                    "downstream": {
+                        "service": names[call["to_service_id"]], "symbol": contract["source"],
+                        "error_type": contract["internal_type"], "kind": contract["error_kind"],
+                        "status": contract["transport_code"],
+                    },
+                    "retry_policies": [
+                        {"mechanism": policy["mechanism"], "value": policy["value"], "unit": policy["unit"]}
+                        for policy in policies
+                    ],
+                    "scope": scope,
+                    "confidence": confidence,
+                    "evidence": [
+                        {
+                            "file": call["caller_file_path"], "start_line": call["caller_start_line"],
+                            "end_line": call["caller_end_line"],
+                        },
+                        *[_edge_evidence(policy) for policy in policies],
+                        _edge_evidence(contract),
+                    ],
+                    "unknowns": [
+                        "The retry predicate may exclude this response, or the policy may apply to another branch in the same source symbol.",
+                        (
+                            "The target endpoint flow proves this error source is reachable, but not which runtime response branch it receives."
+                            if scope == "endpoint_flow"
+                            else "The downstream mapping may be global or may not apply to this endpoint."
+                        ),
+                    ],
+                    "remediation": [
+                        "Review retry predicates and exclude permanent client errors unless the downstream contract explicitly marks them transient.",
+                        "Document exceptions such as rate limits before retrying a 4xx response.",
+                    ],
+                },
+            })
     return findings
 
 
@@ -1218,6 +1316,7 @@ _DETECTORS = (
     find_flow_hypotheses, find_read_entrypoint_side_effects, find_error_semantics_lost,
     find_static_http_calls_without_resilience_policy,
     find_retries_on_potentially_non_idempotent_http_calls,
+    find_retries_on_downstream_client_errors,
     find_unmapped_downstream_errors,
     find_overbroad_exception_handlers,
     find_message_consumers_without_recovery_policy,

@@ -29,6 +29,7 @@ from orbitkb.generation.architecture import (
     find_message_consumers_without_recovery_policy,
     find_overbroad_exception_handlers,
     find_read_entrypoint_side_effects,
+    find_retries_on_downstream_client_errors,
     find_retries_on_potentially_non_idempotent_http_calls,
     find_shared_database,
     find_static_http_calls_without_resilience_policy,
@@ -297,6 +298,62 @@ def test_retry_risk_finding_disappears_when_the_http_method_is_idempotent(tmp_pa
     )
 
     assert find_retries_on_potentially_non_idempotent_http_calls(conn) == []
+
+
+def test_retry_on_downstream_client_error_disappears_without_a_retry_policy(tmp_path: Path):
+    conn = open_db(tmp_path / "retry-downstream-error.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    inventory = services_repo.ensure_service(conn, "inventory", "/tmp/inventory", "jvm-spring")
+    call = StaticServiceCall(
+        source="CheckoutService.reserve", target_service="inventory", protocol="http",
+        target_method="POST", target_path="/reservations", evidence=STATIC_EVIDENCE,
+    )
+    retry = ResiliencePolicy(
+        source="CheckoutService.reserve", kind="retry", mechanism="reactor",
+        value=2, unit="retries", evidence=STATIC_EVIDENCE,
+    )
+    conflict = ErrorContract(
+        source="InventoryService.reserve", role="raises", error_kind="conflict",
+        internal_type="InsufficientStockException", protocol="http", transport_code="409",
+        public_code="OUT_OF_STOCK", exposes_internal_detail=False, retryability="not_retryable",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, checkout, AnalysisResult(static_service_calls=[call], resilience_policies=[retry]),
+    )
+    flows_repo.replace_analysis(
+        conn,
+        inventory,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/reservations", "InventoryController.reserve", STATIC_EVIDENCE)],
+            edges=[FlowEdge("InventoryController.reserve", "InventoryService.reserve", "invokes", STATIC_EVIDENCE)],
+            error_contracts=[conflict],
+        ),
+    )
+
+    findings = find_retries_on_downstream_client_errors(conn)
+
+    assert _kinds(findings) == {"possible_retry_on_downstream_client_error"}
+    assert findings[0]["detail"]["downstream"] == {
+        "service": "inventory", "symbol": "InventoryService.reserve",
+        "error_type": "InsufficientStockException", "kind": "conflict", "status": "409",
+    }
+    assert findings[0]["detail"]["scope"] == "endpoint_flow"
+    assert len(findings[0]["detail"]["evidence"]) == 3
+    run_id = recompute_architecture_view(conn)
+    assert "possible_retry_on_downstream_client_error" in {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    }
+
+    timeout = ResiliencePolicy(
+        source="CheckoutService.reserve", kind="timeout", mechanism="reactor",
+        value=2_000, unit="milliseconds", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, checkout, AnalysisResult(static_service_calls=[call], resilience_policies=[timeout]),
+    )
+
+    assert find_retries_on_downstream_client_errors(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

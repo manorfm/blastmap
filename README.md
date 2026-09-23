@@ -169,6 +169,12 @@ not assume the request is unsafe: an idempotency key or server-side deduplicatio
 exist outside indexed source. It instead directs the agent to validate repeat safety
 before preserving or expanding retries.
 
+OrbitKB also correlates retry declarations with source-proven downstream 4xx
+contracts. When the target route is indexed, the signal is limited to errors reachable
+from that endpoint; otherwise it uses the target service's contracts with lower
+confidence. It does not claim a retry predicate accepts the 4xx: rate limits and other
+documented transient client responses may be legitimate exceptions.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,
