@@ -264,7 +264,7 @@ CREATE TABLE IF NOT EXISTS entrypoint_contracts (
 CREATE TABLE IF NOT EXISTS security_findings (
     id          INTEGER PRIMARY KEY,
     service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-    kind        TEXT NOT NULL CHECK (kind IN ('tracked_dotenv', 'hardcoded_secret')),
+    kind        TEXT NOT NULL CHECK (kind IN ('tracked_dotenv', 'hardcoded_secret', 'cloud_credential_literal')),
     severity    TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'error')),
     file_path   TEXT NOT NULL,
     line        INTEGER NOT NULL,

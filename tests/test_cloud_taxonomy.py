@@ -215,8 +215,15 @@ def test_azure_servicebus_and_eventhub_method_tables_exist():
 
 
 def test_iac_presence_attributes_track_dlq_configuration_key_only():
-    assert IAC_PRESENCE_ATTRIBUTES["aws_sqs_queue"] == ("redrive_policy",)
-    assert IAC_PRESENCE_ATTRIBUTES["AWS::SQS::Queue"] == ("RedrivePolicy",)
+    assert "redrive_policy" in IAC_PRESENCE_ATTRIBUTES["aws_sqs_queue"]
+    assert "RedrivePolicy" in IAC_PRESENCE_ATTRIBUTES["AWS::SQS::Queue"]
+
+
+def test_iac_presence_attributes_track_encryption_and_versioning():
+    assert "kms_master_key_id" in IAC_PRESENCE_ATTRIBUTES["aws_sqs_queue"]
+    assert "KmsMasterKeyId" in IAC_PRESENCE_ATTRIBUTES["AWS::SQS::Queue"]
+    assert IAC_PRESENCE_ATTRIBUTES["aws_s3_bucket"] == ("versioning", "server_side_encryption_configuration")
+    assert IAC_PRESENCE_ATTRIBUTES["AWS::S3::Bucket"] == ("BucketEncryption", "VersioningConfiguration")
 
 
 def test_iac_value_attributes_track_public_access_controls():

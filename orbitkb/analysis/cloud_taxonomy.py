@@ -94,9 +94,25 @@ IAC_NAME_ATTRIBUTES: dict[str, tuple[str, ...]] = {
 # the way IAC_NAME_ATTRIBUTES resolves a name; only "was a dead-letter policy
 # configured at all" is asked for the DLQ smell, and the key's presence alone
 # answers that.
+# kms_master_key_id/KmsMasterKeyId prove SQS server-side encryption is
+# configured (still an inline attribute in Terraform, never split into a
+# separate resource the way S3's encryption/versioning were in AWS provider
+# v4+). BucketEncryption/VersioningConfiguration are CloudFormation's own
+# inline S3 properties — no split-resource problem there at all. Terraform's
+# S3 encryption/versioning (both inline-legacy and modern split-resource) are
+# handled separately: `versioning`/`server_side_encryption_configuration`
+# below track the legacy inline block still valid on `aws_s3_bucket` itself;
+# the modern `aws_s3_bucket_versioning`/`_server_side_encryption_configuration`
+# resources are correlated back to their bucket by orbitkb/iac/terraform.py
+# itself (see its own module docstring), writing synthetic
+# `versioning_configured`/`encryption_configured` keys into that same
+# attributes dict — a cross-resource fact, not a single declaration's own
+# attribute, so it can't live in this table.
 IAC_PRESENCE_ATTRIBUTES: dict[str, tuple[str, ...]] = {
-    "aws_sqs_queue": ("redrive_policy",),
-    "AWS::SQS::Queue": ("RedrivePolicy",),
+    "aws_sqs_queue": ("redrive_policy", "kms_master_key_id"),
+    "AWS::SQS::Queue": ("RedrivePolicy", "KmsMasterKeyId"),
+    "aws_s3_bucket": ("versioning", "server_side_encryption_configuration"),
+    "AWS::S3::Bucket": ("BucketEncryption", "VersioningConfiguration"),
 }
 
 # Attribute(s) whose literal value matters, same "only literal, interpolation

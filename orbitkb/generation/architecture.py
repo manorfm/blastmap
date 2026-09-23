@@ -590,12 +590,192 @@ def find_shared_cloud_resource(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+# Presence key(s) that prove a setting was configured, per IaC dialect and (for
+# Terraform S3) per detection path -- legacy inline block vs. the modern
+# split-resource correlation orbitkb/iac/terraform.py itself performs (see its
+# module docstring). Checking every key covers all three paths without
+# needing to know which one a given file used.
+_ENCRYPTION_PRESENCE_KEYS: dict[str, tuple[str, ...]] = {
+    "aws_sqs_queue": ("kms_master_key_id",),
+    "AWS::SQS::Queue": ("KmsMasterKeyId",),
+    "aws_s3_bucket": ("server_side_encryption_configuration", "encryption_configured"),
+    "AWS::S3::Bucket": ("BucketEncryption",),
+}
+_VERSIONING_PRESENCE_KEYS: dict[str, tuple[str, ...]] = {
+    "aws_s3_bucket": ("versioning", "versioning_configured"),
+    "AWS::S3::Bucket": ("VersioningConfiguration",),
+}
+# Attribute name -> the literal value(s) that mean "publicly accessible",
+# vendor-sourced from each provider's own ACL/access-level vocabulary, one
+# entry per IaC dialect's own spelling of the same attribute.
+_PUBLIC_ACCESS_VALUES: dict[str, frozenset[str]] = {
+    "acl": frozenset({"public-read", "public-read-write", "authenticated-read"}),
+    "AccessControl": frozenset({"PublicRead", "PublicReadWrite", "AuthenticatedRead"}),
+    "container_access_type": frozenset({"blob", "container"}),
+}
+
+
+def find_cloud_dead_letter_queue_missing(conn: sqlite3.Connection) -> list[dict]:
+    """Flag an SQS queue with no source-proven dead-letter/redrive policy —
+    the IaC analog of find_message_consumers_without_recovery_policy. A
+    missing local declaration is not proof the queue truly lacks one (it
+    could be set outside the indexed IaC), hence the low confidence and
+    "worth checking" framing rather than a verdict."""
+    names = _service_names(conn)
+    rows = conn.execute(
+        """
+        SELECT cir.service_id, cir.iac_resource_type, cir.logical_name, cir.physical_name,
+               cir.attributes_json, cir.file_path, cir.start_line, cir.end_line
+        FROM cloud_iac_resources cir
+        JOIN services svc ON svc.id = cir.service_id
+        WHERE cir.iac_resource_type IN ('aws_sqs_queue', 'AWS::SQS::Queue')
+        ORDER BY cir.service_id, cir.logical_name
+        """
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        attributes = json.loads(row["attributes_json"] or "{}")
+        redrive_key = "redrive_policy" if row["iac_resource_type"] == "aws_sqs_queue" else "RedrivePolicy"
+        if attributes.get(redrive_key):
+            continue
+        service = names[row["service_id"]]
+        queue = row["physical_name"] or row["logical_name"]
+        findings.append({
+            "kind": "possible_missing_dead_letter_queue", "severity": "warning",
+            "services": [service],
+            "reason": f"{service}'s SQS queue '{queue}' has no source-proven dead-letter/redrive policy; validate it.",
+            "detail": {
+                "queue": queue, "confidence": 0.45,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": ["A redrive policy may be declared outside the indexed IaC, or attached to a shared DLQ module."],
+                "remediation": ["Confirm a dead-letter queue and redrive policy are configured, or declare one near this queue."],
+            },
+        })
+    return findings
+
+
+def find_public_object_storage(conn: sqlite3.Connection) -> list[dict]:
+    """A bucket/container whose IaC declaration literally sets a public ACL —
+    the literal value is the proof, not an inference from the resource's
+    name or purpose."""
+    names = _service_names(conn)
+    rows = conn.execute(
+        """
+        SELECT cir.service_id, cir.provider, cir.iac_resource_type, cir.logical_name, cir.physical_name,
+               cir.attributes_json, cir.file_path, cir.start_line, cir.end_line
+        FROM cloud_iac_resources cir
+        JOIN services svc ON svc.id = cir.service_id
+        WHERE cir.resource_type = 'object_storage'
+        ORDER BY cir.service_id, cir.logical_name
+        """
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        attributes = json.loads(row["attributes_json"] or "{}")
+        public_attribute = next(
+            (
+                (attr_name, value) for attr_name, value in attributes.items()
+                if value in _PUBLIC_ACCESS_VALUES.get(attr_name, frozenset())
+            ),
+            None,
+        )
+        if public_attribute is None:
+            continue
+        attr_name, value = public_attribute
+        service = names[row["service_id"]]
+        bucket = row["physical_name"] or row["logical_name"]
+        findings.append({
+            "kind": "possible_public_object_storage", "severity": "critical",
+            "services": [service],
+            "reason": f"{service}'s {row['provider']} storage '{bucket}' declares {attr_name}='{value}', a publicly accessible setting.",
+            "detail": {
+                "bucket": bucket, "attribute": attr_name, "value": value, "confidence": 0.85,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": ["A bucket policy or public access block declared elsewhere in the IaC may still restrict access."],
+                "remediation": ["Confirm public access is intentional, or set a private ACL and rely on explicit bucket policies instead."],
+            },
+        })
+    return findings
+
+
+def find_unencrypted_cloud_resource(conn: sqlite3.Connection) -> list[dict]:
+    """S3/SQS specifically — GCS and Azure Storage encrypt by default, so an
+    absent declaration there isn't informative the way it is for AWS."""
+    names = _service_names(conn)
+    rows = conn.execute(
+        """
+        SELECT cir.service_id, cir.provider, cir.iac_resource_type, cir.logical_name, cir.physical_name,
+               cir.attributes_json, cir.file_path, cir.start_line, cir.end_line
+        FROM cloud_iac_resources cir
+        JOIN services svc ON svc.id = cir.service_id
+        WHERE cir.iac_resource_type IN ('aws_sqs_queue', 'AWS::SQS::Queue', 'aws_s3_bucket', 'AWS::S3::Bucket')
+        ORDER BY cir.service_id, cir.logical_name
+        """
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        attributes = json.loads(row["attributes_json"] or "{}")
+        presence_keys = _ENCRYPTION_PRESENCE_KEYS[row["iac_resource_type"]]
+        if any(attributes.get(key) for key in presence_keys):
+            continue
+        service = names[row["service_id"]]
+        resource = row["physical_name"] or row["logical_name"]
+        findings.append({
+            "kind": "possible_unencrypted_cloud_resource", "severity": "info",
+            "services": [service],
+            "reason": f"{service}'s {row['provider']} resource '{resource}' has no source-proven server-side encryption; validate it.",
+            "detail": {
+                "resource": resource, "confidence": 0.4,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": ["Encryption may be enabled by an account/organization default outside the indexed IaC."],
+                "remediation": ["Confirm server-side encryption is enabled, or declare it explicitly near this resource."],
+            },
+        })
+    return findings
+
+
+def find_missing_bucket_versioning(conn: sqlite3.Connection) -> list[dict]:
+    names = _service_names(conn)
+    rows = conn.execute(
+        """
+        SELECT cir.service_id, cir.provider, cir.iac_resource_type, cir.logical_name, cir.physical_name,
+               cir.attributes_json, cir.file_path, cir.start_line, cir.end_line
+        FROM cloud_iac_resources cir
+        JOIN services svc ON svc.id = cir.service_id
+        WHERE cir.iac_resource_type IN ('aws_s3_bucket', 'AWS::S3::Bucket')
+        ORDER BY cir.service_id, cir.logical_name
+        """
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        attributes = json.loads(row["attributes_json"] or "{}")
+        presence_keys = _VERSIONING_PRESENCE_KEYS[row["iac_resource_type"]]
+        if any(attributes.get(key) for key in presence_keys):
+            continue
+        service = names[row["service_id"]]
+        bucket = row["physical_name"] or row["logical_name"]
+        findings.append({
+            "kind": "possible_missing_bucket_versioning", "severity": "info",
+            "services": [service],
+            "reason": f"{service}'s bucket '{bucket}' has no source-proven versioning configuration; validate it.",
+            "detail": {
+                "bucket": bucket, "confidence": 0.4,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": ["Versioning may be enabled by an account/organization default outside the indexed IaC."],
+                "remediation": ["Confirm versioning is enabled, or declare it explicitly for this bucket."],
+            },
+        })
+    return findings
+
+
 _DETECTORS = (
     find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
+    find_cloud_dead_letter_queue_missing, find_public_object_storage,
+    find_unencrypted_cloud_resource, find_missing_bucket_versioning,
 )
 
 

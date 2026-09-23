@@ -8,6 +8,17 @@ case is stored as unresolved rather than guessed.
 the returned value (e.g. the Python string `'"orders-queue"'`, not
 `'orders-queue'`) — `_unquote` below is exactly that normalization, nothing
 more.
+
+AWS provider v4+ split S3 bucket versioning/encryption out of `aws_s3_bucket`
+into their own resources (`aws_s3_bucket_versioning`,
+`aws_s3_bucket_server_side_encryption_configuration`), each pointing back at
+its bucket via a reference expression (`bucket = aws_s3_bucket.orders.id`),
+which `hcl2.load()` represents as the literal string `"${aws_s3_bucket.orders.id}"`.
+Neither settings resource is a cloud resource of its own — modeling either as
+a separate `cloud_iac_resources` row would be misleading — so
+`_referenced_bucket_names` below correlates them back to their bucket's own
+declaration at parse time, folding the result into that bucket's
+`attributes` dict as `versioning_configured`/`encryption_configured`.
 """
 from __future__ import annotations
 
@@ -66,6 +77,26 @@ def _declaration_pattern(iac_resource_type: str, logical_name: str) -> re.Patter
     )
 
 
+_BUCKET_REFERENCE_RE = re.compile(r"^\$\{aws_s3_bucket\.(\w+)\.")
+_VERSIONING_RESOURCE_TYPE = "aws_s3_bucket_versioning"
+_ENCRYPTION_RESOURCE_TYPE = "aws_s3_bucket_server_side_encryption_configuration"
+
+
+def _referenced_bucket_names(raw_resources: list[dict], target_iac_type: str) -> set[str]:
+    """Logical names of every `aws_s3_bucket` a `target_iac_type` resource
+    points its own `bucket` attribute at — see this module's docstring."""
+    names: set[str] = set()
+    for block in raw_resources:
+        for raw_type, named in block.items():
+            if _unquote(raw_type) != target_iac_type:
+                continue
+            for attrs in named.values():
+                bucket_ref = attrs.get("bucket")
+                if isinstance(bucket_ref, str) and (match := _BUCKET_REFERENCE_RE.match(bucket_ref)):
+                    names.add(match.group(1))
+    return names
+
+
 def parse_terraform_file(path: Path) -> list[IacResource]:
     """One `IacResource` per declared resource whose type is in
     `IAC_RESOURCE_TYPE_TABLE`; every other resource type is silently skipped —
@@ -78,8 +109,12 @@ def parse_terraform_file(path: Path) -> list[IacResource]:
     except LarkError:
         return []
 
+    raw_resources = parsed.get("resource", [])
+    versioned_buckets = _referenced_bucket_names(raw_resources, _VERSIONING_RESOURCE_TYPE)
+    encrypted_buckets = _referenced_bucket_names(raw_resources, _ENCRYPTION_RESOURCE_TYPE)
+
     resources: list[IacResource] = []
-    for block in parsed.get("resource", []):
+    for block in raw_resources:
         for raw_type, named in block.items():
             iac_resource_type = _unquote(raw_type)
             mapping = IAC_RESOURCE_TYPE_TABLE.get(iac_resource_type)
@@ -90,6 +125,12 @@ def parse_terraform_file(path: Path) -> list[IacResource]:
                 logical_name = _unquote(raw_name)
                 physical_name = _resolve_physical_name(attrs, iac_resource_type)
                 line = find_line(text, _declaration_pattern(iac_resource_type, logical_name))
+                resolved_attributes = _resolve_attributes(attrs, iac_resource_type)
+                if iac_resource_type == "aws_s3_bucket":
+                    if logical_name in versioned_buckets:
+                        resolved_attributes["versioning_configured"] = True
+                    if logical_name in encrypted_buckets:
+                        resolved_attributes["encryption_configured"] = True
                 resources.append(IacResource(
                     provider=provider,
                     resource_type=resource_type,
@@ -101,6 +142,6 @@ def parse_terraform_file(path: Path) -> list[IacResource]:
                     file_path=str(path),
                     start_line=line,
                     end_line=line,
-                    attributes=_resolve_attributes(attrs, iac_resource_type),
+                    attributes=resolved_attributes,
                 ))
     return resources

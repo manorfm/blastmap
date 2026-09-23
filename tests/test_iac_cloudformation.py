@@ -144,3 +144,57 @@ def test_s3_bucket_with_intrinsic_access_control_does_not_track_it(tmp_path: Pat
     resources = parse_cloudformation_file(template)
 
     assert resources[0].attributes == {}
+
+
+def test_sqs_queue_with_kms_master_key_tracks_encryption_presence(tmp_path: Path):
+    template = tmp_path / "template.yaml"
+    template.write_text(
+        "Resources:\n"
+        "  OrdersQueue:\n"
+        "    Type: AWS::SQS::Queue\n"
+        "    Properties:\n"
+        "      QueueName: orders-queue\n"
+        "      KmsMasterKeyId: alias/aws/sqs\n"
+    )
+
+    resources = parse_cloudformation_file(template)
+
+    assert resources[0].attributes == {"KmsMasterKeyId": True}
+
+
+def test_s3_bucket_tracks_encryption_and_versioning_presence(tmp_path: Path):
+    """Unlike Terraform (split into separate resources in provider v4+),
+    CloudFormation declares both inline on the bucket itself."""
+    template = tmp_path / "template.yaml"
+    template.write_text(
+        "Resources:\n"
+        "  AssetsBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      BucketName: my-assets-bucket\n"
+        "      VersioningConfiguration:\n"
+        "        Status: Enabled\n"
+        "      BucketEncryption:\n"
+        "        ServerSideEncryptionConfiguration:\n"
+        "          - ServerSideEncryptionByDefault:\n"
+        "              SSEAlgorithm: AES256\n"
+    )
+
+    resources = parse_cloudformation_file(template)
+
+    assert resources[0].attributes == {"BucketEncryption": True, "VersioningConfiguration": True}
+
+
+def test_s3_bucket_without_encryption_or_versioning_has_no_tracked_attributes(tmp_path: Path):
+    template = tmp_path / "template.yaml"
+    template.write_text(
+        "Resources:\n"
+        "  AssetsBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      BucketName: my-assets-bucket\n"
+    )
+
+    resources = parse_cloudformation_file(template)
+
+    assert resources[0].attributes == {}

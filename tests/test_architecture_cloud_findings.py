@@ -11,8 +11,12 @@ from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import (
     find_cloud_code_without_iac,
+    find_cloud_dead_letter_queue_missing,
     find_cloud_iac_unused_in_code,
+    find_missing_bucket_versioning,
+    find_public_object_storage,
     find_shared_cloud_resource,
+    find_unencrypted_cloud_resource,
 )
 from orbitkb.iac.models import IacResource
 
@@ -137,3 +141,186 @@ def test_one_service_on_a_queue_is_not_flagged_as_shared(tmp_path: Path):
     flows_repo.replace_analysis(conn, a, AnalysisResult(cloud_facts=[_cloud_fact()]))
 
     assert find_shared_cloud_resource(conn) == []
+
+
+# WP15 — smells derived from cloud_iac_resources.attributes_json (WP11)
+
+
+def test_sqs_queue_without_redrive_policy_is_flagged_as_missing_dlq(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "orders-service", "/tmp/shop/orders", "node-ts", repository_id=repository_id)
+    cloud_iac_repo.replace_iac_resources(
+        conn, repository_id, [_iac_resource(matched_service_name="orders-service")],
+    )
+
+    findings = find_cloud_dead_letter_queue_missing(conn)
+
+    assert len(findings) == 1
+    assert findings[0]["kind"] == "possible_missing_dead_letter_queue"
+    assert findings[0]["severity"] == "warning"
+    assert findings[0]["services"] == ["orders-service"]
+
+
+def test_sqs_queue_with_redrive_policy_is_not_flagged_as_missing_dlq(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "orders-service", "/tmp/shop/orders", "node-ts", repository_id=repository_id)
+    resource = IacResource(
+        provider="aws", resource_type="queue", iac_resource_type="aws_sqs_queue",
+        logical_name="orders", physical_name="orders-queue", source_format="terraform",
+        confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+        matched_service_name="orders-service", attributes={"redrive_policy": True},
+    )
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [resource])
+
+    assert find_cloud_dead_letter_queue_missing(conn) == []
+
+
+def test_s3_bucket_with_public_acl_is_flagged(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "assets-service", "/tmp/shop/assets", "node-ts", repository_id=repository_id)
+    resource = IacResource(
+        provider="aws", resource_type="object_storage", iac_resource_type="aws_s3_bucket",
+        logical_name="assets", physical_name="my-assets-bucket", source_format="terraform",
+        confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+        matched_service_name="assets-service", attributes={"acl": "public-read"},
+    )
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [resource])
+
+    findings = find_public_object_storage(conn)
+
+    assert len(findings) == 1
+    assert findings[0]["kind"] == "possible_public_object_storage"
+    assert findings[0]["severity"] == "critical"
+    assert findings[0]["detail"]["attribute"] == "acl"
+    assert findings[0]["detail"]["value"] == "public-read"
+
+
+def test_s3_bucket_with_private_acl_is_not_flagged(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "assets-service", "/tmp/shop/assets", "node-ts", repository_id=repository_id)
+    resource = IacResource(
+        provider="aws", resource_type="object_storage", iac_resource_type="aws_s3_bucket",
+        logical_name="assets", physical_name="my-assets-bucket", source_format="terraform",
+        confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+        matched_service_name="assets-service", attributes={"acl": "private"},
+    )
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [resource])
+
+    assert find_public_object_storage(conn) == []
+
+
+def test_azure_container_with_public_access_type_is_flagged(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "assets-service", "/tmp/shop/assets", "node-ts", repository_id=repository_id)
+    resource = IacResource(
+        provider="azure", resource_type="object_storage", iac_resource_type="azurerm_storage_container",
+        logical_name="assets", physical_name="assets", source_format="terraform",
+        confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+        matched_service_name="assets-service", attributes={"container_access_type": "blob"},
+    )
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [resource])
+
+    findings = find_public_object_storage(conn)
+
+    assert len(findings) == 1
+    assert findings[0]["detail"]["attribute"] == "container_access_type"
+
+
+def test_s3_bucket_without_encryption_is_flagged(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "assets-service", "/tmp/shop/assets", "node-ts", repository_id=repository_id)
+    resource = IacResource(
+        provider="aws", resource_type="object_storage", iac_resource_type="aws_s3_bucket",
+        logical_name="assets", physical_name="my-assets-bucket", source_format="terraform",
+        confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+        matched_service_name="assets-service",
+    )
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [resource])
+
+    findings = find_unencrypted_cloud_resource(conn)
+
+    assert len(findings) == 1
+    assert findings[0]["kind"] == "possible_unencrypted_cloud_resource"
+    assert findings[0]["severity"] == "info"
+
+
+def test_s3_bucket_with_modern_split_resource_encryption_is_not_flagged(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "assets-service", "/tmp/shop/assets", "node-ts", repository_id=repository_id)
+    resource = IacResource(
+        provider="aws", resource_type="object_storage", iac_resource_type="aws_s3_bucket",
+        logical_name="assets", physical_name="my-assets-bucket", source_format="terraform",
+        confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+        matched_service_name="assets-service", attributes={"encryption_configured": True},
+    )
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [resource])
+
+    assert find_unencrypted_cloud_resource(conn) == []
+
+
+def test_sqs_queue_without_kms_key_is_flagged_as_unencrypted(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "orders-service", "/tmp/shop/orders", "node-ts", repository_id=repository_id)
+    cloud_iac_repo.replace_iac_resources(
+        conn, repository_id, [_iac_resource(matched_service_name="orders-service")],
+    )
+
+    findings = find_unencrypted_cloud_resource(conn)
+
+    assert len(findings) == 1
+    assert findings[0]["detail"]["resource"] == "orders-queue"
+
+
+def test_s3_bucket_without_versioning_is_flagged(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "assets-service", "/tmp/shop/assets", "node-ts", repository_id=repository_id)
+    resource = IacResource(
+        provider="aws", resource_type="object_storage", iac_resource_type="aws_s3_bucket",
+        logical_name="assets", physical_name="my-assets-bucket", source_format="terraform",
+        confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+        matched_service_name="assets-service",
+    )
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [resource])
+
+    findings = find_missing_bucket_versioning(conn)
+
+    assert len(findings) == 1
+    assert findings[0]["kind"] == "possible_missing_bucket_versioning"
+    assert findings[0]["severity"] == "info"
+
+
+def test_s3_bucket_with_modern_split_resource_versioning_is_not_flagged(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "assets-service", "/tmp/shop/assets", "node-ts", repository_id=repository_id)
+    resource = IacResource(
+        provider="aws", resource_type="object_storage", iac_resource_type="aws_s3_bucket",
+        logical_name="assets", physical_name="my-assets-bucket", source_format="terraform",
+        confidence="high", file_path="infra/main.tf", start_line=1, end_line=3,
+        matched_service_name="assets-service", attributes={"versioning_configured": True},
+    )
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, [resource])
+
+    assert find_missing_bucket_versioning(conn) == []
+
+
+def test_sqs_queue_is_not_flagged_by_the_bucket_versioning_detector(tmp_path: Path):
+    """find_missing_bucket_versioning only considers S3 buckets -- an SQS
+    queue has no versioning concept at all."""
+    conn = open_db(tmp_path / "test.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "orders-service", "/tmp/shop/orders", "node-ts", repository_id=repository_id)
+    cloud_iac_repo.replace_iac_resources(
+        conn, repository_id, [_iac_resource(matched_service_name="orders-service")],
+    )
+
+    assert find_missing_bucket_versioning(conn) == []

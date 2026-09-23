@@ -8,11 +8,19 @@ _ASSIGNMENT = re.compile(
 )
 _BEARER = re.compile(r"(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+")
 _PRIVATE_KEY = re.compile(r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----")
+# Same gap _ASSIGNMENT leaves open as orbitkb.security.findings._CLOUD_CREDENTIAL_LITERAL
+# documents: `accessKeyId`/`AccountKey` don't contain any of _ASSIGNMENT's
+# keywords, so these need their own patterns to keep the literal out of
+# evidence text reaching an LLM, not just out of the security-findings scan.
+_AWS_ACCESS_KEY = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
+_AZURE_ACCOUNT_KEY = re.compile(r"\bAccountKey=[A-Za-z0-9+/=]{20,}")
 
 
 def redact_sensitive_values(text: str) -> str:
     """Returns usable evidence while replacing values, never keys or topology."""
     text = _PRIVATE_KEY.sub("[REDACTED_PRIVATE_KEY]", text)
+    text = _AWS_ACCESS_KEY.sub("[REDACTED]", text)
+    text = _AZURE_ACCOUNT_KEY.sub("AccountKey=[REDACTED]", text)
     text = _ASSIGNMENT.sub(r"\g<prefix>[REDACTED]", text)
     return _BEARER.sub(r"\1[REDACTED]", text)
 

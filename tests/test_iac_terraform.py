@@ -158,3 +158,100 @@ def test_s3_bucket_with_interpolated_acl_does_not_track_it(tmp_path: Path):
     resources = parse_terraform_file(tf)
 
     assert resources[0].attributes == {}
+
+
+def test_sqs_queue_with_kms_key_tracks_encryption_presence(tmp_path: Path):
+    tf = tmp_path / "main.tf"
+    tf.write_text(
+        'resource "aws_sqs_queue" "orders" {\n'
+        '  name              = "orders-queue"\n'
+        '  kms_master_key_id = "alias/aws/sqs"\n'
+        "}\n"
+    )
+
+    resources = parse_terraform_file(tf)
+
+    assert resources[0].attributes == {"kms_master_key_id": True}
+
+
+def test_s3_bucket_with_legacy_inline_versioning_block_tracks_presence(tmp_path: Path):
+    tf = tmp_path / "main.tf"
+    tf.write_text(
+        'resource "aws_s3_bucket" "assets" {\n'
+        '  bucket = "my-assets-bucket"\n'
+        "  versioning {\n"
+        "    enabled = true\n"
+        "  }\n"
+        "}\n"
+    )
+
+    resources = parse_terraform_file(tf)
+
+    assert resources[0].attributes == {"versioning": True}
+
+
+def test_s3_bucket_versioning_resource_is_correlated_back_to_its_bucket(tmp_path: Path):
+    """Modern Terraform (AWS provider v4+) splits versioning into its own
+    resource, referencing the bucket instead of declaring it inline."""
+    tf = tmp_path / "main.tf"
+    tf.write_text(
+        'resource "aws_s3_bucket" "orders" {\n'
+        '  bucket = "orders-bucket"\n'
+        "}\n"
+        'resource "aws_s3_bucket_versioning" "orders" {\n'
+        "  bucket = aws_s3_bucket.orders.id\n"
+        "  versioning_configuration {\n"
+        '    status = "Enabled"\n'
+        "  }\n"
+        "}\n"
+    )
+
+    resources = parse_terraform_file(tf)
+
+    bucket = next(r for r in resources if r.iac_resource_type == "aws_s3_bucket")
+    assert bucket.attributes == {"versioning_configured": True}
+    # aws_s3_bucket_versioning is a settings attachment, not a cloud resource
+    # of its own -- it must not also appear as a separate IacResource row.
+    assert len(resources) == 1
+
+
+def test_s3_bucket_encryption_resource_is_correlated_back_to_its_bucket(tmp_path: Path):
+    tf = tmp_path / "main.tf"
+    tf.write_text(
+        'resource "aws_s3_bucket" "orders" {\n'
+        '  bucket = "orders-bucket"\n'
+        "}\n"
+        'resource "aws_s3_bucket_server_side_encryption_configuration" "orders" {\n'
+        "  bucket = aws_s3_bucket.orders.id\n"
+        "  rule {\n"
+        "    apply_server_side_encryption_by_default {\n"
+        '      sse_algorithm = "AES256"\n'
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+
+    resources = parse_terraform_file(tf)
+
+    bucket = next(r for r in resources if r.iac_resource_type == "aws_s3_bucket")
+    assert bucket.attributes == {"encryption_configured": True}
+
+
+def test_s3_bucket_versioning_resource_referencing_a_different_bucket_is_not_correlated(tmp_path: Path):
+    tf = tmp_path / "main.tf"
+    tf.write_text(
+        'resource "aws_s3_bucket" "orders" {\n'
+        '  bucket = "orders-bucket"\n'
+        "}\n"
+        'resource "aws_s3_bucket_versioning" "payments" {\n'
+        "  bucket = aws_s3_bucket.payments.id\n"
+        "  versioning_configuration {\n"
+        '    status = "Enabled"\n'
+        "  }\n"
+        "}\n"
+    )
+
+    resources = parse_terraform_file(tf)
+
+    bucket = next(r for r in resources if r.iac_resource_type == "aws_s3_bucket")
+    assert bucket.attributes == {}
