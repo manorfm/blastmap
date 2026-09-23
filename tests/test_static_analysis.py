@@ -97,6 +97,35 @@ class OrdersController(private val useCase: CreateOrderUseCase) {
     assert any(edge.kind == "invokes" and edge.target == "useCase.execute" for edge in result.edges)
 
 
+def test_jvm_spring_analyzer_links_feign_invocation_to_declared_target_endpoint(tmp_path: Path):
+    (tmp_path / "InventoryClient.java").write_text(
+        '''@FeignClient(name = "inventory")
+interface InventoryClient {
+  @PostMapping("/reservations")
+  Reservation reserve(ReserveRequest request);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "CheckoutService.java").write_text(
+        '''class CheckoutService {
+  private InventoryClient inventoryClient;
+  Receipt checkout(ReserveRequest request) {
+    Reservation reservation = inventoryClient.reserve(request);
+    return new Receipt(reservation);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(call.source, call.target_service, call.protocol, call.target_method, call.target_path) for call in result.static_service_calls] == [
+        ("CheckoutService.checkout", "inventory", "http", "POST", "/reservations"),
+    ]
+
+
 def test_native_literal_route_prefixes_are_composed(tmp_path: Path):
     (tmp_path / "OrdersController.java").write_text(
         '''@RequestMapping("/api") class OrdersController {

@@ -46,6 +46,7 @@ from orbitkb.analysis.models import (
     Injection,
     MessageContract,
     PersistenceFact,
+    StaticServiceCall,
     Symbol,
 )
 from orbitkb.analysis.node_imports import parse_node_named_imports
@@ -1646,8 +1647,80 @@ class StaticAnalysisEngine:
         result.persistence_facts.extend(_persistence_facts(files, root))
         result.cloud_facts.extend(detect_cloud_facts(files, root))
         result = BoundedFlowResolver().resolve(result)
+        if stack == "jvm-spring":
+            result.static_service_calls.extend(_spring_feign_service_calls(result, files))
         result.edges.extend(self._depth_provider.enrich(root, result))
         return result
+
+
+_FEIGN_CLIENT_PATTERN = re.compile(
+    r'@FeignClient\s*\(\s*(?:name|value)\s*=\s*"(?P<service>[^"]+)"[^)]*\)\s*'
+    r'(?:public\s+)?interface\s+(?P<client>\w+)\s*\{(?P<body>.*?)\}',
+    re.DOTALL,
+)
+_FEIGN_METHOD_PATTERN = re.compile(
+    r'@(?P<mapping>GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*'
+    r'\(\s*(?:value\s*=\s*)?"(?P<path>[^"]+)"[^)]*\)\s*'
+    r'(?:[\w<>?,\[\]\s]+\s+)?(?P<method>\w+)\s*\(',
+    re.DOTALL,
+)
+
+
+def _spring_feign_service_calls(result: AnalysisResult, files: list[Path]) -> list[StaticServiceCall]:
+    """Connect a Spring field injection to an explicitly declared Feign mapping.
+
+    This deliberately supports only literal ``name``/``value`` and method mapping
+    annotations. Property placeholders and dynamic URLs do not become facts.
+    """
+    endpoints = _feign_endpoints(files)
+    injection_contracts = {
+        (injection.consumer.split(".", 1)[0], injection.consumer.rsplit(".", 1)[-1]): injection.contract
+        for injection in result.injections
+    }
+    calls: list[StaticServiceCall] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for edge in result.edges:
+        receiver, separator, member = edge.target.rpartition(".")
+        if not separator:
+            continue
+        owner = edge.source.split(".", 1)[0]
+        client = injection_contracts.get((owner, receiver))
+        endpoint = endpoints.get((client or "", member))
+        if endpoint is None:
+            continue
+        target_service, method, path = endpoint
+        key = (edge.source, target_service, "http", method, path)
+        if key in seen:
+            continue
+        seen.add(key)
+        calls.append(StaticServiceCall(
+            source=edge.source,
+            target_service=target_service,
+            protocol="http",
+            target_method=method,
+            target_path=path,
+            evidence=edge.evidence,
+        ))
+    return calls
+
+
+def _feign_endpoints(files: list[Path]) -> dict[tuple[str, str], tuple[str, str, str]]:
+    """Return only literal method mappings declared in a local Feign interface."""
+    endpoints = {}
+    for path in files:
+        if path.suffix != ".java":
+            continue
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for client_match in _FEIGN_CLIENT_PATTERN.finditer(source):
+            service = client_match.group("service")
+            client = client_match.group("client")
+            for method_match in _FEIGN_METHOD_PATTERN.finditer(client_match.group("body")):
+                endpoints[(client, method_match.group("method"))] = (
+                    service,
+                    _JavaSpringAnalyzer.ROUTES[method_match.group("mapping")],
+                    method_match.group("path"),
+                )
+    return endpoints
 
 
 def _extract_scheduled_jobs(result: AnalysisResult, files: list[Path], root: Path) -> None:
