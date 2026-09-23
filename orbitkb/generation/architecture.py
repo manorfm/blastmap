@@ -447,6 +447,84 @@ def find_overbroad_exception_handlers(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_broad_handlers_that_can_swallow_timeouts(conn: sqlite3.Connection) -> list[dict]:
+    """Correlate broad HTTP 500 mappings with local timeout-protected HTTP calls.
+
+    A generic handler may be an intentional final fallback, and a timeout can be
+    translated before reaching it. The detector therefore presents their service-level
+    coexistence as a review risk, never a proven runtime catch path.
+    """
+    names = _service_names(conn)
+    handlers = conn.execute(
+        """SELECT service_id, source, internal_type, transport_code,
+                  file_path, start_line, end_line
+           FROM static_error_contracts
+           WHERE role = 'maps'
+             AND protocol = 'http'
+             AND transport_code = '500'
+             AND internal_type IS NOT NULL
+           ORDER BY service_id, source, internal_type, file_path, start_line""",
+    ).fetchall()
+    timeout_policies = _resilience_policies_by_source(conn, "timeout")
+    calls = conn.execute(
+        """SELECT service_id, source, target_service, target_method, target_path,
+                  file_path, start_line, end_line
+           FROM static_service_calls
+           WHERE protocol = 'http'
+           ORDER BY service_id, source, target_service, target_method, target_path,
+                    file_path, start_line""",
+    ).fetchall()
+    timeout_flows = [
+        (call, timeout_policies[(call["service_id"], call["source"])])
+        for call in calls
+        if (call["service_id"], call["source"]) in timeout_policies
+    ]
+    findings: list[dict] = []
+    for handler in handlers:
+        if handler["internal_type"].rsplit(".", 1)[-1].casefold() not in BROAD_EXCEPTION_TYPES:
+            continue
+        for call, policies in timeout_flows:
+            if call["service_id"] != handler["service_id"]:
+                continue
+            service = names[handler["service_id"]]
+            findings.append({
+                "kind": "possible_broad_handler_swallows_timeout", "severity": "warning",
+                "services": [service],
+                "reason": (
+                    f"{handler['source']} maps broad {handler['internal_type']} to HTTP 500 while "
+                    f"{call['source']} has a timeout-protected internal HTTP call; review timeout semantics."
+                ),
+                "detail": {
+                    "handler": {
+                        "symbol": handler["source"], "error_type": handler["internal_type"],
+                        "status": handler["transport_code"],
+                    },
+                    "timeout_flow": {
+                        "symbol": call["source"], "target_service": call["target_service"],
+                        "method": call["target_method"], "path": call["target_path"],
+                    },
+                    "timeout_policies": [
+                        {"mechanism": policy["mechanism"], "value": policy["value"], "unit": policy["unit"]}
+                        for policy in policies
+                    ],
+                    "confidence": 0.65,
+                    "evidence": [
+                        _edge_evidence(handler), _edge_evidence(call),
+                        *[_edge_evidence(policy) for policy in policies],
+                    ],
+                    "unknowns": [
+                        "The generic handler may be an intentional final fallback or may not apply to this execution path.",
+                        "The timeout may be handled or translated before it reaches the broad mapping.",
+                    ],
+                    "remediation": [
+                        "Keep a safe generic fallback, but add and document a specific timeout mapping with unavailable or gateway-timeout semantics.",
+                        "Verify the timeout client boundary preserves its intended error contract before the broad handler is reached.",
+                    ],
+                },
+            })
+    return findings
+
+
 def find_error_semantics_lost(conn: sqlite3.Connection) -> list[dict]:
     """Find a source-proven client/domain error degraded to an HTTP 5xx mapping.
 
@@ -1513,6 +1591,7 @@ _DETECTORS = (
     find_timeouts_without_local_fallback,
     find_unmapped_downstream_errors,
     find_overbroad_exception_handlers,
+    find_broad_handlers_that_can_swallow_timeouts,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
     find_cloud_dead_letter_queue_missing, find_public_object_storage,

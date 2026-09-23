@@ -23,6 +23,7 @@ from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import (
+    find_broad_handlers_that_can_swallow_timeouts,
     find_cycles,
     find_error_semantics_lost,
     find_fan_imbalance,
@@ -489,6 +490,63 @@ def test_timeout_mapping_finding_disappears_when_status_becomes_unavailable(tmp_
     flows_repo.replace_analysis(conn, checkout, AnalysisResult(error_contracts=[unavailable]))
 
     assert find_timeouts_mapped_as_internal_server_errors(conn) == []
+
+
+def test_broad_timeout_handler_risk_disappears_when_the_handler_becomes_specific(tmp_path: Path):
+    conn = open_db(tmp_path / "broad-timeout-handler.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    broad_handler = ErrorContract(
+        source="ApiExceptionHandler.handle", role="maps", error_kind="unexpected",
+        internal_type="Exception", protocol="http", transport_code="500",
+        public_code=None, exposes_internal_detail=False, retryability="unknown",
+        evidence=STATIC_EVIDENCE,
+    )
+    call = StaticServiceCall(
+        source="CheckoutService.reserve", target_service="inventory", protocol="http",
+        target_method="POST", target_path="/reservations", evidence=STATIC_EVIDENCE,
+    )
+    timeout = ResiliencePolicy(
+        source="CheckoutService.reserve", kind="timeout", mechanism="reactor",
+        value=2_000, unit="milliseconds", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(
+            error_contracts=[broad_handler], static_service_calls=[call], resilience_policies=[timeout],
+        ),
+    )
+
+    findings = find_broad_handlers_that_can_swallow_timeouts(conn)
+
+    assert _kinds(findings) == {"possible_broad_handler_swallows_timeout"}
+    assert findings[0]["detail"]["handler"] == {
+        "symbol": "ApiExceptionHandler.handle", "error_type": "Exception", "status": "500",
+    }
+    assert findings[0]["detail"]["timeout_flow"] == {
+        "symbol": "CheckoutService.reserve", "target_service": "inventory",
+        "method": "POST", "path": "/reservations",
+    }
+    run_id = recompute_architecture_view(conn)
+    assert "possible_broad_handler_swallows_timeout" in {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    }
+
+    specific_handler = ErrorContract(
+        source="ApiExceptionHandler.handle", role="maps", error_kind="timeout",
+        internal_type="TimeoutException", protocol="http", transport_code="504",
+        public_code=None, exposes_internal_detail=False, retryability="unknown",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(
+            error_contracts=[specific_handler], static_service_calls=[call], resilience_policies=[timeout],
+        ),
+    )
+
+    assert find_broad_handlers_that_can_swallow_timeouts(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

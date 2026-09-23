@@ -198,6 +198,12 @@ for review. OrbitKB does not flag the same mapping to 503 or 504; those retain e
 unavailability or gateway-timeout semantics. A 500 mapping may still be intentional,
 so the result asks for contract validation rather than prescribing a status change.
 
+OrbitKB also correlates a broad handler that maps `Exception`, `Throwable`, `Error` or
+`RuntimeException` to HTTP 500 with a timeout-protected internal HTTP call in the same
+service. It does not claim that the handler captures that timeout; it highlights a
+review point for adding or documenting a more specific timeout contract before the
+generic fallback.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,

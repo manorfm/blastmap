@@ -266,6 +266,12 @@ they preserve explicit unavailable or gateway-timeout semantics. The finding doe
 declare 500 incorrect: a compatibility or gateway contract may intentionally require
 that translation.
 
+`possible_broad_handler_swallows_timeout` requires a broad exception mapping to HTTP
+500 plus a timeout-protected source-proven internal HTTP call in the same service. It
+reports the handler and the client boundary separately. This is coexistence of static
+facts, not proof that the handler catches the timeout at runtime; a local translation
+or a more specific mapping may run first.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally
