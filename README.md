@@ -115,7 +115,7 @@ Start broad, then narrow the request.
 `get_change_context` returns at most five compact service cards. It includes likely
 impact, flow, contracts at risk, persistence, messaging, architectural hypotheses,
 unknowns and recommended next queries. A selected service card can additionally
-include up to three source-proven, unambiguous Feign dependencies with their literal
+include up to three source-proven, unambiguous static HTTP dependencies with their literal
 target routes and resolved service identity; when indexed, the remote endpoint link
 and code location are included. It does not reread the source tree while answering.
 
@@ -129,10 +129,11 @@ Error messages and stack traces are never indexed. Dynamic global handlers, prox
 and gateways remain explicit unknowns rather than inferred behavior.
 
 For Java/Kotlin Spring, the same bounded response includes `service_calls` when an
-entrypoint reaches a Feign client with a literal service name and HTTP route. This
-includes a literal interface `@RequestMapping` prefix when present, giving an agent
-the target service and endpoint without scanning source; placeholder configuration
-and dynamic URLs remain unknown.
+entrypoint reaches a Feign client with a literal service name and HTTP route, or an
+injected `RestTemplate` with a literal single-label service host. Feign calls include
+a literal interface `@RequestMapping` prefix when present, giving an agent the target
+service and endpoint without scanning source; placeholder configuration, dynamic URLs,
+IPs, localhost and external domains remain unknown.
 
 Each returned static service call also carries `resolved_target`: it links to the
 indexed remote endpoint when the target is unique (or uniquely belongs to the caller's
@@ -142,12 +143,12 @@ service names automatically.
 
 When an indexed internal HTTP dependency exposes a source-proven 4xx error, OrbitKB
 can also flag that the caller has no same-type client-error mapping indexed. This is a
-review signal, not proof that the caller returns HTTP 500. When a literal Feign route
+review signal, not proof that the caller returns HTTP 500. When a literal static route
 also resolves to an indexed downstream endpoint, only error contracts reachable from
 that endpoint's static flow are considered.
 
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
-three unambiguous static Feign targets can be added as `secondary` findings. They are
+three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,
 but whether the requested change crosses that client boundary remains a review item.
 
@@ -172,7 +173,7 @@ The supported deterministic subset is intentionally focused:
 | Area | Current coverage | Boundary |
 | --- | --- | --- |
 | Go | HTTP handlers, calls, GORM and `database/sql`, RabbitMQ, Kafka (`segmentio/kafka-go`) | Dynamic routing and types remain unknown. |
-| Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs; Feign client calls with literal service and route mappings | Only unambiguous local wiring is resolved; Feign properties and dynamic URLs are not inferred. |
+| Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs; Feign and injected `RestTemplate` calls with literal internal service/route mappings | Only unambiguous local wiring is resolved; dynamic URLs, IPs, localhost and external domains are not inferred as services. |
 | Node and TypeScript | GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
 | GraphQL | Operations, local schema contracts, input/output shapes | Remote composition, directives and federation behavior are not inferred. |
 | Persistence and messaging | Postgres/Mongo evidence, RabbitMQ bindings and contracts, Kafka producer/consumer contracts | Only literal, source-proven configuration is exposed; Kafka consumer detection is Go/JVM/Node only, no Python. |

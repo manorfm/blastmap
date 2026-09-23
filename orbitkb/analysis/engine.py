@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import urlparse
 
 import tree_sitter_go
 import tree_sitter_java
@@ -154,6 +155,10 @@ _SPRING_MONGO_WRITE_METHODS = frozenset({
 })
 _ENTITY_MANAGER_READ_METHODS = frozenset({"find", "getReference"})
 _ENTITY_MANAGER_WRITE_METHODS = frozenset({"flush", "merge", "persist", "remove"})
+_REST_TEMPLATE_METHODS = {
+    "getForEntity": "GET", "getForObject": "GET", "postForEntity": "POST",
+    "postForObject": "POST", "put": "PUT", "delete": "DELETE",
+}
 
 
 def _mongoose_model_variables(source: str) -> frozenset[str]:
@@ -349,6 +354,17 @@ def _spring_persistence_receivers(
         _spring_jdbc_template_receivers(injections, class_name),
         _spring_mongo_template_receivers(injections, class_name),
         _entity_manager_receivers(injections, class_name),
+    )
+
+
+def _spring_rest_template_receivers(injections: list[Injection], class_name: str) -> frozenset[str]:
+    """Return locally injected Spring ``RestTemplate`` member names only."""
+    prefix = f"{class_name}."
+    return frozenset(
+        injection.consumer.removeprefix(prefix)
+        for injection in injections
+        if injection.consumer.startswith(prefix)
+        and injection.contract.rsplit(".", 1)[-1] == "RestTemplate"
     )
 
 
@@ -663,6 +679,7 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                     result.edges.append(FlowEdge(injection_symbol, contract, "injects", evidence))
                     result.injections.append(Injection(injection_symbol, contract, _first_qualifier(_text(parameter, source)), evidence))
             persistence_receivers = _spring_persistence_receivers(result.injections, class_name)
+            rest_template_receivers = _spring_rest_template_receivers(result.injections, class_name)
             for function_node in (node for node in _walk(class_node) if node.type == "function_declaration"):
                 name_node = function_node.child_by_field_name("name")
                 if name_node is None:
@@ -679,6 +696,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.error_contracts.extend(_spring_raised_error_contracts(
                     symbol, _text(function_node, source), path, root, function_node,
+                ))
+                result.static_service_calls.extend(_spring_rest_template_service_calls(
+                    symbol, _text(function_node, source), rest_template_receivers, path, root, function_node,
                 ))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(function_node, source), publishers, path, root, function_node, kotlin=True)
@@ -735,6 +755,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                     result.edges.append(FlowEdge(consumer, contract, "injects", evidence))
                     result.injections.append(Injection(consumer, contract, _first_qualifier(_text(field, source)), evidence))
             persistence_receivers = _spring_persistence_receivers(result.injections, class_name)
+            rest_template_receivers = _spring_rest_template_receivers(result.injections, class_name)
             for method_node in (node for node in _walk(class_node) if node.type == "method_declaration"):
                 name_node = method_node.child_by_field_name("name")
                 body = method_node.child_by_field_name("body")
@@ -752,6 +773,9 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.error_contracts.extend(_spring_raised_error_contracts(
                     symbol, _text(method_node, source), path, root, method_node,
+                ))
+                result.static_service_calls.extend(_spring_rest_template_service_calls(
+                    symbol, _text(method_node, source), rest_template_receivers, path, root, method_node,
                 ))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(method_node, source), publishers, path, root, method_node)
@@ -1729,6 +1753,45 @@ def _feign_endpoints(files: list[Path]) -> dict[tuple[str, str], tuple[str, str,
                     _join_route(route_prefix, method_match.group("path")),
                 )
     return endpoints
+
+
+_REST_TEMPLATE_CALL_PATTERN = re.compile(
+    r'\b(?P<receiver>\w+)\.(?P<operation>getForEntity|getForObject|postForEntity|postForObject|put|delete)'
+    r'\s*\(\s*"(?P<url>https?://[^"]+)"',
+)
+
+
+def _spring_rest_template_service_calls(
+    symbol: str,
+    declaration: str,
+    receivers: frozenset[str],
+    path: Path,
+    root: Path,
+    node: Node,
+) -> list[StaticServiceCall]:
+    """Extract literal inter-service ``RestTemplate`` calls on injected members.
+
+    A host must be a single service-like label. This excludes IPs, localhost,
+    external domains and dynamic configuration rather than guessing their identity.
+    Query text is deliberately not persisted.
+    """
+    calls = []
+    for match in _REST_TEMPLATE_CALL_PATTERN.finditer(declaration):
+        if match.group("receiver") not in receivers:
+            continue
+        parsed = urlparse(match.group("url"))
+        host = parsed.hostname
+        if host is None or not re.fullmatch(r"[a-z][a-z0-9-]*", host, re.IGNORECASE):
+            continue
+        calls.append(StaticServiceCall(
+            source=symbol,
+            target_service=host,
+            protocol="http",
+            target_method=_REST_TEMPLATE_METHODS[match.group("operation")],
+            target_path=parsed.path or "/",
+            evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+        ))
+    return calls
 
 
 def _extract_scheduled_jobs(result: AnalysisResult, files: list[Path], root: Path) -> None:

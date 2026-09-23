@@ -65,7 +65,7 @@ contains `impact` (primary/secondary findings, cross-service flow, contracts/dat
 external integrations), compact `services` cards, matching `architecture_risks`,
 `unknowns`, `recommended_next_queries` and a `budget` object. Each card contains only
 interfaces, outbound dependencies, persistence and messages. A card may also include
-up to three `static_outbound_dependencies`: source-proven Java/Kotlin Feign calls
+up to three `static_outbound_dependencies`: source-proven Java/Kotlin static HTTP calls
 whose target service resolves unambiguously, including literal method/route and the
 resolved service identity. When the remote route is indexed, its symbol and evidence
 are included in `resolved_target`. Ambiguous and unindexed targets are omitted to
@@ -73,7 +73,7 @@ protect the context budget and avoid inventing scope. Use its recommended detail
 rather than treating it as a full service dump.
 
 `find_change_surface` may append up to three `secondary` findings with
-`origin: static_dependency`. These are direct, unambiguous Java/Kotlin Feign targets
+`origin: static_dependency`. These are direct, unambiguous Java/Kotlin static HTTP targets
 of an LLM-selected primary service. The call fact is deterministic; the `0.6`
 confidence applies only to whether the task needs to cross that boundary. A matching
 flow edge has `origin: static`. No additional LLM call is made.
@@ -170,9 +170,10 @@ whether a symbol raises, handles or maps an error, its category/type and any lit
 transport/public code. It never contains exception messages, response bodies or stack
 traces. Missing handlers and dynamic mappings are not inferred as failures. The
 `service_calls` list is similarly bounded to reachable symbols and contains only
-source-proven Java/Kotlin Feign calls with literal target service, method and route;
-an interface-level literal `@RequestMapping` prefix is composed with the method route.
-Each call includes `resolved_target`: `endpoint_indexed` with an entrypoint link,
+source-proven Java/Kotlin Feign calls with literal target service, method and route,
+or injected `RestTemplate` calls with a literal single-label service host. An
+interface-level literal `@RequestMapping` prefix is composed with the Feign method
+route. Each call includes `resolved_target`: `endpoint_indexed` with an entrypoint link,
 `service_indexed` without a matching route, `not_indexed`, or `ambiguous` with
 repository candidates. A unique target in the caller's repository is preferred over
 same-named external-repository candidates. Dynamic URLs and placeholder configuration
@@ -204,7 +205,7 @@ to HTTP 5xx in one service. Both remain hypotheses: handlers, gateways or proxie
 outside the indexed source may intentionally alter the final response.
 
 `possible_unmapped_downstream_error` is a cross-service review signal. It prefers a
-source-proven Java/Kotlin Feign call with literal service and route mappings. When the
+source-proven Java/Kotlin static HTTP call with literal service and route mappings. When the
 target endpoint is indexed, it scopes contracts to that endpoint's reachable static
 flow (`scope: endpoint_flow`, confidence `0.75`); otherwise it uses target-service
 contracts (`scope: service_contracts`, confidence `0.6`). A reconciled internal HTTP

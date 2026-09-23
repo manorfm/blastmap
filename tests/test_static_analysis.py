@@ -183,6 +183,53 @@ interface InventoryClient {
     ]
 
 
+def test_jvm_spring_analyzer_links_injected_rest_template_to_a_literal_service_endpoint(tmp_path: Path):
+    (tmp_path / "CheckoutService.java").write_text(
+        '''class CheckoutService {
+  private RestTemplate restTemplate;
+  Receipt checkout(ReserveRequest request) {
+    Reservation reservation = restTemplate.postForEntity(
+        "http://inventory/reservations", request, Reservation.class).getBody();
+    return new Receipt(reservation);
+  }
+  Receipt unproven(ReserveRequest request) {
+    return new HttpClient().postForEntity("http://payments/charges", request, Receipt.class);
+  }
+  Receipt external(ReserveRequest request) {
+    return restTemplate.postForEntity("https://api.stripe.com/charges?token=ignored", request, Receipt.class);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(call.source, call.target_service, call.protocol, call.target_method, call.target_path) for call in result.static_service_calls] == [
+        ("CheckoutService.checkout", "inventory", "http", "POST", "/reservations"),
+    ]
+
+
+def test_jvm_spring_analyzer_links_kotlin_injected_rest_template_to_a_literal_service_endpoint(tmp_path: Path):
+    (tmp_path / "CheckoutService.kt").write_text(
+        '''class CheckoutService(private val restTemplate: RestTemplate) {
+  fun checkout(request: ReserveRequest): Receipt {
+    val reservation = restTemplate.postForEntity(
+      "http://inventory/reservations", request, Reservation::class.java).body
+    return Receipt(reservation)
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(call.source, call.target_service, call.protocol, call.target_method, call.target_path) for call in result.static_service_calls] == [
+        ("CheckoutService.checkout", "inventory", "http", "POST", "/reservations"),
+    ]
+
+
 def test_native_literal_route_prefixes_are_composed(tmp_path: Path):
     (tmp_path / "OrdersController.java").write_text(
         '''@RequestMapping("/api") class OrdersController {
