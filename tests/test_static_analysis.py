@@ -782,6 +782,25 @@ class ApiExceptionHandler {
     ]
 
 
+def test_spring_response_status_exception_emits_a_raised_error_contract(tmp_path: Path):
+    (tmp_path / "StockReservation.java").write_text(
+        '''class StockReservation {
+  void reserve() { throw new ResponseStatusException(HttpStatus.CONFLICT); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(contract.source, contract.role, contract.error_kind, contract.internal_type,
+             contract.protocol, contract.transport_code, contract.retryability)
+            for contract in result.error_contracts] == [
+        ("StockReservation.reserve", "raises", "conflict", "ResponseStatusException",
+         "http", "409", "not_retryable"),
+    ]
+
+
 def test_static_persistence_facts_require_local_entity_evidence(tmp_path: Path):
     (tmp_path / "Order.java").write_text(
         '''@Entity @Table(name = "orders") class Order { String id; }''', encoding="utf-8",

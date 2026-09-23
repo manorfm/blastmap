@@ -676,6 +676,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 result.edges.extend(function_edges)
                 result.cloud_facts.extend(function_cloud_facts)
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
+                result.error_contracts.extend(_spring_raised_error_contracts(
+                    symbol, _text(function_node, source), path, root, function_node,
+                ))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(function_node, source), publishers, path, root, function_node, kotlin=True)
                 )
@@ -746,6 +749,9 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 result.edges.extend(function_edges)
                 result.cloud_facts.extend(function_cloud_facts)
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
+                result.error_contracts.extend(_spring_raised_error_contracts(
+                    symbol, _text(method_node, source), path, root, method_node,
+                ))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(method_node, source), publishers, path, root, method_node)
                 )
@@ -1460,6 +1466,35 @@ def _spring_error_contracts(
         retryability="retryable" if code == 429 else "not_retryable",
         evidence=evidence,
     )]
+
+
+def _spring_raised_error_contracts(
+    symbol: str, declaration: str, path: Path, root: Path, node: Node,
+) -> list[ErrorContract]:
+    """Extract explicit local ``throw new`` statements without guessing status.
+
+    A normal domain exception has no transport semantics until an indexed mapper
+    proves one. ``ResponseStatusException`` is the narrow exception because its
+    literal ``HttpStatus`` argument is part of the source fact itself.
+    """
+    contracts: list[ErrorContract] = []
+    for match in re.finditer(r"\bthrow\s+new\s+([\w.]+)\s*\([^)]*\)", declaration):
+        statuses = _spring_response_statuses(match.group(0))
+        status = statuses[0] if statuses else None
+        code = status["code"] if status is not None else None
+        contracts.append(ErrorContract(
+            source=symbol,
+            role="raises",
+            error_kind=_ERROR_KIND_BY_HTTP_STATUS.get(code, "unexpected" if code and code >= 500 else "unknown"),
+            internal_type=match.group(1).rsplit(".", 1)[-1],
+            protocol="http" if code is not None else "internal",
+            transport_code=str(code) if code is not None else None,
+            public_code=None,
+            exposes_internal_detail=False,
+            retryability="retryable" if code == 429 else ("not_retryable" if code is not None else "unknown"),
+            evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+        ))
+    return contracts
 
 
 def _spring_response_statuses(source: str) -> list[dict]:
