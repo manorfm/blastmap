@@ -172,9 +172,10 @@ traces. Missing handlers and dynamic mappings are not inferred as failures. The
 `service_calls` list is similarly bounded to reachable symbols and contains only
 source-proven Java/Kotlin Feign calls with literal target service, method and route,
 or injected `RestTemplate`/`WebClient` calls with a literal single-label service host.
-WebClient requires an explicit verb followed by a literal `.uri(...)`. An interface-level
-literal `@RequestMapping` prefix is composed with the Feign method route. Each call
-includes `resolved_target`: `endpoint_indexed` with an entrypoint link,
+WebClient requires an explicit verb or literal `.method(HttpMethod.X)` followed by a
+literal `.uri(...)`; `RestTemplate.exchange` likewise requires literal `HttpMethod.X`.
+An interface-level literal `@RequestMapping` prefix is composed with the Feign method
+route. Each call includes `resolved_target`: `endpoint_indexed` with an entrypoint link,
 `service_indexed` without a matching route, `not_indexed`, or `ambiguous` with
 repository candidates. A unique target in the caller's repository is preferred over
 same-named external-repository candidates. Dynamic URLs and placeholder configuration

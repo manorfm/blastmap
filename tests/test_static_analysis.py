@@ -270,6 +270,33 @@ def test_jvm_spring_analyzer_links_kotlin_injected_web_client_to_a_literal_servi
     ]
 
 
+def test_jvm_spring_analyzer_links_literal_http_methods_in_rest_template_and_web_client(tmp_path: Path):
+    (tmp_path / "CheckoutService.java").write_text(
+        '''class CheckoutService {
+  private RestTemplate restTemplate;
+  private WebClient webClient;
+  Receipt reconcile(ReserveRequest request) {
+    return restTemplate.exchange("http://inventory/reservations", HttpMethod.PATCH, new HttpEntity<>(request), Receipt.class).getBody();
+  }
+  Receipt cancel() {
+    return webClient.method(HttpMethod.DELETE).uri("http://payments/charges").retrieve().bodyToMono(Receipt.class).block();
+  }
+  Receipt unknown(HttpMethod method) {
+    return restTemplate.exchange("http://inventory/reservations", method, null, Receipt.class).getBody();
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(call.source, call.target_service, call.protocol, call.target_method, call.target_path) for call in result.static_service_calls] == [
+        ("CheckoutService.reconcile", "inventory", "http", "PATCH", "/reservations"),
+        ("CheckoutService.cancel", "payments", "http", "DELETE", "/charges"),
+    ]
+
+
 def test_native_literal_route_prefixes_are_composed(tmp_path: Path):
     (tmp_path / "OrdersController.java").write_text(
         '''@RequestMapping("/api") class OrdersController {

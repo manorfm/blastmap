@@ -1769,10 +1769,19 @@ _REST_TEMPLATE_CALL_PATTERN = re.compile(
     r'\b(?P<receiver>\w+)\.(?P<operation>getForEntity|getForObject|postForEntity|postForObject|put|delete)'
     r'\s*\(\s*"(?P<url>https?://[^"]+)"',
 )
+_REST_TEMPLATE_EXCHANGE_PATTERN = re.compile(
+    r'\b(?P<receiver>\w+)\.exchange\s*\(\s*"(?P<url>https?://[^"]+)"'
+    r'\s*,\s*HttpMethod\.(?P<method>[A-Z]+)',
+)
 _WEB_CLIENT_CALL_PATTERN = re.compile(
     r'\b(?P<receiver>\w+)\.(?P<operation>get|post|put|patch|delete)\s*\(\s*\)'
     r'\s*\.uri\s*\(\s*"(?P<url>https?://[^"]+)"',
 )
+_WEB_CLIENT_METHOD_PATTERN = re.compile(
+    r'\b(?P<receiver>\w+)\.method\s*\(\s*HttpMethod\.(?P<method>[A-Z]+)\s*\)'
+    r'\s*\.uri\s*\(\s*"(?P<url>https?://[^"]+)"',
+)
+_HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 
 
 def _literal_internal_http_destination(url: str) -> tuple[str, str] | None:
@@ -1799,21 +1808,26 @@ def _spring_rest_template_service_calls(
     Query text is deliberately not persisted.
     """
     calls = []
-    for match in _REST_TEMPLATE_CALL_PATTERN.finditer(declaration):
-        if match.group("receiver") not in receivers:
-            continue
-        destination = _literal_internal_http_destination(match.group("url"))
-        if destination is None:
-            continue
-        host, target_path = destination
-        calls.append(StaticServiceCall(
-            source=symbol,
-            target_service=host,
-            protocol="http",
-            target_method=_REST_TEMPLATE_METHODS[match.group("operation")],
-            target_path=target_path,
-            evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
-        ))
+    for pattern, method_for in (
+        (_REST_TEMPLATE_CALL_PATTERN, lambda match: _REST_TEMPLATE_METHODS[match.group("operation")]),
+        (_REST_TEMPLATE_EXCHANGE_PATTERN, lambda match: match.group("method")),
+    ):
+        for match in pattern.finditer(declaration):
+            method = method_for(match)
+            if match.group("receiver") not in receivers or method not in _HTTP_METHOD_LITERALS:
+                continue
+            destination = _literal_internal_http_destination(match.group("url"))
+            if destination is None:
+                continue
+            host, target_path = destination
+            calls.append(StaticServiceCall(
+                source=symbol,
+                target_service=host,
+                protocol="http",
+                target_method=method,
+                target_path=target_path,
+                evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+            ))
     return calls
 
 
@@ -1827,21 +1841,26 @@ def _spring_web_client_service_calls(
 ) -> list[StaticServiceCall]:
     """Extract literal ``WebClient`` verb/URI pairs on an injected client member."""
     calls = []
-    for match in _WEB_CLIENT_CALL_PATTERN.finditer(declaration):
-        if match.group("receiver") not in receivers:
-            continue
-        destination = _literal_internal_http_destination(match.group("url"))
-        if destination is None:
-            continue
-        host, target_path = destination
-        calls.append(StaticServiceCall(
-            source=symbol,
-            target_service=host,
-            protocol="http",
-            target_method=match.group("operation").upper(),
-            target_path=target_path,
-            evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
-        ))
+    for pattern, method_for in (
+        (_WEB_CLIENT_CALL_PATTERN, lambda match: match.group("operation").upper()),
+        (_WEB_CLIENT_METHOD_PATTERN, lambda match: match.group("method")),
+    ):
+        for match in pattern.finditer(declaration):
+            method = method_for(match)
+            if match.group("receiver") not in receivers or method not in _HTTP_METHOD_LITERALS:
+                continue
+            destination = _literal_internal_http_destination(match.group("url"))
+            if destination is None:
+                continue
+            host, target_path = destination
+            calls.append(StaticServiceCall(
+                source=symbol,
+                target_service=host,
+                protocol="http",
+                target_method=method,
+                target_path=target_path,
+                evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+            ))
     return calls
 
 

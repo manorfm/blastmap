@@ -132,9 +132,11 @@ For Java/Kotlin Spring, the same bounded response includes `service_calls` when 
 entrypoint reaches a Feign client with a literal service name and HTTP route, or an
 injected `RestTemplate` or `WebClient` with a literal single-label service host. Feign
 calls include a literal interface `@RequestMapping` prefix when present; WebClient
-requires an explicit verb followed by `.uri("http://service/path")`. This gives an
-agent the target service and endpoint without scanning source; placeholder
-configuration, dynamic URLs, IPs, localhost and external domains remain unknown.
+requires an explicit verb or literal `.method(HttpMethod.X)` followed by
+`.uri("http://service/path")`; `RestTemplate.exchange` likewise requires a literal
+`HttpMethod.X`. This gives an agent the target service and endpoint without scanning
+source; placeholder configuration, dynamic URLs, IPs, localhost and external domains
+remain unknown.
 
 Each returned static service call also carries `resolved_target`: it links to the
 indexed remote endpoint when the target is unique (or uniquely belongs to the caller's
