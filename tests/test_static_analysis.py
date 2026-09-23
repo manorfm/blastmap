@@ -759,6 +759,29 @@ def test_native_flow_boundaries_are_extracted_from_declared_control_flow(tmp_pat
     }
 
 
+def test_spring_exception_handler_emits_a_static_error_contract(tmp_path: Path):
+    (tmp_path / "ApiExceptionHandler.java").write_text(
+        '''@ControllerAdvice
+class ApiExceptionHandler {
+  @ExceptionHandler(InsufficientStockException.class)
+  @ResponseStatus(HttpStatus.CONFLICT)
+  ApiError handleStock(InsufficientStockException error) { return new ApiError(); }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(contract.source, contract.role, contract.error_kind, contract.internal_type,
+             contract.protocol, contract.transport_code, contract.public_code,
+             contract.exposes_internal_detail, contract.retryability)
+            for contract in result.error_contracts] == [
+        ("ApiExceptionHandler.handleStock", "maps", "conflict", "InsufficientStockException",
+         "http", "409", None, False, "not_retryable"),
+    ]
+
+
 def test_static_persistence_facts_require_local_entity_evidence(tmp_path: Path):
     (tmp_path / "Order.java").write_text(
         '''@Entity @Table(name = "orders") class Order { String id; }''', encoding="utf-8",

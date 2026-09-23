@@ -39,6 +39,7 @@ from orbitkb.analysis.models import (
     AnalysisResult,
     CloudFact,
     EntryPoint,
+    ErrorContract,
     Evidence,
     FlowBoundary,
     FlowEdge,
@@ -683,6 +684,9 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 )
                 modifiers = next((node for node in function_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
+                result.error_contracts.extend(_spring_error_contracts(
+                    symbol, modifier_text, _evidence(path, root, modifiers or function_node), kotlin=True,
+                ))
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
                 if match:
                     result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], _join_route(route_prefix, match.group(2)), symbol, _evidence(path, root, function_node)))
@@ -750,6 +754,9 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 )
                 modifiers = next((node for node in method_node.named_children if node.type == "modifiers"), None)
                 modifier_text = _text(modifiers, source) if modifiers else ""
+                result.error_contracts.extend(_spring_error_contracts(
+                    symbol, modifier_text, _evidence(path, root, modifiers or method_node), kotlin=False,
+                ))
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
                 if match:
                     result.entrypoints.append(EntryPoint("http", self.ROUTES[match.group(1)], _join_route(route_prefix, match.group(2)), symbol, _evidence(path, root, method_node)))
@@ -1416,6 +1423,43 @@ def _spring_http_contract(declaration: str, annotations: str, kotlin: bool = Fal
 
 
 _HTTP_STATUS_CODES = {"OK": 200, "CREATED": 201, "ACCEPTED": 202, "NO_CONTENT": 204, "BAD_REQUEST": 400, "NOT_FOUND": 404, "CONFLICT": 409}
+
+_ERROR_KIND_BY_HTTP_STATUS = {
+    400: "validation", 401: "authorization", 403: "authorization", 404: "not_found",
+    409: "conflict", 422: "validation", 429: "rate_limit",
+}
+
+
+def _spring_error_contracts(
+    symbol: str, annotations: str, evidence: Evidence, *, kotlin: bool,
+) -> list[ErrorContract]:
+    """Extract only explicit Spring exception-to-status mappings.
+
+    An exception handler without a literal transport status may be completed by a
+    global response mapper or dynamic code. It remains absent here rather than
+    becoming a guessed error contract.
+    """
+    class_suffix = r"::class" if kotlin else r"\.class"
+    match = re.search(
+        rf"@ExceptionHandler\s*\(\s*(?:value\s*=\s*)?(?:\{{\s*)?([\w.]+){class_suffix}", annotations,
+    )
+    statuses = _spring_response_statuses(annotations)
+    if match is None or not statuses:
+        return []
+    status = statuses[0]
+    code = status["code"]
+    return [ErrorContract(
+        source=symbol,
+        role="maps",
+        error_kind=_ERROR_KIND_BY_HTTP_STATUS.get(code, "unexpected" if code >= 500 else "unknown"),
+        internal_type=match.group(1).rsplit(".", 1)[-1],
+        protocol="http",
+        transport_code=str(code),
+        public_code=None,
+        exposes_internal_detail=False,
+        retryability="retryable" if code == 429 else "not_retryable",
+        evidence=evidence,
+    )]
 
 
 def _spring_response_statuses(source: str) -> list[dict]:
