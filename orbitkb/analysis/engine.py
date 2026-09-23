@@ -47,6 +47,7 @@ from orbitkb.analysis.models import (
     Injection,
     MessageContract,
     PersistenceFact,
+    ResiliencePolicy,
     StaticServiceCall,
     Symbol,
 )
@@ -706,14 +707,18 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                 result.static_service_calls.extend(_spring_web_client_service_calls(
                     symbol, _text(function_node, source), web_client_receivers, path, root, function_node,
                 ))
+                modifiers = next((node for node in function_node.named_children if node.type == "modifiers"), None)
+                modifier_text = _text(modifiers, source) if modifiers else ""
+                result.resilience_policies.extend(_spring_resilience_policies(
+                    symbol, _text(function_node, source), modifier_text, web_client_receivers,
+                    path, root, function_node,
+                ))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(function_node, source), publishers, path, root, function_node, kotlin=True)
                 )
                 result.message_contracts.extend(
                     _spring_kafka_publish_contracts(_text(function_node, source), kafka_publishers, path, root, function_node, kotlin=True)
                 )
-                modifiers = next((node for node in function_node.named_children if node.type == "modifiers"), None)
-                modifier_text = _text(modifiers, source) if modifiers else ""
                 result.error_contracts.extend(_spring_error_contracts(
                     symbol, modifier_text, _evidence(path, root, modifiers or function_node), kotlin=True,
                 ))
@@ -787,14 +792,18 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                 result.static_service_calls.extend(_spring_web_client_service_calls(
                     symbol, _text(method_node, source), web_client_receivers, path, root, method_node,
                 ))
+                modifiers = next((node for node in method_node.named_children if node.type == "modifiers"), None)
+                modifier_text = _text(modifiers, source) if modifiers else ""
+                result.resilience_policies.extend(_spring_resilience_policies(
+                    symbol, _text(method_node, source), modifier_text, web_client_receivers,
+                    path, root, method_node,
+                ))
                 result.message_contracts.extend(
                     _spring_publish_contracts(_text(method_node, source), publishers, path, root, method_node)
                 )
                 result.message_contracts.extend(
                     _spring_kafka_publish_contracts(_text(method_node, source), kafka_publishers, path, root, method_node)
                 )
-                modifiers = next((node for node in method_node.named_children if node.type == "modifiers"), None)
-                modifier_text = _text(modifiers, source) if modifiers else ""
                 result.error_contracts.extend(_spring_error_contracts(
                     symbol, modifier_text, _evidence(path, root, modifiers or method_node), kotlin=False,
                 ))
@@ -1781,6 +1790,19 @@ _WEB_CLIENT_METHOD_PATTERN = re.compile(
     r'\b(?P<receiver>\w+)\.method\s*\(\s*HttpMethod\.(?P<method>[A-Z]+)\s*\)'
     r'\s*\.uri\s*\(\s*"(?P<url>https?://[^"]+)"',
 )
+_WEB_CLIENT_REACTOR_REQUEST = (
+    r'\b(?P<receiver>\w+)\.(?:get|post|put|patch|delete)\s*\(\s*\)'
+    r'|\b(?P<method_receiver>\w+)\.method\s*\(\s*HttpMethod\.[A-Z]+\s*\)'
+)
+_WEB_CLIENT_REACTOR_TIMEOUT_PATTERN = re.compile(
+    rf'(?:{_WEB_CLIENT_REACTOR_REQUEST})(?:(?!;).)*?\.timeout\s*\(\s*'
+    r'Duration\.of(?P<duration_unit>Millis|Seconds|Minutes)\s*\(\s*(?P<value>\d+)\s*\)\s*\)',
+    re.DOTALL,
+)
+_WEB_CLIENT_REACTOR_RETRY_PATTERN = re.compile(
+    rf'(?:{_WEB_CLIENT_REACTOR_REQUEST})(?:(?!;).)*?\.retry\s*\(\s*(?P<value>\d+)\s*\)',
+    re.DOTALL,
+)
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 
 
@@ -1862,6 +1884,56 @@ def _spring_web_client_service_calls(
                 evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
             ))
     return calls
+
+
+def _spring_resilience_policies(
+    symbol: str,
+    declaration: str,
+    modifiers: str,
+    web_client_receivers: frozenset[str],
+    path: Path,
+    root: Path,
+    node: Node,
+) -> list[ResiliencePolicy]:
+    """Extract only literal retry and timeout limits declared on a Spring method.
+
+    The resulting fact describes the source method, not a runtime guarantee for
+    each call inside it. Reactor limits must be on a chain started by an injected
+    ``WebClient`` member; dynamic values and policy objects are intentionally
+    omitted.
+    """
+    policies: list[ResiliencePolicy] = []
+    for match in re.finditer(r'@Retryable\s*\([^)]*\bmaxAttempts\s*=\s*(?P<value>\d+)', modifiers):
+        policies.append(ResiliencePolicy(
+            source=symbol,
+            kind="retry",
+            mechanism="spring_annotation",
+            value=int(match.group("value")),
+            unit="attempts",
+            evidence=_declaration_match_evidence(path, root, node, declaration, 0, 0),
+        ))
+    for pattern, kind, unit, scale in (
+        (_WEB_CLIENT_REACTOR_TIMEOUT_PATTERN, "timeout", "milliseconds", {
+            "Millis": 1, "Seconds": 1_000, "Minutes": 60_000,
+        }),
+        (_WEB_CLIENT_REACTOR_RETRY_PATTERN, "retry", "retries", None),
+    ):
+        for match in pattern.finditer(declaration):
+            receiver = match.group("receiver") or match.group("method_receiver")
+            if receiver not in web_client_receivers:
+                continue
+            value = int(match.group("value"))
+            if scale is not None:
+                value *= scale[match.group("duration_unit")]
+            policies.append(ResiliencePolicy(
+                source=symbol,
+                kind=kind,
+                mechanism="reactor",
+                value=value,
+                unit=unit,
+                evidence=_declaration_match_evidence(path, root, node, declaration, match.start(), match.end()),
+            ))
+    return policies
 
 
 def _extract_scheduled_jobs(result: AnalysisResult, files: list[Path], root: Path) -> None:

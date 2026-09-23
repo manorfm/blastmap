@@ -959,6 +959,46 @@ def test_native_flow_boundaries_are_extracted_from_declared_control_flow(tmp_pat
     }
 
 
+def test_spring_extracts_literal_resilience_limits_without_runtime_inference(tmp_path: Path):
+    (tmp_path / "CheckoutClient.java").write_text(
+        '''class CheckoutClient {
+  private WebClient client;
+  @Retryable(maxAttempts = 3)
+  Receipt reserve() {
+    return client.post().uri("http://inventory/reservations").retrieve()
+        .bodyToMono(Receipt.class).timeout(Duration.ofSeconds(2)).retry(1);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(policy.source, policy.kind, policy.mechanism, policy.value, policy.unit)
+            for policy in result.resilience_policies} == {
+        ("CheckoutClient.reserve", "retry", "spring_annotation", 3, "attempts"),
+        ("CheckoutClient.reserve", "timeout", "reactor", 2_000, "milliseconds"),
+        ("CheckoutClient.reserve", "retry", "reactor", 1, "retries"),
+    }
+
+
+def test_spring_ignores_dynamic_or_unbounded_resilience_declarations(tmp_path: Path):
+    (tmp_path / "CheckoutClient.kt").write_text(
+        '''class CheckoutClient(private val client: WebClient) {
+  @Retryable
+  fun reserve() = client.post().uri("http://inventory/reservations").retrieve()
+      .bodyToMono(Receipt::class.java).timeout(timeout).retryWhen(policy)
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert result.resilience_policies == []
+
+
 def test_spring_exception_handler_emits_a_static_error_contract(tmp_path: Path):
     (tmp_path / "ApiExceptionHandler.java").write_text(
         '''@ControllerAdvice
