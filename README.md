@@ -131,8 +131,9 @@ tool contract, pagination, response examples and ambiguity rules are in
 [INTERFACE.md](INTERFACE.md).
 
 Node/TypeScript REST indexing currently recognizes literal Express app/router routes
-that point to a named handler in the same file. Dynamic registration, wrappers and
-unresolved handlers are intentionally left out rather than guessed into an endpoint.
+that point to a named function or arrow handler in the same file. Dynamic registration,
+wrappers and unresolved handlers are intentionally left out rather than guessed into an
+endpoint.
 
 For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven error
 contracts (raised or explicitly mapped exception types and explicit local timeout

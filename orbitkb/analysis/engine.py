@@ -858,16 +858,8 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         command_imports = node_command_imports(source_text)
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
         functions_by_name: dict[str, _Function] = {}
-        for node in _walk(tree):
-            if node.type != "function_declaration":
-                continue
-            name_node = node.child_by_field_name("name")
-            body = node.child_by_field_name("body")
-            if name_node is None or body is None:
-                continue
-            name = _text(name_node, source)
-            function = _Function(name, f"{path.stem}.{name}", body, node)
-            functions_by_name[name] = function
+        for function in _node_named_functions(tree, source, path.stem):
+            functions_by_name[function.name] = function
             result.symbols.append(_symbol(function, path, root, imports=imports))
             function_edges, function_cloud_facts = self._edges_for_node(
                 function, path, root, source, mongoose_models, prisma_clients, client_declarations, command_imports,
@@ -1788,6 +1780,28 @@ def _express_route_receivers(source: str) -> frozenset[str]:
     return frozenset(re.findall(
         r"\b(?:const|let|var)\s+(\w+)\s*=\s*express(?:\.Router)?\s*\(", source,
     ))
+
+
+def _node_named_functions(tree: Node, source: bytes, module_name: str) -> list[_Function]:
+    """Extract named declaration and arrow handlers with one stable symbol shape."""
+    functions: list[_Function] = []
+    for node in _walk(tree):
+        if node.type == "function_declaration":
+            name_node = node.child_by_field_name("name")
+            body = node.child_by_field_name("body")
+        elif node.type == "variable_declarator":
+            name_node = node.child_by_field_name("name")
+            value_node = node.child_by_field_name("value")
+            if value_node is None or value_node.type != "arrow_function":
+                continue
+            body = value_node.child_by_field_name("body")
+        else:
+            continue
+        if name_node is None or body is None:
+            continue
+        name = _text(name_node, source)
+        functions.append(_Function(name, f"{module_name}.{name}", body, node))
+    return functions
 
 
 class StaticAnalysisEngine:
