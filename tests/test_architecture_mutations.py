@@ -33,6 +33,7 @@ from orbitkb.generation.architecture import (
     find_resilience_policies_on_write_flows,
     find_retries_on_downstream_client_errors,
     find_retries_on_potentially_non_idempotent_http_calls,
+    find_retries_on_write_publish_flows,
     find_shared_database,
     find_static_http_calls_without_resilience_policy,
     find_timeout_fallbacks_masking_failures,
@@ -587,6 +588,48 @@ def test_resilience_write_flow_risk_disappears_when_the_local_write_is_removed(t
     )
 
     assert find_resilience_policies_on_write_flows(conn) == []
+
+
+def test_retry_write_publish_risk_disappears_when_retry_is_removed(tmp_path: Path):
+    conn = open_db(tmp_path / "retry-write-publish.db")
+    checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")
+    retry = ResiliencePolicy(
+        source="CheckoutService.reserve", kind="retry", mechanism="reactor",
+        value=2, unit="retries", evidence=STATIC_EVIDENCE,
+    )
+    write = FlowEdge(
+        "CheckoutService.reserve", "OrderRepository.save", "writes", STATIC_EVIDENCE,
+    )
+    publish = FlowEdge(
+        "CheckoutService.reserve", "order.created", "publishes", STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(resilience_policies=[retry], edges=[write, publish]),
+    )
+
+    findings = find_retries_on_write_publish_flows(conn)
+
+    assert _kinds(findings) == {"possible_retry_on_write_publish_flow"}
+    assert findings[0]["detail"]["writes"] == [{"target": "OrderRepository.save"}]
+    assert findings[0]["detail"]["publishes"] == [{"target": "order.created"}]
+    run_id = recompute_architecture_view(conn)
+    assert "possible_retry_on_write_publish_flow" in {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    }
+
+    timeout = ResiliencePolicy(
+        source="CheckoutService.reserve", kind="timeout", mechanism="reactor",
+        value=2_000, unit="milliseconds", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(resilience_policies=[timeout], edges=[write, publish]),
+    )
+
+    assert find_retries_on_write_publish_flows(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

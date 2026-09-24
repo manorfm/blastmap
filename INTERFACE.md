@@ -278,6 +278,12 @@ returns up to three write targets plus `write_count` to keep the result compact.
 does not infer call order or the absence of transactions, outboxes, idempotency keys or
 compensation; those mechanisms may exist outside the indexed facts.
 
+`possible_retry_on_write_publish_flow` requires a literal retry plus source-proven
+local write and event publication in the same symbol. It includes up to three write and
+publication targets with their totals. The result does not establish ordering,
+atomicity, an outbox or producer/consumer de-duplication; it focuses review on their
+combined retry boundary.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally

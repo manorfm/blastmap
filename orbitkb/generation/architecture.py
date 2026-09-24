@@ -534,14 +534,7 @@ def find_resilience_policies_on_write_flows(conn: sqlite3.Connection) -> list[di
     """
     names = _service_names(conn)
     policies_by_source = _resilience_policies_by_source(conn, None)
-    writes_by_source: dict[tuple[int, str], list[sqlite3.Row]] = defaultdict(list)
-    for write in conn.execute(
-        """SELECT service_id, from_symbol, to_symbol, file_path, start_line, end_line
-           FROM flow_edges
-           WHERE kind = 'writes'
-           ORDER BY service_id, from_symbol, to_symbol, file_path, start_line""",
-    ).fetchall():
-        writes_by_source[(write["service_id"], write["from_symbol"])].append(write)
+    writes_by_source = _flow_edges_by_source(conn, "writes")
     calls = conn.execute(
         """SELECT service_id, source, target_service, target_method, target_path,
                   file_path, start_line, end_line
@@ -594,6 +587,75 @@ def find_resilience_policies_on_write_flows(conn: sqlite3.Connection) -> list[di
                 "remediation": [
                     "Review ordering, idempotency and recovery for the write and remote call as one failure boundary.",
                     "Use a transaction, outbox, compensation or an explicit retry-safe contract where the operation can be partially applied.",
+                ],
+            },
+        })
+    return findings
+
+
+def _flow_edges_by_source(conn: sqlite3.Connection, kind: str) -> dict[tuple[int, str], list[sqlite3.Row]]:
+    """Group one deterministic flow-edge kind by its local source symbol."""
+    edges_by_source: dict[tuple[int, str], list[sqlite3.Row]] = defaultdict(list)
+    for edge in conn.execute(
+        """SELECT service_id, from_symbol, to_symbol, file_path, start_line, end_line
+           FROM flow_edges
+           WHERE kind = ?
+           ORDER BY service_id, from_symbol, to_symbol, file_path, start_line""",
+        (kind,),
+    ).fetchall():
+        edges_by_source[(edge["service_id"], edge["from_symbol"])].append(edge)
+    return edges_by_source
+
+
+def find_retries_on_write_publish_flows(conn: sqlite3.Connection) -> list[dict]:
+    """Flag a retrying source that both writes local state and publishes an event.
+
+    The three static facts do not establish sequencing or atomicity. This is a bounded
+    prompt to verify outbox, transaction, de-duplication and retry behavior together.
+    """
+    names = _service_names(conn)
+    retries_by_source = _retry_policies_by_source(conn)
+    writes_by_source = _flow_edges_by_source(conn, "writes")
+    publishes_by_source = _flow_edges_by_source(conn, "publishes")
+    findings: list[dict] = []
+    for source_key, policies in retries_by_source.items():
+        writes = writes_by_source.get(source_key)
+        publishes = publishes_by_source.get(source_key)
+        if not writes or not publishes:
+            continue
+        service_id, symbol = source_key
+        visible_writes = writes[:3]
+        visible_publishes = publishes[:3]
+        findings.append({
+            "kind": "possible_retry_on_write_publish_flow", "severity": "warning",
+            "services": [names[service_id]],
+            "reason": (
+                f"{symbol} writes local state and publishes an event under a literal retry policy; "
+                "review duplicate-event and partial-effect handling."
+            ),
+            "detail": {
+                "flow": {"symbol": symbol},
+                "retry_policies": [
+                    {"mechanism": policy["mechanism"], "value": policy["value"], "unit": policy["unit"]}
+                    for policy in policies
+                ],
+                "writes": [{"target": write["to_symbol"]} for write in visible_writes],
+                "write_count": len(writes),
+                "publishes": [{"target": publish["to_symbol"]} for publish in visible_publishes],
+                "publish_count": len(publishes),
+                "confidence": 0.7,
+                "evidence": [
+                    *[_edge_evidence(policy) for policy in policies],
+                    *[_edge_evidence(write) for write in visible_writes],
+                    *[_edge_evidence(publish) for publish in visible_publishes],
+                ],
+                "unknowns": [
+                    "Static analysis does not establish whether the write and publication share one transaction or their execution order.",
+                    "An outbox, idempotent producer or consumer de-duplication may protect against duplicate delivery outside the indexed facts.",
+                ],
+                "remediation": [
+                    "Review the write and publication as one retry boundary and confirm duplicate-event behavior.",
+                    "Use an outbox, idempotency key or documented de-duplication when retries can repeat event publication.",
                 ],
             },
         })
@@ -1676,6 +1738,7 @@ _DETECTORS = (
     find_overbroad_exception_handlers,
     find_broad_handlers_that_can_swallow_timeouts,
     find_resilience_policies_on_write_flows,
+    find_retries_on_write_publish_flows,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
     find_cloud_dead_letter_queue_missing, find_public_object_storage,

@@ -210,6 +210,11 @@ operation order or claim that recovery is absent: transactions, outboxes, idempo
 keys and compensation may be implemented outside the indexed facts. The signal focuses
 the review on treating the write and remote call as one failure boundary.
 
+OrbitKB separately flags a literal retry on a symbol that both writes local state and
+publishes an event. It is a focused outbox and duplicate-delivery review: source facts
+do not establish ordering, atomicity or whether producer/consumer deduplication is
+already in place.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,
