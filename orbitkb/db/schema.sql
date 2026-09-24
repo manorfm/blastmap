@@ -228,7 +228,7 @@ CREATE INDEX IF NOT EXISTS idx_components_service ON components(service_id);
 CREATE TABLE IF NOT EXISTS entrypoints (
     id          INTEGER PRIMARY KEY,
     service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-    kind        TEXT NOT NULL CHECK (kind IN ('http', 'graphql', 'message', 'cli', 'job', 'rpc')),
+    kind        TEXT NOT NULL CHECK (kind IN ('http', 'graphql', 'grpc', 'message', 'cli', 'job', 'rpc')),
     method      TEXT NOT NULL,
     name        TEXT NOT NULL,
     symbol      TEXT NOT NULL,

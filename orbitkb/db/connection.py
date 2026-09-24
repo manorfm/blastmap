@@ -4,7 +4,7 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "19"
+SCHEMA_VERSION = "20"
 DEFAULT_DB_PATH = Path.home() / ".orbitkb" / "orbitkb.db"
 
 
@@ -26,6 +26,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "change_plan_runs", "decision_points_json", "TEXT NOT NULL DEFAULT '[]'")
     _add_column_if_missing(conn, "change_plan_runs", "selected_decisions_json", "TEXT NOT NULL DEFAULT '[]'")
     _add_column_if_missing(conn, "change_plan_runs", "change_units_json", "TEXT NOT NULL DEFAULT '[]'")
+    _migrate_entrypoint_kind_if_needed(conn)
     _migrate_architecture_findings_if_needed(conn)
     row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
     if row is None:
@@ -41,6 +42,41 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, de
     columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}  # nosec B608 - table is a module-owned constant.
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")  # nosec B608 - identifiers are module-owned constants.
+
+
+def _migrate_entrypoint_kind_if_needed(conn: sqlite3.Connection) -> None:
+    """Expand the fixed entrypoint kind enum without discarding indexed flow data."""
+    table_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entrypoints'"
+    ).fetchone()["sql"]
+    if "'grpc'" in table_sql:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE entrypoints_replacement (
+                id          INTEGER PRIMARY KEY,
+                service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+                kind        TEXT NOT NULL CHECK (kind IN ('http', 'graphql', 'grpc', 'message', 'cli', 'job', 'rpc')),
+                method      TEXT NOT NULL,
+                name        TEXT NOT NULL,
+                symbol      TEXT NOT NULL,
+                file_path   TEXT NOT NULL,
+                start_line  INTEGER NOT NULL,
+                end_line    INTEGER NOT NULL,
+                updated_at  TEXT NOT NULL,
+                UNIQUE(service_id, kind, method, name, symbol)
+            );
+            INSERT INTO entrypoints_replacement
+                SELECT id, service_id, kind, method, name, symbol, file_path, start_line, end_line, updated_at
+                FROM entrypoints;
+            DROP TABLE entrypoints;
+            ALTER TABLE entrypoints_replacement RENAME TO entrypoints;
+            """
+        )
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def _migrate_architecture_findings_if_needed(conn: sqlite3.Connection) -> None:

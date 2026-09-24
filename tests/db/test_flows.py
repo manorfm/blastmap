@@ -32,6 +32,34 @@ def test_flow_snapshot_is_replaced_per_service(tmp_path):
     assert flows.list_entrypoints(conn, service_id) == []
 
 
+def test_grpc_entrypoint_contract_is_persisted_with_the_flow_snapshot(tmp_path):
+    conn = open_db(tmp_path / "grpc.db")
+    service_id = services.ensure_service(conn, "inventory", "/repos/inventory", "go")
+    evidence = Evidence("inventory.proto", 7, 7)
+
+    flows.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(entrypoints=[
+            EntryPoint(
+                "grpc", "RPC", "inventory.v1.Inventory.Reserve",
+                "proto.inventory.v1.Inventory.Reserve", evidence,
+            ),
+        ], contracts={
+            "proto.inventory.v1.Inventory.Reserve": {"formal_contract": {"format": "protobuf"}},
+        }),
+    )
+
+    entrypoint = flows.get_entrypoint(
+        conn, service_id, "grpc", "rpc", "inventory.v1.Inventory.Reserve",
+    )
+
+    assert entrypoint is not None
+    assert flows.get_entrypoint_contract(conn, entrypoint["id"]) == {
+        "formal_contract": {"format": "protobuf"},
+    }
+
+
 def test_static_message_contracts_are_replaced_with_the_flow_snapshot(tmp_path):
     conn = open_db(tmp_path / "contracts.db")
     service_id = services.ensure_service(conn, "orders", "/repos/orders", "node-ts")
