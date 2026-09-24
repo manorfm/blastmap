@@ -226,15 +226,14 @@ def _list_static_resilience_policies(
     params: list[object] = [service_id]
     if sources:
         placeholders = ", ".join("?" for _ in sources)
-        source_filter = f" AND source IN ({placeholders})"  # nosec B608 - placeholders are generated from set cardinality.
+        source_filter = f" AND source IN ({placeholders})"
         params.extend(sorted(sources))
-    return conn.execute(
-        """SELECT source, kind, mechanism, value, unit, file_path, start_line, end_line
-           FROM static_resilience_policies
-           WHERE service_id = ?""" + source_filter + """
-           ORDER BY source, kind, mechanism, value, file_path, start_line""",
-        params,
-    ).fetchall()
+    query = (
+        "SELECT source, kind, mechanism, value, unit, file_path, start_line, end_line "  # nosec B608 - source_filter is either empty or IN (?, ?, ...) with bound placeholders; never raw input.
+        "FROM static_resilience_policies WHERE service_id = ?" + source_filter +
+        " ORDER BY source, kind, mechanism, value, file_path, start_line"
+    )
+    return conn.execute(query, params).fetchall()
 
 
 def list_static_service_calls_for_sources(
@@ -252,16 +251,14 @@ def _list_static_service_calls(
     params: list[object] = [service_id]
     if sources:
         placeholders = ", ".join("?" for _ in sources)
-        source_filter = f" AND source IN ({placeholders})"  # nosec B608 - placeholders are generated from set cardinality.
+        source_filter = f" AND source IN ({placeholders})"
         params.extend(sorted(sources))
-    return conn.execute(
-        """SELECT source, target_service, protocol, target_method, target_path,
-                  file_path, start_line, end_line
-           FROM static_service_calls
-           WHERE service_id = ?""" + source_filter + """
-           ORDER BY source, target_service, target_method, target_path, file_path, start_line""",
-        params,
-    ).fetchall()
+    query = (
+        "SELECT source, target_service, protocol, target_method, target_path, "  # nosec B608 - source_filter is either empty or IN (?, ?, ...) with bound placeholders; never raw input.
+        "file_path, start_line, end_line FROM static_service_calls WHERE service_id = ?" + source_filter +
+        " ORDER BY source, target_service, target_method, target_path, file_path, start_line"
+    )
+    return conn.execute(query, params).fetchall()
 
 
 def list_static_error_contracts_for_sources(
@@ -279,17 +276,15 @@ def _list_static_error_contracts(
     params: list[object] = [service_id]
     if sources:
         placeholders = ", ".join("?" for _ in sources)
-        source_filter = f" AND source IN ({placeholders})"  # nosec B608 - placeholders are generated from set cardinality.
+        source_filter = f" AND source IN ({placeholders})"
         params.extend(sorted(sources))
-    return conn.execute(
-        """SELECT source, role, error_kind, internal_type, protocol, transport_code,
-                  public_code, exposes_internal_detail, retryability, file_path,
-                  start_line, end_line
-           FROM static_error_contracts
-           WHERE service_id = ?""" + source_filter + """
-           ORDER BY source, role, internal_type, transport_code, file_path, start_line""",
-        params,
-    ).fetchall()
+    query = (
+        "SELECT source, role, error_kind, internal_type, protocol, transport_code, "  # nosec B608 - source_filter is either empty or IN (?, ?, ...) with bound placeholders; never raw input.
+        "public_code, exposes_internal_detail, retryability, file_path, start_line, end_line "
+        "FROM static_error_contracts WHERE service_id = ?" + source_filter +
+        " ORDER BY source, role, internal_type, transport_code, file_path, start_line"
+    )
+    return conn.execute(query, params).fetchall()
 
 
 def list_flow_boundaries(conn: sqlite3.Connection, service_id: int, symbols: set[str]) -> list[sqlite3.Row]:

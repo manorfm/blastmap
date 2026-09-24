@@ -1117,15 +1117,13 @@ def find_retries_on_potentially_non_idempotent_http_calls(conn: sqlite3.Connecti
     names = _service_names(conn)
     methods = tuple(sorted(POTENTIALLY_NON_IDEMPOTENT_HTTP_METHODS))
     placeholders = ", ".join("?" for _ in methods)
-    calls = conn.execute(
-        """SELECT service_id, source, target_service, target_method, target_path,
-                  file_path, start_line, end_line
-           FROM static_service_calls
-           WHERE protocol = 'http' AND target_method IN (""" + placeholders + """ )
-           ORDER BY service_id, source, target_service, target_method, target_path,
-                    file_path, start_line""",
-        methods,
-    ).fetchall()
+    query = (
+        "SELECT service_id, source, target_service, target_method, target_path, "  # nosec B608 - placeholders are generated from a fixed constant tuple; values are bound.
+        "file_path, start_line, end_line FROM static_service_calls "
+        "WHERE protocol = 'http' AND target_method IN (" + placeholders + ") "
+        "ORDER BY service_id, source, target_service, target_method, target_path, file_path, start_line"
+    )
+    calls = conn.execute(query, methods).fetchall()
     policies_by_source = _retry_policies_by_source(conn)
 
     findings: list[dict] = []

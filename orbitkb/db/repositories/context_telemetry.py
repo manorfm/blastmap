@@ -88,34 +88,45 @@ def record_verification(
 
 
 def aggregate(conn: sqlite3.Connection, epic_type: str | None = None) -> dict:
+    # where/run_where are always one of two fixed literals (never derived from
+    # caller input); epic_type itself is only ever bound as a `?` parameter.
     where = "WHERE epic_type = ?" if epic_type is not None else ""
+    run_where = "WHERE run.epic_type = ?" if epic_type is not None else ""
     params = (epic_type,) if epic_type is not None else ()
-    totals = conn.execute(
-        """SELECT COUNT(*) AS runs, AVG(response_bytes) AS average_response_bytes,
-                  AVG(estimated_tokens) AS average_estimated_tokens,
-                  AVG(truncated) AS truncation_rate
-           FROM context_budget_runs """ + where, params).fetchone()
-    budgets = conn.execute(
-        """SELECT requested_budget AS budget, COUNT(*) AS runs, AVG(returned_cards) AS average_returned_cards
-           FROM context_budget_runs """ + where + " GROUP BY requested_budget ORDER BY requested_budget", params).fetchall()
-    outcomes = conn.execute(
-        """SELECT feedback.outcome, COUNT(*) AS count FROM context_budget_feedback AS feedback
-           JOIN context_budget_runs AS run ON run.id = feedback.context_run_id """ + where.replace("epic_type", "run.epic_type") +
-        " GROUP BY feedback.outcome", params
-    ).fetchall()
-    recommendation_count = conn.execute(
-        "SELECT COALESCE(SUM(json_array_length(recommended_queries_json)), 0) AS count FROM context_budget_runs " + where, params
-    ).fetchone()["count"]
-    executed_count = conn.execute(
-        """SELECT COUNT(*) AS count FROM context_budget_query_executions AS execution
-           JOIN context_budget_runs AS run ON run.id = execution.context_run_id """ + where.replace("epic_type", "run.epic_type"), params
-    ).fetchone()["count"]
-    verification = conn.execute(
-        """SELECT COUNT(*) AS runs, AVG(verification.precision) AS precision,
-                  AVG(verification.recall) AS recall, AVG(verification.omission_rate) AS omission_rate
-           FROM context_budget_verifications AS verification
-           JOIN context_budget_runs AS run ON run.id = verification.context_run_id """ + where.replace("epic_type", "run.epic_type"), params
-    ).fetchone()
+    totals_query = (
+        "SELECT COUNT(*) AS runs, AVG(response_bytes) AS average_response_bytes, "  # nosec B608 - where is a fixed literal; epic_type is bound.
+        "AVG(estimated_tokens) AS average_estimated_tokens, AVG(truncated) AS truncation_rate "
+        "FROM context_budget_runs " + where
+    )
+    totals = conn.execute(totals_query, params).fetchone()
+    budgets_query = (
+        "SELECT requested_budget AS budget, COUNT(*) AS runs, AVG(returned_cards) AS average_returned_cards "  # nosec B608 - where is a fixed literal; epic_type is bound.
+        "FROM context_budget_runs " + where + " GROUP BY requested_budget ORDER BY requested_budget"
+    )
+    budgets = conn.execute(budgets_query, params).fetchall()
+    outcomes_query = (
+        "SELECT feedback.outcome, COUNT(*) AS count FROM context_budget_feedback AS feedback "  # nosec B608 - run_where is a fixed literal; epic_type is bound.
+        "JOIN context_budget_runs AS run ON run.id = feedback.context_run_id " + run_where +
+        " GROUP BY feedback.outcome"
+    )
+    outcomes = conn.execute(outcomes_query, params).fetchall()
+    recommendation_query = (
+        "SELECT COALESCE(SUM(json_array_length(recommended_queries_json)), 0) AS count "  # nosec B608 - where is a fixed literal; epic_type is bound.
+        "FROM context_budget_runs " + where
+    )
+    recommendation_count = conn.execute(recommendation_query, params).fetchone()["count"]
+    executed_query = (
+        "SELECT COUNT(*) AS count FROM context_budget_query_executions AS execution "  # nosec B608 - run_where is a fixed literal; epic_type is bound.
+        "JOIN context_budget_runs AS run ON run.id = execution.context_run_id " + run_where
+    )
+    executed_count = conn.execute(executed_query, params).fetchone()["count"]
+    verification_query = (
+        "SELECT COUNT(*) AS runs, AVG(verification.precision) AS precision, "  # nosec B608 - run_where is a fixed literal; epic_type is bound.
+        "AVG(verification.recall) AS recall, AVG(verification.omission_rate) AS omission_rate "
+        "FROM context_budget_verifications AS verification "
+        "JOIN context_budget_runs AS run ON run.id = verification.context_run_id " + run_where
+    )
+    verification = conn.execute(verification_query, params).fetchone()
     by_type_rows = conn.execute(
         """SELECT run.epic_type, feedback.outcome, COUNT(*) AS count
            FROM context_budget_feedback AS feedback

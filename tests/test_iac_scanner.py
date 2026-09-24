@@ -2,6 +2,7 @@ from pathlib import Path
 
 from orbitkb.discovery.node_ts import NodeTsDetector
 from orbitkb.discovery.walker import ServiceCandidate
+from orbitkb.iac.kubernetes import parse_kubernetes_configuration_sources_file
 from orbitkb.iac.scanner import scan_repository, scan_repository_facts
 
 
@@ -135,6 +136,20 @@ def test_kubernetes_scanner_marks_an_env_from_source_absent_from_local_yaml_as_u
     assert [(issue.source_kind, issue.source_name, issue.prefix, issue.matched_service_name)
             for issue in facts.configuration_source_import_unknowns] == [
         ("config_map", "externally-managed-config", None, "orders-service"),
+    ]
+
+
+def test_kubernetes_source_file_parses_a_secret_declaration_as_secret_kind(tmp_path: Path):
+    secret_file = tmp_path / "secret.yaml"
+    secret_file.write_text(
+        "apiVersion: v1\nkind: Secret\nmetadata:\n  name: orders-credentials\n"
+        "stringData:\n  db-password: unused-in-source\n"
+    )
+
+    sources = parse_kubernetes_configuration_sources_file(secret_file)
+
+    assert [(source.source_kind, source.source_name, source.keys) for source in sources] == [
+        ("secret", "orders-credentials", ("db-password",)),
     ]
 
 

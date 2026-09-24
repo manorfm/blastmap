@@ -122,7 +122,7 @@ def parse_kubernetes_configuration_sources_file(path: Path) -> list[KubernetesCo
         if not isinstance(document, MappingNode):
             continue
         resource_kind = _scalar(_mapping_value(document, "kind"))
-        source_kind = {"ConfigMap": "config_map", "Secret": "secret"}.get(resource_kind)
+        source_kind = {"ConfigMap": "config_map", "Secret": "secret"}.get(resource_kind)  # nosec B105 - a Kubernetes resource kind label, not a credential.
         metadata = _mapping_value(document, "metadata")
         source_name = _scalar(_mapping_value(metadata, "name")) if isinstance(metadata, MappingNode) else None
         if source_kind is None or source_name is None:
