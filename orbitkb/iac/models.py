@@ -79,3 +79,17 @@ class KubernetesConfigurationKeyMismatch:
     declaration_start_line: int
     declaration_end_line: int
     matched_service_name: str | None = None
+
+
+@dataclass(frozen=True)
+class KubernetesConfigurationSourceUnknown:
+    """A workload reference with no source declaration in indexed plain YAML."""
+
+    environment_key: str
+    source_kind: str
+    source_name: str
+    source_key: str
+    reference_file_path: str
+    reference_start_line: int
+    reference_end_line: int
+    matched_service_name: str | None = None
