@@ -687,6 +687,11 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                     evidence = _evidence(path, root, parameter)
                     result.edges.append(FlowEdge(injection_symbol, contract, "injects", evidence))
                     result.injections.append(Injection(injection_symbol, contract, _first_qualifier(_text(parameter, source)), evidence))
+                    if binding := _spring_value_property_binding(
+                        class_name, name_match.group(1) if name_match else None,
+                        _text(parameter, source), evidence,
+                    ):
+                        result.configuration_bindings.append(binding)
             persistence_receivers = _spring_persistence_receivers(result.injections, class_name)
             rest_template_receivers = _spring_http_client_receivers(result.injections, class_name, "RestTemplate")
             web_client_receivers = _spring_http_client_receivers(result.injections, class_name, "WebClient")
@@ -767,13 +772,32 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
             for field in (node for node in _walk(class_node) if node.type == "field_declaration"):
                 types = [node for node in _walk(field) if node.type == "type_identifier"]
                 names = [node for node in _walk(field) if node.type == "variable_declarator"]
+                if names:
+                    variable = names[-1].child_by_field_name("name") or names[-1].named_children[0]
+                    variable_name = _text(variable, source)
+                    evidence = _evidence(path, root, field)
+                    if binding := _spring_value_property_binding(
+                        class_name, variable_name, _text(field, source), evidence,
+                    ):
+                        result.configuration_bindings.append(binding)
                 if types and names:
                     variable = names[-1].child_by_field_name("name") or names[-1].named_children[0]
-                    consumer = f"{class_name}.{_text(variable, source)}"
+                    variable_name = _text(variable, source)
+                    consumer = f"{class_name}.{variable_name}"
                     contract = _text(types[-1], source)
                     evidence = _evidence(path, root, field)
                     result.edges.append(FlowEdge(consumer, contract, "injects", evidence))
                     result.injections.append(Injection(consumer, contract, _first_qualifier(_text(field, source)), evidence))
+            for constructor in (node for node in _walk(class_node) if node.type == "constructor_declaration"):
+                for parameter in (node for node in _walk(constructor) if node.type == "formal_parameter"):
+                    name_node = parameter.child_by_field_name("name")
+                    if name_node is None:
+                        continue
+                    evidence = _evidence(path, root, parameter)
+                    if binding := _spring_value_property_binding(
+                        class_name, _text(name_node, source), _text(parameter, source), evidence,
+                    ):
+                        result.configuration_bindings.append(binding)
             persistence_receivers = _spring_persistence_receivers(result.injections, class_name)
             rest_template_receivers = _spring_http_client_receivers(result.injections, class_name, "RestTemplate")
             web_client_receivers = _spring_http_client_receivers(result.injections, class_name, "WebClient")
@@ -2694,6 +2718,10 @@ _PROPERTY_CONFIGURATION_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}")
 _SENSITIVE_CONFIGURATION_KEY = re.compile(
     r"(?:password|secret|token|api[_-]?key|credential|private[_-]?key)", re.IGNORECASE,
 )
+_SPRING_VALUE_PROPERTY = re.compile(
+    r'@Value\s*\(\s*(?:value\s*=\s*)?"\$\{'
+    r'(?P<key>[A-Za-z_][A-Za-z0-9_.-]{0,127})(?::[^{}"]*)?\}"\s*\)',
+)
 
 
 @dataclass(frozen=True)
@@ -2701,6 +2729,28 @@ class _CodeToken:
     kind: str
     text: str
     start: int
+
+
+def _spring_value_property_binding(
+    owner: str, member: str | None, declaration: str, evidence: Evidence,
+) -> ConfigurationBinding | None:
+    """Return an exact Spring ``@Value`` property binding, never resolved values.
+
+    Spring permits SpEL and composed placeholders. Those forms do not identify a
+    single configuration key locally, so only one literal ``${key}`` (optionally
+    with a literal default) becomes an index fact.
+    """
+    match = _SPRING_VALUE_PROPERTY.search(declaration)
+    if match is None or member is None:
+        return None
+    key = match.group("key")
+    return ConfigurationBinding(
+        source=f"{owner}.{member}",
+        key=key,
+        kind="property",
+        sensitive=_SENSITIVE_CONFIGURATION_KEY.search(key) is not None,
+        evidence=evidence,
+    )
 
 
 def _literal_configuration_bindings(symbols: list[Symbol], root: Path) -> list[ConfigurationBinding]:

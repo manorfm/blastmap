@@ -1826,6 +1826,57 @@ func Credentials() (string, bool) { return os.LookupEnv("PARTNER_API_TOKEN") }
     ]
 
 
+def test_static_analysis_extracts_literal_spring_value_property_bindings(tmp_path: Path):
+    (tmp_path / "PaymentClient.java").write_text(
+        '''class PaymentClient {
+  @Value("${payments.base-url}")
+  private String baseUrl;
+  @Value("${payments.retries:3}")
+  private int retries;
+  String pay() { return baseUrl; }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "OrdersConfig.kt").write_text(
+        '''class OrdersConfig(
+  @Value("${orders.topic}") private val topic: String,
+  @Value("${PARTNER_API_TOKEN}") private val token: String,
+) {
+  fun publish() = topic
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "IgnoredConfig.java").write_text(
+        '''class IgnoredConfig {
+  @Value("#{environment['PAYMENTS_URL']}") String spel;
+  @Value("prefix-${payments.host}") String composed;
+  @Value("${first}-${second}") String multiple;
+  String read() { return spel; }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "BillingConfig.java").write_text(
+        '''class BillingConfig {
+  BillingConfig(@Value("${billing.timeout-ms}") int timeout) {}
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(binding.source, binding.key, binding.kind, binding.sensitive) for binding in result.configuration_bindings} == {
+        ("PaymentClient.baseUrl", "payments.base-url", "property", False),
+        ("PaymentClient.retries", "payments.retries", "property", False),
+        ("OrdersConfig.topic", "orders.topic", "property", False),
+        ("OrdersConfig.token", "PARTNER_API_TOKEN", "property", True),
+        ("BillingConfig.timeout", "billing.timeout-ms", "property", False),
+    }
+
+
 def test_static_analysis_ignores_go_environment_like_calls_without_os_import(tmp_path: Path):
     (tmp_path / "config.go").write_text(
         '''package config
