@@ -300,9 +300,12 @@ boundary for review.
 `possible_retry_write_publish_reaches_unrecovered_persistent_consumer` narrows that
 boundary to a matching RabbitMQ consumer that has no source-proven retry boundary,
 retry delay or dead-letter route. It returns up to three consumer write summaries and
-queues. The signal does not claim that broker recovery, idempotency or de-duplication
-is absent: those controls can be configured outside indexed source, and other brokers
-are intentionally excluded from this absence-of-proof check.
+queues. When the consumer handler contains a local idempotency marker, its summary
+also returns `idempotency: "declared"`; that marker does not suppress the finding or
+prove a key, storage constraint or de-duplication implementation. The signal does not
+claim that broker recovery, idempotency or de-duplication is absent: those controls can
+be configured outside indexed source, and other brokers are intentionally excluded from
+this absence-of-proof check.
 
 `possible_non_atomic_service_publish` extends the transaction/outbox review to a
 non-entrypoint service symbol with source-proven local write and event publication but
@@ -366,6 +369,9 @@ one literal version header named `schema_version`, `schemaVersion`,
 Matching consumer contracts may include literal `dead_letter_routing_key` and
 `retry_delay_ms` extracted from local queue declarations; missing or dynamic values
 are not represented.
+`idempotency: "detected"` is emitted only when that consumer's own handler declaration
+contains an idempotency marker. It is a scoped source hint, not proof that duplicate
+delivery is safely prevented.
 For Go, these values require a literal `amqp.Table` supplied to `QueueDeclare` on a
 receiver locally declared as `*amqp.Channel`.
 Consumer `contract.bindings` is an optional ordered list of `{exchange,

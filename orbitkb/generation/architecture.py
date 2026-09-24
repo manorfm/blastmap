@@ -882,12 +882,15 @@ def find_retry_write_publish_flows_with_unrecovered_persistent_consumers(
             consumer_evidence = []
             for consumer, writes, recovery in visible_consumers:
                 visible_writes = writes[:3]
-                consumer_details.append({
+                consumer_detail = {
                     "service": names[consumer["service_id"]], "symbol": consumer["symbol"],
                     "queue": recovery["queue"],
                     "writes": [{"target": write["to_symbol"]} for write in visible_writes],
                     "write_count": len(writes),
-                })
+                }
+                if json.loads(recovery["contract_json"]).get("idempotency") == "detected":
+                    consumer_detail["idempotency"] = "declared"
+                consumer_details.append(consumer_detail)
                 consumer_evidence.extend([
                     _edge_evidence(consumer),
                     _edge_evidence(recovery),

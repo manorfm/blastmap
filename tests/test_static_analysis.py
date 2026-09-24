@@ -421,6 +421,25 @@ channel.consume("orders.created", async (message: OrderCreated) => {
     ]
 
 
+def test_rabbit_consumer_idempotency_is_scoped_to_its_handler(tmp_path: Path):
+    (tmp_path / "consumer.ts").write_text(
+        '''channel.consume("orders.created", async (message: OrderCreated) => {
+  // idempotency key prevents duplicate handling
+  await orderService.handle(message);
+});
+channel.consume("billing.created", async (message: BillingCreated) => {
+  await billingService.handle(message);
+});
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.contracts["message.consume:orders.created"]["idempotency"] == "detected"
+    assert "idempotency" not in result.contracts["message.consume:billing.created"]
+
+
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
     source = tmp_path / "consumer.go"
     source.write_text(

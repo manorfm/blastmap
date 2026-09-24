@@ -762,7 +762,7 @@ def test_persistent_consumer_risk_disappears_when_consumer_write_is_removed(tmp_
     assert find_retry_write_publish_flows_with_persistent_consumers(conn) == []
 
 
-def test_unrecovered_persistent_consumer_risk_disappears_when_dlq_is_proven(tmp_path: Path):
+def test_unrecovered_persistent_consumer_risk_reports_declared_idempotency_without_hiding_recovery_gap(tmp_path: Path):
     conn = open_db(tmp_path / "unrecovered-persistent-consumer.db")
     orders = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
     billing = services_repo.ensure_service(conn, "billing", "/tmp/billing", "jvm-spring")
@@ -807,6 +807,24 @@ def test_unrecovered_persistent_consumer_risk_disappears_when_dlq_is_proven(tmp_
     assert "possible_retry_write_publish_reaches_unrecovered_persistent_consumer" in {
         row["kind"] for row in architecture_repo.list_findings(conn, run_id)
     }
+
+    flows_repo.replace_analysis(
+        conn,
+        billing,
+        AnalysisResult(
+            entrypoints=[consumer_entrypoint], message_contracts=[consumer_contract], edges=[consumer_write],
+            contracts={consumer_entrypoint.symbol: {
+                "transport": "rabbitmq", "direction": "consumes", "queue": "order.created",
+                "idempotency": "detected",
+            }},
+        ),
+    )
+
+    idempotency_findings = find_retry_write_publish_flows_with_unrecovered_persistent_consumers(conn)
+    assert _kinds(idempotency_findings) == {
+        "possible_retry_write_publish_reaches_unrecovered_persistent_consumer",
+    }
+    assert idempotency_findings[0]["detail"]["consumers"][0]["idempotency"] == "declared"
 
     flows_repo.replace_analysis(
         conn,

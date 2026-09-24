@@ -1113,12 +1113,15 @@ def _message_contract(channel: str, declaration: str, language: str, *, transpor
         name, type_name = match.groups()
     else:
         name = type_name = None
-    return {
+    contract = {
         "transport": transport,
         "direction": "consumes",
         "queue": channel,
         "payload": {"name": name, "type": type_name.rstrip("?").lstrip("*") if type_name else None, "required": True} if type_name else None,
     }
+    if transport == "rabbitmq" and re.search(r"\bidempot(?:ent|ency)\b", declaration, re.I):
+        contract["idempotency"] = "detected"
+    return contract
 
 
 def _node_publish_contracts(tree: Node, source: bytes, path: Path, root: Path) -> list[MessageContract]:
@@ -2079,8 +2082,6 @@ def _enrich_rabbitmq_contracts(contracts: dict[str, dict], files: list[Path]) ->
             contract.update(options)
         if queue_bindings := bindings.get(contract["queue"]):
             contract["bindings"] = queue_bindings
-        if re.search(r"\bidempot(?:ent|ency)\b", source_text, re.I):
-            contract["idempotency"] = "detected"
         if re.search(r"\btimeout\b", source_text, re.I):
             contract["timeout"] = "detected"
 
