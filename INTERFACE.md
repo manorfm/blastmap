@@ -61,14 +61,15 @@ an error type.
 ## Change plan
 
 `plan_change` is the evidence-first planning contract. Its initial response contains
-`plan_id` when a surface synthesis was persisted, `status`, the bounded
+a durable `plan_id`, `status`, the bounded
 `surface.primary`/`secondary`/`contracts_at_risk`, explicit `unknowns`, and a
 `budget` with requested and estimated response tokens. It currently returns empty
 `decision_points` and `change_units` rather than guessing code targets from broad
 service matches. `ready` means a relevant indexed surface exists; it does not claim
 that code-level targets have been proven. `insufficient_evidence` means no indexed
-service matched the task. The token budget is capped at 2,200 estimated response
-tokens.
+service matched the task. The audit record links to a surface synthesis when one
+exists and does not duplicate task text. The token budget is capped at 2,200 estimated
+response tokens.
 
 ## Compact change context
 

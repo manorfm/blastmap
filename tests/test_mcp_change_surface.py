@@ -78,7 +78,7 @@ async def test_plan_change_is_reachable_over_stdio(tmp_path: Path):
 
             result = content_json(await session.call_tool("plan_change", {"task": "unrelated xyz"}))
 
-            assert result["plan_id"] is None
+            assert result["plan_id"].startswith("cp_")
             assert result["status"] == "insufficient_evidence"
             assert result["surface"] == {"primary": [], "secondary": [], "contracts_at_risk": []}
             assert result["decision_points"] == []

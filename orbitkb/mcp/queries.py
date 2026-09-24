@@ -11,6 +11,7 @@ from collections import deque
 from orbitkb.analysis.smells import find_entrypoint_smells
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import architecture as architecture_repo
+from orbitkb.db.repositories import change_plans as change_plans_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
 from orbitkb.db.repositories import cloud_iac as cloud_iac_repo
 from orbitkb.db.repositories import components as components_repo
@@ -777,12 +778,13 @@ def plan_change(
     if "error" in change_surface_result:
         return change_surface_result
     primary = change_surface_result["primary"]
+    status = "ready" if primary else "insufficient_evidence"
+    plan_run_id = change_plans_repo.record_plan(
+        conn, change_surface_result.get("run_id"), status, token_budget,
+    )
     response = {
-        "plan_id": (
-            f"cp_{change_surface_result['run_id']}"
-            if change_surface_result.get("run_id") is not None else None
-        ),
-        "status": "ready" if primary else "insufficient_evidence",
+        "plan_id": f"cp_{plan_run_id}",
+        "status": status,
         "surface": {
             "primary": primary,
             "secondary": change_surface_result["secondary"],
@@ -795,6 +797,9 @@ def plan_change(
     }
     response["budget"]["estimated_tokens"] = (len(json.dumps(response, sort_keys=True)) + 3) // 4
     response["budget"]["truncated"] = response["budget"]["estimated_tokens"] > token_budget
+    change_plans_repo.update_measurements(
+        conn, plan_run_id, response["budget"]["estimated_tokens"], response["budget"]["truncated"],
+    )
     return response
 
 

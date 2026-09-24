@@ -407,6 +407,20 @@ CREATE TABLE IF NOT EXISTS change_surface_verifications (
 
 CREATE INDEX IF NOT EXISTS idx_change_surface_verifications_run ON change_surface_verifications(run_id);
 
+-- A plan is an auditable, bounded view over one change-surface run. It stores
+-- metadata only; the task text remains owned by the existing surface-run record.
+CREATE TABLE IF NOT EXISTS change_plan_runs (
+    id                    INTEGER PRIMARY KEY,
+    change_surface_run_id INTEGER REFERENCES change_surface_runs(id) ON DELETE SET NULL,
+    status                TEXT NOT NULL CHECK (status IN ('ready', 'needs_decision', 'insufficient_evidence', 'stale_knowledge')),
+    requested_tokens      INTEGER NOT NULL CHECK (requested_tokens > 0),
+    estimated_tokens      INTEGER NOT NULL CHECK (estimated_tokens >= 0),
+    truncated             INTEGER NOT NULL CHECK (truncated IN (0, 1)),
+    created_at            TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_plan_runs_surface ON change_plan_runs(change_surface_run_id);
+
 -- Privacy-safe calibration data for get_change_context. These rows deliberately
 -- contain no task/prompt text, source/code excerpts or generated card text: only
 -- response measurements, service IDs and bounded tool metadata.
