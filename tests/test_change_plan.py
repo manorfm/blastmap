@@ -522,6 +522,11 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
             reference_file_path="deploy/checkout.yaml", reference_start_line=12, reference_end_line=15,
             matched_service_name="checkout-service",
         ),
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix="PAYMENTS_",
+            reference_file_path="deploy/checkout.yaml", reference_start_line=20, reference_end_line=23,
+            matched_service_name="checkout-service",
+        ),
     ])
 
     result = queries.plan_change(conn, FakeBackend({
@@ -535,7 +540,10 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
         "target": {
             "role": "configuration",
             "symbol": "kubernetes:config_map:external-config",
-            "evidence": [{"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 15}],
+            "evidence": [
+                {"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 15},
+                {"file": "deploy/checkout.yaml", "start_line": 20, "end_line": 23},
+            ],
         },
         "action": "review",
         "reason": (
@@ -550,7 +558,10 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
             "verify required configuration keys are supplied by the owning delivery boundary before rollout",
         ],
         "confidence": 0.4,
-        "evidence": [{"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 15}],
+        "evidence": [
+            {"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 15},
+            {"file": "deploy/checkout.yaml", "start_line": 20, "end_line": 23},
+        ],
     }]
     detail = queries.describe_change_unit(
         conn,
