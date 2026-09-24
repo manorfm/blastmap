@@ -1954,17 +1954,24 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
            WHERE service_id IS NOT NULL
            ORDER BY service_id, source_name, prefix, reference_file_path, reference_start_line"""
     ).fetchall()
-    findings: list[dict] = []
+    grouped: dict[tuple[int, str, str], list[sqlite3.Row]] = {}
     for row in rows:
-        service = names[row["service_id"]]
-        source_label = "ConfigMap" if row["source_kind"] == "config_map" else "Secret"
-        prefix_text = f" with prefix {row['prefix']}" if row["prefix"] is not None else ""
+        grouped.setdefault((row["service_id"], row["source_kind"], row["source_name"]), []).append(row)
+    findings: list[dict] = []
+    for (service_id, source_kind, source_name), imports in sorted(grouped.items()):
+        service = names[service_id]
+        source_label = "ConfigMap" if source_kind == "config_map" else "Secret"
+        evidence = sorted({
+            (row["reference_file_path"], row["reference_start_line"], row["reference_end_line"])
+            for row in imports
+        })
+        prefixes = sorted({row["prefix"] for row in imports if row["prefix"] is not None})
         detail = {
-            "source_kind": row["source_kind"], "source_name": row["source_name"], "confidence": 0.4,
-            "evidence": [{
-                "file": row["reference_file_path"], "start_line": row["reference_start_line"],
-                "end_line": row["reference_end_line"],
-            }],
+            "source_kind": source_kind, "source_name": source_name, "confidence": 0.4,
+            "evidence": [
+                {"file": file_path, "start_line": start_line, "end_line": end_line}
+                for file_path, start_line, end_line in evidence
+            ],
             "unknowns": [
                 "The source may be managed by another repository, Helm chart, controller, or deployment process.",
                 "envFrom does not expose its imported environment keys as static facts.",
@@ -1973,13 +1980,15 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
                 "Confirm which delivery boundary owns this ConfigMap or Secret before relying on its imported keys.",
             ],
         }
-        if row["prefix"] is not None:
-            detail["prefix"] = row["prefix"]
+        if prefixes:
+            detail["prefixes"] = prefixes
+        if any(row["prefix"] is None for row in imports):
+            detail["includes_unprefixed_import"] = True
         findings.append({
             "kind": "possible_kubernetes_configuration_source_import_not_declared_locally", "severity": "info",
             "services": [service],
             "reason": (
-                f"{service} imports keys from {source_label} {row['source_name']} through envFrom{prefix_text}, "
+                f"{service} imports keys from {source_label} {source_name} through envFrom, "
                 "but no matching source declaration was indexed locally."
             ),
             "detail": detail,

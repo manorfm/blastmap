@@ -156,6 +156,11 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
             reference_file_path="deploy/orders.yaml", reference_start_line=12, reference_end_line=15,
             matched_service_name="orders",
         ),
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix="PAYMENTS_",
+            reference_file_path="deploy/orders.yaml", reference_start_line=20, reference_end_line=23,
+            matched_service_name="orders",
+        ),
     ])
 
     assert find_kubernetes_configuration_source_import_unknowns(conn) == [{
@@ -163,13 +168,16 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
         "severity": "info",
         "services": ["orders"],
         "reason": (
-            "orders imports keys from ConfigMap external-config through envFrom with prefix ORDERS_, but no matching "
-            "source declaration was indexed locally."
+            "orders imports keys from ConfigMap external-config through envFrom, but no matching source declaration "
+            "was indexed locally."
         ),
         "detail": {
-            "source_kind": "config_map", "source_name": "external-config", "prefix": "ORDERS_",
-            "confidence": 0.4,
-            "evidence": [{"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15}],
+            "source_kind": "config_map", "source_name": "external-config",
+            "prefixes": ["ORDERS_", "PAYMENTS_"], "confidence": 0.4,
+            "evidence": [
+                {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15},
+                {"file": "deploy/orders.yaml", "start_line": 20, "end_line": 23},
+            ],
             "unknowns": [
                 "The source may be managed by another repository, Helm chart, controller, or deployment process.",
                 "envFrom does not expose its imported environment keys as static facts.",
