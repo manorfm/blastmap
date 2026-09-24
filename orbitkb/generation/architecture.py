@@ -1948,7 +1948,7 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
     """Return low-confidence possible external ``envFrom`` dependencies."""
     names = _service_names(conn)
     rows = conn.execute(
-        """SELECT service_id, source_kind, source_name, prefix, reference_file_path,
+        """SELECT service_id, source_kind, source_name, prefix, optional, reference_file_path,
                   reference_start_line, reference_end_line
            FROM kubernetes_configuration_source_import_unknowns
            WHERE service_id IS NOT NULL
@@ -1966,8 +1966,15 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
             for row in imports
         })
         prefixes = sorted({row["prefix"] for row in imports if row["prefix"] is not None})
+        availability_values = {None if row["optional"] is None else bool(row["optional"]) for row in imports}
+        availability = (
+            "optional" if availability_values == {True}
+            else "required" if availability_values == {False}
+            else "unknown" if availability_values == {None}
+            else "mixed"
+        )
         detail = {
-            "source_kind": source_kind, "source_name": source_name, "confidence": 0.4,
+            "source_kind": source_kind, "source_name": source_name, "availability": availability, "confidence": 0.4,
             "evidence": [
                 {"file": file_path, "start_line": start_line, "end_line": end_line}
                 for file_path, start_line, end_line in evidence
@@ -1984,6 +1991,14 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
             detail["prefixes"] = prefixes
         if any(row["prefix"] is None for row in imports):
             detail["includes_unprefixed_import"] = True
+        if availability == "optional":
+            detail["unknowns"].append("The source is optional and may be absent at runtime.")
+            detail["remediation"].append(
+                f"Verify requested behavior remains safe when the optional {source_label} {source_name} is unavailable.",
+            )
+        elif availability in {"mixed", "unknown"}:
+            detail["unknowns"].append("The imports do not establish one unambiguous source-availability requirement.")
+            detail["remediation"].append("Confirm source availability before relying on imported configuration during rollout.")
         findings.append({
             "kind": "possible_kubernetes_configuration_source_import_not_declared_locally", "severity": "info",
             "services": [service],

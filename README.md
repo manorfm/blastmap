@@ -174,7 +174,8 @@ chart, controller or delivery process owns that source; it never assumes the sou
 must be created in the indexed repository.
 The same ownership review is created once per unresolved `envFrom` source for a
 primary service, grouping its references even when prefixes differ. It does not
-infer which keys the imported source supplies.
+infer which keys the imported source supplies. For an optional source, it validates
+safe behavior when absent rather than requiring its keys before rollout.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned
@@ -261,7 +262,9 @@ confirmation because transforms and runtime mutation may change the deployment.
 An unresolved `envFrom` source is also reported separately as the informational,
 low-confidence `possible_kubernetes_configuration_source_import_not_declared_locally`.
 It groups repeated imports of the same source per service, retaining evidence and
-prefixes while imported environment keys remain unknown.
+prefixes while imported environment keys remain unknown. Its availability is
+`optional`, `required`, `mixed` or `unknown`; optional sources prompt a behavioral
+absence review instead of an assertion that rollout must provision the source.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and

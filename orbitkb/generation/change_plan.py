@@ -234,7 +234,7 @@ def derive_feature_flag_review_units(
     """
     units: list[dict] = []
     for service in sorted(primary_services):
-        grouped: dict[tuple[str, str], list[dict]] = {}
+        grouped: dict[tuple[str, str], list[tuple[dict, object]]] = {}
         for flag in feature_flags_by_service.get(service, []):
             if not isinstance(flag, dict):
                 continue
@@ -517,10 +517,27 @@ def derive_runtime_configuration_source_import_unknown_review_units(
                 all(isinstance(value, str) and value for value in (source_kind, source_name))
                 and _unique_evidence([reference])
             ):
-                grouped.setdefault((source_kind, source_name), []).append(reference)
-        for (source_kind, source_name), references in sorted(grouped.items()):
-            evidence = _sorted_evidence(references)
+                grouped.setdefault((source_kind, source_name), []).append((reference, unknown.get("optional")))
+        for (source_kind, source_name), records in sorted(grouped.items()):
+            evidence = _sorted_evidence([reference for reference, _optional in records])
             source_label = "ConfigMap" if source_kind == "config_map" else "Secret"
+            availability_values = {
+                None if optional is None else bool(optional)
+                for _reference, optional in records
+            }
+            availability = (
+                "optional" if availability_values == {True}
+                else "required" if availability_values == {False}
+                else "unknown" if availability_values == {None}
+                else "mixed"
+            )
+            availability_validation = (
+                f"verify requested behavior remains safe when the optional {source_label} {source_name} is unavailable"
+                if availability == "optional"
+                else "verify required configuration keys are supplied by the owning delivery boundary before rollout"
+                if availability == "required"
+                else "confirm source availability before relying on imported configuration during rollout"
+            )
             units.append({
                 "id": f"runtime-configuration-source-import-unknown:{service}:{source_kind}:{source_name}",
                 "service": service,
@@ -538,7 +555,7 @@ def derive_runtime_configuration_source_import_unknown_review_units(
                 "dependencies": [],
                 "validation": [
                     f"confirm the owning repository, chart, controller, or deployment process for {source_label} {source_name}",
-                    "verify required configuration keys are supplied by the owning delivery boundary before rollout",
+                    availability_validation,
                 ],
                 "confidence": 0.4,
                 "evidence": evidence,
