@@ -152,6 +152,9 @@ stable route-derived symbol. A router route is an HTTP entrypoint only after one
 literal `app.use(prefix, router)` mount, which is composed into its path; unmounted or
 multiply-mounted routers, dynamic registration, framework wrappers and unresolved
 handlers remain unknown rather than becoming route facts.
+Fastify uses the same literal method/path and handler rules, but only for an instance
+created from a locally imported Fastify factory; plugin registration and dynamic
+prefixes remain unknown.
 
 ## Entrypoint response
 

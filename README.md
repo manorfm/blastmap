@@ -136,6 +136,8 @@ Inline routes receive a stable route-derived symbol. Router routes require exact
 direct literal mount, and inherit that prefix. Dynamic registration, wrappers,
 unmounted/multiply-mounted routers and unresolved handlers are intentionally left out
 rather than guessed into an endpoint.
+The same literal method/path and handler rules cover Fastify instances created from a
+locally imported factory; dynamic prefixes and plugin registration remain out of scope.
 
 For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven error
 contracts (raised or explicitly mapped exception types and explicit local timeout

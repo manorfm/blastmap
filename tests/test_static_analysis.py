@@ -580,6 +580,49 @@ router.post("/orders", createOrder);
     assert result.entrypoints == []
 
 
+def test_node_analyzer_exposes_literal_fastify_route_and_named_handler_flow(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import Fastify from "fastify";
+const app = Fastify();
+
+function createOrder(request: FastifyRequest, reply: FastifyReply) {
+  return orderService.create(request.body);
+}
+
+app.post("/orders", createOrder);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(entry.kind, entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
+        ("http", "POST", "/orders", "orders.createOrder"),
+    ]
+    assert any(
+        edge.source == "orders.createOrder" and edge.target == "orderService.create"
+        for edge in result.edges
+    )
+
+
+def test_node_analyzer_skips_fastify_like_route_without_a_local_factory(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''const app = makeTestServer();
+
+function createOrder(request: Request, response: Response) {
+  return orderService.create(request.body);
+}
+
+app.post("/orders", createOrder);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.entrypoints == []
+
+
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
     source = tmp_path / "consumer.go"
     source.write_text(

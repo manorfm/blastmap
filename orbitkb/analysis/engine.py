@@ -864,7 +864,10 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
                 client_declarations, command_imports,
             )
-        express_route_prefixes = _express_route_prefixes(source_text)
+        route_prefixes = {
+            **_express_route_prefixes(source_text),
+            **{receiver: "" for receiver in _fastify_route_receivers(source_text)},
+        }
         for node in _walk(tree):
             if node.type != "call_expression":
                 continue
@@ -876,12 +879,12 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             if "." not in callee_text:
                 continue
             receiver, method = callee_text.rsplit(".", 1)
-            if receiver not in express_route_prefixes or method not in self.HTTP_ROUTE_METHODS:
+            if receiver not in route_prefixes or method not in self.HTTP_ROUTE_METHODS:
                 continue
             args = arguments.named_children
             path_value = _string(args[0], source) if args else None
             if path_value is not None:
-                path_value = _join_route(express_route_prefixes[receiver], path_value)
+                path_value = _join_route(route_prefixes[receiver], path_value)
             handler_node = args[-1] if len(args) > 1 else None
             handler = functions_by_name.get(_text(handler_node, source)) if handler_node is not None else None
             if handler is None and handler_node is not None and handler_node.type in {"arrow_function", "function_expression"}:
@@ -1825,6 +1828,22 @@ def _express_route_prefixes(source: str) -> dict[str, str]:
         **{application: "" for application in applications},
         **{router: prefixes[0] for router, prefixes in mounts.items() if len(prefixes) == 1},
     }
+
+
+def _fastify_route_receivers(source: str) -> frozenset[str]:
+    """Return instances created from a locally imported Fastify factory."""
+    factories = {
+        *re.findall(r"\bimport\s+(\w+)\s+from\s*[\"']fastify[\"']", source),
+        *re.findall(
+            r"\b(?:const|let)\s+(\w+)\s*=\s*require\s*\(\s*[\"']fastify[\"']\s*\)", source,
+        ),
+    }
+    receivers: set[str] = set()
+    for factory in factories:
+        receivers.update(re.findall(
+            rf"\b(?:const|let|var)\s+(\w+)\s*=\s*{re.escape(factory)}\s*\(", source,
+        ))
+    return frozenset(receivers)
 
 
 def _node_named_functions(tree: Node, source: bytes, module_name: str) -> list[_Function]:
