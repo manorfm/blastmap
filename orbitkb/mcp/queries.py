@@ -712,15 +712,35 @@ def describe_runtime_configuration(
         kubernetes_configuration_repo.list_kubernetes_configuration_bindings_for_service(conn, row["id"]),
         limit, offset,
     )
+    mismatches_by_reference = {
+        (
+            mismatch["environment_key"], mismatch["source_kind"], mismatch["source_name"], mismatch["source_key"],
+            mismatch["reference_file_path"], mismatch["reference_start_line"], mismatch["reference_end_line"],
+        ): mismatch
+        for mismatch in kubernetes_configuration_repo.list_kubernetes_configuration_key_mismatches_for_service(
+            conn, row["id"],
+        )
+    }
+    response_bindings = []
+    for item in bindings:
+        response_binding = {"environment_key": item["environment_key"], **_runtime_configuration_reference(item)}
+        mismatch = mismatches_by_reference.get((
+            item["environment_key"], item["source_kind"], item["source_name"], item["source_key"],
+            item["file_path"], item["start_line"], item["end_line"],
+        ))
+        if mismatch is not None:
+            response_binding["declaration"] = {
+                "status": "key_not_declared",
+                "evidence": {
+                    "file": mismatch["declaration_file_path"],
+                    "start_line": mismatch["declaration_start_line"],
+                    "end_line": mismatch["declaration_end_line"],
+                },
+            }
+        response_bindings.append(response_binding)
     return {
         "service": row["name"], "repository": row["repository_name"],
-        "bindings": [
-            {
-                "environment_key": item["environment_key"],
-                **_runtime_configuration_reference(item),
-            }
-            for item in bindings
-        ],
+        "bindings": response_bindings,
         **page,
     }
 

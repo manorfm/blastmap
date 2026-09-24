@@ -100,6 +100,9 @@ references. Absence of that match is unknown, never a missing-configuration find
 Kubernetes workload manifests, including the variable name, ConfigMap or Secret
 name/key, workload/container and file evidence. It never reads values; `envFrom`,
 dynamic names and unrendered Helm templates remain unknown.
+When a single local source declaration omits a key referenced by that workload, the
+binding reports `key_not_declared` with declaration evidence; absent or ambiguous
+source declarations remain unknown.
 
 `describe_feature_flags` returns literal reads through a locally proven feature-flag
 SDK, currently LaunchDarkly's Node server SDK. It returns key, provider and source

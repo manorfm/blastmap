@@ -230,6 +230,9 @@ absence is unknown, not evidence that deployment configuration is missing.
 Kubernetes workload manifests. It identifies the environment variable, ConfigMap or
 Secret name/key, workload/container and source evidence, without exposing values.
 `envFrom`, dynamic names and unrendered Helm templates remain unknown.
+When exactly one local source declaration exists and it does not list a referenced
+key, the response marks that source-proven mismatch and returns its declaration
+evidence. Sources absent from the indexed repository remain unknown.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and

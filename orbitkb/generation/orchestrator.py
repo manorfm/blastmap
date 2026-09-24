@@ -706,6 +706,9 @@ def index_path(
     kubernetes_configuration_repo.replace_kubernetes_configuration_bindings(
         conn, repository_id, iac_facts.configuration_bindings,
     )
+    kubernetes_configuration_repo.replace_kubernetes_configuration_key_mismatches(
+        conn, repository_id, iac_facts.configuration_key_mismatches,
+    )
     # index_service's own recompute_architecture_view call (above, per service)
     # necessarily runs *before* this repository's IaC scan on a fresh index —
     # cloud_iac_resources findings computed there would be stale by exactly one

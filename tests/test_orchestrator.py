@@ -117,6 +117,9 @@ def test_index_path_persists_kubernetes_runtime_configuration_bindings(tmp_path:
         "            - name: ORDERS_TOPIC\n              valueFrom:\n                configMapKeyRef:\n"
         "                  name: orders-config\n                  key: orders-topic\n"
     )
+    (root / "orders-service" / "config.yaml").write_text(
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: orders-config\ndata:\n  other-key: value\n"
+    )
     conn = open_db(tmp_path / "test.db")
 
     index_path(conn, root, FakeOrchestratorBackend())
@@ -125,6 +128,10 @@ def test_index_path_persists_kubernetes_runtime_configuration_bindings(tmp_path:
     bindings = kubernetes_configuration_repo.list_kubernetes_configuration_bindings_for_service(conn, orders["id"])
     assert [(binding["environment_key"], binding["source_kind"], binding["source_name"], binding["source_key"])
             for binding in bindings] == [("ORDERS_TOPIC", "config_map", "orders-config", "orders-topic")]
+    mismatches = kubernetes_configuration_repo.list_kubernetes_configuration_key_mismatches_for_service(conn, orders["id"])
+    assert [(mismatch["source_name"], mismatch["source_key"]) for mismatch in mismatches] == [
+        ("orders-config", "orders-topic"),
+    ]
 
 
 def test_messaging_prompt_includes_provider_hints_and_config_evidence(tmp_path: Path):

@@ -261,6 +261,30 @@ CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_bindings_repository
 CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_bindings_service
     ON kubernetes_configuration_bindings(service_id);
 
+-- A source-proven local mismatch: a workload references a key that is absent
+-- from its single ConfigMap/Secret declaration in this repository. This says
+-- nothing about external resources, rendered templates, or runtime values.
+CREATE TABLE IF NOT EXISTS kubernetes_configuration_key_mismatches (
+    id                     INTEGER PRIMARY KEY,
+    repository_id          INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    service_id             INTEGER REFERENCES services(id) ON DELETE SET NULL,
+    environment_key        TEXT NOT NULL,
+    source_kind            TEXT NOT NULL CHECK (source_kind IN ('config_map', 'secret')),
+    source_name            TEXT NOT NULL,
+    source_key             TEXT NOT NULL,
+    reference_file_path    TEXT NOT NULL,
+    reference_start_line   INTEGER NOT NULL,
+    reference_end_line     INTEGER NOT NULL,
+    declaration_file_path  TEXT NOT NULL,
+    declaration_start_line INTEGER NOT NULL,
+    declaration_end_line   INTEGER NOT NULL,
+    updated_at             TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_key_mismatches_repository
+    ON kubernetes_configuration_key_mismatches(repository_id);
+CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_key_mismatches_service
+    ON kubernetes_configuration_key_mismatches(service_id);
+
 -- One row per class/controller/module cluster of endpoints within a service, synthesized
 -- from the already-generated `apis` summaries of the endpoints it groups (never raw code
 -- read again) — the layer between a single endpoint and the whole service. `file_path` is

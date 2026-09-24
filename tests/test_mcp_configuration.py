@@ -8,7 +8,10 @@ from orbitkb.db.repositories import (
     repositories,
     services,
 )
-from orbitkb.iac.models import KubernetesConfigurationBinding
+from orbitkb.iac.models import (
+    KubernetesConfigurationBinding,
+    KubernetesConfigurationKeyMismatch,
+)
 from orbitkb.mcp import queries
 
 
@@ -64,6 +67,33 @@ def test_describe_runtime_configuration_returns_kubernetes_references_without_va
         }],
         "total": 1,
         "truncated": False,
+    }
+
+
+def test_describe_runtime_configuration_marks_a_source_proven_missing_declared_key(tmp_path):
+    conn = open_db(tmp_path / "runtime-configuration-mismatch.db")
+    repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")
+    services.ensure_service(conn, "orders", "/repos/shop/orders", "node-ts", repository_id=repository_id)
+    binding = KubernetesConfigurationBinding(
+        environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="orders-config",
+        source_key="orders-topic", workload_kind="Deployment", workload_name="orders", container_name="api",
+        file_path="deploy/orders.yaml", start_line=12, end_line=17, matched_service_name="orders",
+    )
+    kubernetes_configuration.replace_kubernetes_configuration_bindings(conn, repository_id, [binding])
+    kubernetes_configuration.replace_kubernetes_configuration_key_mismatches(conn, repository_id, [
+        KubernetesConfigurationKeyMismatch(
+            environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="orders-config",
+            source_key="orders-topic", reference_file_path="deploy/orders.yaml", reference_start_line=12,
+            reference_end_line=17, declaration_file_path="deploy/config.yaml", declaration_start_line=1,
+            declaration_end_line=7, matched_service_name="orders",
+        ),
+    ])
+
+    result = queries.describe_runtime_configuration(conn, "orders")
+
+    assert result["bindings"][0]["declaration"] == {
+        "status": "key_not_declared",
+        "evidence": {"file": "deploy/config.yaml", "start_line": 1, "end_line": 7},
     }
 
 

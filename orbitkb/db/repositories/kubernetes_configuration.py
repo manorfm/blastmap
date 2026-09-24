@@ -4,7 +4,10 @@ from __future__ import annotations
 import sqlite3
 
 from orbitkb.db.repositories import services as services_repo
-from orbitkb.iac.models import KubernetesConfigurationBinding
+from orbitkb.iac.models import (
+    KubernetesConfigurationBinding,
+    KubernetesConfigurationKeyMismatch,
+)
 
 from ._util import now
 
@@ -64,4 +67,48 @@ def list_kubernetes_configuration_bindings_for_environment_keys(
              WHERE service_id = ? AND environment_key IN ({placeholders})
              ORDER BY environment_key, source_name, source_key, file_path, start_line""",  # nosec B608 - placeholders are generated from a set length.
         (service_id, *sorted(environment_keys)),
+    ).fetchall()
+
+
+def replace_kubernetes_configuration_key_mismatches(
+    conn: sqlite3.Connection, repository_id: int, mismatches: list[KubernetesConfigurationKeyMismatch],
+) -> None:
+    """Replace only source-proven local declaration conflicts for a repository."""
+    conn.execute("DELETE FROM kubernetes_configuration_key_mismatches WHERE repository_id = ?", (repository_id,))
+    timestamp = now()
+    rows = []
+    for mismatch in mismatches:
+        service_id = None
+        if mismatch.matched_service_name is not None:
+            service = services_repo.get_service_by_name(
+                conn, mismatch.matched_service_name, repository_id=repository_id,
+            )
+            service_id = service["id"] if service is not None else None
+        rows.append((
+            repository_id, service_id, mismatch.environment_key, mismatch.source_kind, mismatch.source_name,
+            mismatch.source_key, mismatch.reference_file_path, mismatch.reference_start_line,
+            mismatch.reference_end_line, mismatch.declaration_file_path, mismatch.declaration_start_line,
+            mismatch.declaration_end_line, timestamp,
+        ))
+    conn.executemany(
+        """INSERT INTO kubernetes_configuration_key_mismatches
+           (repository_id, service_id, environment_key, source_kind, source_name, source_key,
+            reference_file_path, reference_start_line, reference_end_line, declaration_file_path,
+            declaration_start_line, declaration_end_line, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    conn.commit()
+
+
+def list_kubernetes_configuration_key_mismatches_for_service(
+    conn: sqlite3.Connection, service_id: int,
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT environment_key, source_kind, source_name, source_key, reference_file_path,
+                  reference_start_line, reference_end_line, declaration_file_path,
+                  declaration_start_line, declaration_end_line
+           FROM kubernetes_configuration_key_mismatches WHERE service_id = ?
+           ORDER BY environment_key, source_name, source_key, reference_file_path, reference_start_line""",
+        (service_id,),
     ).fetchall()
