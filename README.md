@@ -239,9 +239,11 @@ key, the response marks that source-proven mismatch and returns its declaration
 evidence. Sources absent from the indexed repository remain unknown.
 Those absent sources are labeled `not_declared_locally`: they may be managed by a
 different repository, chart, controller or deployment process.
-`find_architecture_smells` also reports this as
-`possible_kubernetes_configuration_key_not_declared`, with the same uncertainty
-about transforms and runtime mutation.
+`find_architecture_smells` reports a source-proven key mismatch as
+`possible_kubernetes_configuration_key_not_declared`. It separately reports an
+absent local source as the low-confidence, informational
+`possible_kubernetes_configuration_source_not_declared_locally`; both require
+confirmation because transforms and runtime mutation may change the deployment.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and

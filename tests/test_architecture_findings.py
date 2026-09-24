@@ -29,12 +29,16 @@ from orbitkb.generation.architecture import (
     find_fan_imbalance,
     find_flow_hypotheses,
     find_kubernetes_configuration_key_mismatches,
+    find_kubernetes_configuration_source_unknowns,
     find_message_consumers_without_recovery_policy,
     find_read_entrypoint_side_effects,
     find_shared_database,
     recompute_architecture_view,
 )
-from orbitkb.iac.models import KubernetesConfigurationKeyMismatch
+from orbitkb.iac.models import (
+    KubernetesConfigurationKeyMismatch,
+    KubernetesConfigurationSourceUnknown,
+)
 from orbitkb.mcp import queries
 
 EVIDENCE = [{"file": "main.py", "start_line": 1, "end_line": 5}]
@@ -103,6 +107,41 @@ def test_kubernetes_configuration_key_mismatch_is_a_conservative_architecture_wa
     recompute_architecture_view(conn)
     response = queries.find_architecture_smells(conn)
     assert response["findings"][-1]["kind"] == "possible_kubernetes_configuration_key_not_declared"
+
+
+def test_kubernetes_configuration_source_unknown_is_a_low_confidence_architecture_insight(tmp_path: Path):
+    conn = open_db(tmp_path / "configuration-source-unknown.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "orders", "/tmp/shop/orders", "node-ts", repository_id=repository_id)
+    kubernetes_configuration_repo.replace_kubernetes_configuration_source_unknowns(conn, repository_id, [
+        KubernetesConfigurationSourceUnknown(
+            environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="external-config",
+            source_key="orders-topic", reference_file_path="deploy/orders.yaml", reference_start_line=12,
+            reference_end_line=17, matched_service_name="orders",
+        ),
+    ])
+
+    assert find_kubernetes_configuration_source_unknowns(conn) == [{
+        "kind": "possible_kubernetes_configuration_source_not_declared_locally",
+        "severity": "info",
+        "services": ["orders"],
+        "reason": (
+            "orders references ConfigMap external-config key orders-topic for ORDERS_TOPIC, but no matching source "
+            "declaration was indexed locally."
+        ),
+        "detail": {
+            "environment_key": "ORDERS_TOPIC", "source_kind": "config_map", "source_name": "external-config",
+            "source_key": "orders-topic", "confidence": 0.4,
+            "evidence": [{"file": "deploy/orders.yaml", "start_line": 12, "end_line": 17}],
+            "unknowns": [
+                "The source may be managed by another repository, Helm chart, controller, or deployment process.",
+            ],
+            "remediation": ["Confirm which delivery boundary owns this ConfigMap or Secret before changing it."],
+        },
+    }]
+    recompute_architecture_view(conn)
+    response = queries.find_architecture_smells(conn)
+    assert response["findings"][-1]["kind"] == "possible_kubernetes_configuration_source_not_declared_locally"
 
 
 def test_find_cycles_ignores_a_simple_chain(tmp_path: Path):

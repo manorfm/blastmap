@@ -105,9 +105,11 @@ binding reports `key_not_declared` with declaration evidence; absent or ambiguou
 source declarations remain unknown.
 An absent source is labeled `not_declared_locally`, which is an external-dependency
 hypothesis rather than a deployment failure.
-The same source-proven conflict appears in `find_architecture_smells` as
+The source-proven conflict appears in `find_architecture_smells` as
 `possible_kubernetes_configuration_key_not_declared`, with a rollout-oriented
-remediation and explicit runtime uncertainty.
+remediation and explicit runtime uncertainty. An absent local source appears
+separately as the informational, low-confidence
+`possible_kubernetes_configuration_source_not_declared_locally`.
 
 `describe_feature_flags` returns literal reads through a locally proven feature-flag
 SDK, currently LaunchDarkly's Node server SDK. It returns key, provider and source
