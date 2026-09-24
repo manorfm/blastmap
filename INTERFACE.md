@@ -62,6 +62,8 @@ treated as deletion.
    flow crosses an indexed internal HTTP client boundary and its error semantics matter.
    It needs a literal call, a reachable downstream HTTP contract and a matching reachable
    caller mapping; otherwise it returns explicit unknowns rather than inventing a failure.
+   Node REST mappings currently require a literal 4xx/5xx Express/Fastify reply through
+   `res`, `response` or `reply`; global middleware, throws and dynamic statuses remain unknown.
 9. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.

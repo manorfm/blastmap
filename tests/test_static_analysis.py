@@ -657,6 +657,48 @@ app.post("/orders", createOrder);
     )
 
 
+def test_node_analyzer_extracts_literal_express_and_fastify_error_mappings(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import express from "express";
+import Fastify from "fastify";
+const app = express();
+const fastify = Fastify();
+
+function createOrder(req: Request, res: Response) {
+  return res.status(409).json({ code: "OUT_OF_STOCK" });
+}
+
+function findOrder(request: FastifyRequest, reply: FastifyReply) {
+  return reply.code(404).send({ code: "ORDER_NOT_FOUND" });
+}
+
+function rejectOrder(req: Request, response: Response) {
+  return response.sendStatus(400);
+}
+
+function notify(req: Request, client: PartnerClient) {
+  return client.status(500).send();
+}
+
+app.post("/orders", createOrder);
+app.delete("/orders/:id", rejectOrder);
+fastify.get("/orders/:id", findOrder);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(contract.source, contract.role, contract.error_kind, contract.protocol,
+             contract.transport_code, contract.public_code, contract.exposes_internal_detail,
+             contract.retryability)
+            for contract in result.error_contracts] == [
+        ("orders.createOrder", "maps", "conflict", "http", "409", None, False, "not_retryable"),
+        ("orders.findOrder", "maps", "not_found", "http", "404", None, False, "not_retryable"),
+        ("orders.rejectOrder", "maps", "validation", "http", "400", None, False, "not_retryable"),
+    ]
+
+
 def test_node_analyzer_skips_fastify_like_route_without_a_local_factory(tmp_path: Path):
     (tmp_path / "orders.ts").write_text(
         '''const app = makeTestServer();

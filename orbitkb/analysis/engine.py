@@ -1048,6 +1048,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         result.edges.extend(function_edges)
         result.cloud_facts.extend(function_cloud_facts)
         result.boundaries.extend(self._boundaries_for(function, path, root, source))
+        result.error_contracts.extend(_node_http_error_contracts(function, path, root, source))
 
     @staticmethod
     def _edges_for_node(
@@ -1095,6 +1096,69 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 target_name=None, evidence=evidence,
             ))
         return edges, cloud_facts
+
+
+_NODE_RESPONSE_PARAMETER_NAMES = frozenset({"res", "response", "reply"})
+_NODE_HTTP_RESPONSE_STATUS = (
+    r"\b{receiver}\s*\.\s*(?:status|code)\s*\(\s*(?P<status>[45]\d{{2}})\s*\)"
+    r"\s*\.\s*(?:json|send|end)\s*\("
+)
+_NODE_HTTP_SEND_STATUS = (
+    r"\b{receiver}\s*\.\s*sendStatus\s*\(\s*(?P<status>[45]\d{{2}})\s*\)"
+)
+
+
+def _node_http_error_contracts(
+    function: _Function, path: Path, root: Path, source: bytes,
+) -> list[ErrorContract]:
+    """Extract explicit Express/Fastify error replies from a handler parameter.
+
+    A method called ``status`` on an arbitrary dependency is not a public response.
+    The receiver must be the conventional second handler parameter and the status
+    must be immediately followed by an explicit response send operation.
+    """
+    receiver = _node_response_receiver(function, source)
+    if receiver is None:
+        return []
+    declaration = _text(function.declaration, source)
+    patterns = (
+        _NODE_HTTP_RESPONSE_STATUS,
+        _NODE_HTTP_SEND_STATUS,
+    )
+    contracts: list[ErrorContract] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern.format(receiver=re.escape(receiver)), declaration):
+            status = int(match.group("status"))
+            contracts.append(ErrorContract(
+                source=function.symbol,
+                role="maps",
+                error_kind=_ERROR_KIND_BY_HTTP_STATUS.get(status, "unexpected" if status >= 500 else "unknown"),
+                internal_type=None,
+                protocol="http",
+                transport_code=str(status),
+                public_code=None,
+                exposes_internal_detail=False,
+                retryability="retryable" if status == 429 else "not_retryable",
+                evidence=_declaration_match_evidence(
+                    path, root, function.declaration, declaration, match.start(), match.end(),
+                ),
+            ))
+    return contracts
+
+
+def _node_response_receiver(function: _Function, source: bytes) -> str | None:
+    declaration = function.declaration
+    if declaration.type == "variable_declarator":
+        declaration = declaration.child_by_field_name("value") or declaration
+    parameters = declaration.child_by_field_name("parameters")
+    if parameters is None or len(parameters.named_children) < 2:
+        return None
+    response_parameter = parameters.named_children[1]
+    identifier = next((node for node in _walk(response_parameter) if node.type == "identifier"), None)
+    if identifier is None:
+        return None
+    receiver = _text(identifier, source)
+    return receiver if receiver in _NODE_RESPONSE_PARAMETER_NAMES else None
 
 
 class _GraphqlContractExtractor:

@@ -250,6 +250,12 @@ or public code. This makes a proven `409 → 409` distinct from `409 → 500`; a
 or ambiguous link is returned as an unknown, never assumed to be a `500`. Error
 messages, payloads, causes and stack traces are not indexed or returned.
 
+For Node REST, OrbitKB indexes only an explicit 4xx/5xx reply through a conventional
+second handler parameter (`res`, `response` or `reply`): Express
+`status(...).json/send/end` or `sendStatus(...)`, and Fastify `code/status(...).send`.
+It does not infer error semantics from `throw`, promise rejection, global middleware,
+dynamic statuses or the response payload.
+
 `find_architecture_smells` also flags a source-proven internal HTTP call with no
 literal timeout or retry policy on the same source symbol. This is a prompt to review
 the client boundary, not evidence that production has no protection: defaults and
