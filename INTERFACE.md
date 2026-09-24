@@ -284,6 +284,12 @@ publication targets with their totals. The result does not establish ordering,
 atomicity, an outbox or producer/consumer de-duplication; it focuses review on their
 combined retry boundary.
 
+`possible_retry_write_publish_reaches_consumer` additionally requires a static message
+consumer in another service whose `channel` exactly equals the published flow target.
+It returns at most three consumers and `consumer_count` to stay compact. The match does
+not infer broker exchanges, bindings, routing, delivery, ordering or runtime message
+processing; it simply prioritizes a source-proven cross-service review boundary.
+
 `possible_non_atomic_service_publish` extends the transaction/outbox review to a
 non-entrypoint service symbol with source-proven local write and event publication but
 no source-proven transaction boundary. Entrypoint-owned operations remain covered by

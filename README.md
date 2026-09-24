@@ -215,6 +215,11 @@ publishes an event. It is a focused outbox and duplicate-delivery review: source
 do not establish ordering, atomicity or whether producer/consumer deduplication is
 already in place.
 
+When that retrying write/publication flow has consumers in other indexed services on
+the exact same literal channel, OrbitKB prioritizes it as a cross-service duplicate
+delivery review. It does not infer exchanges, bindings, routing, delivery or runtime
+processing from the channel match alone.
+
 The same transaction/outbox review now covers delegated service methods that write and
 publish without a source-proven transaction boundary. Entrypoints remain covered by the
 existing direct-flow signal, so OrbitKB does not duplicate that finding. As elsewhere,

@@ -13,6 +13,7 @@ from orbitkb.analysis.models import (
     Evidence,
     FlowBoundary,
     FlowEdge,
+    MessageContract,
     ResiliencePolicy,
     StaticServiceCall,
 )
@@ -36,6 +37,7 @@ from orbitkb.generation.architecture import (
     find_retries_on_downstream_client_errors,
     find_retries_on_potentially_non_idempotent_http_calls,
     find_retries_on_write_publish_flows,
+    find_retry_write_publish_flows_with_consumers,
     find_shared_database,
     find_static_http_calls_without_resilience_policy,
     find_timeout_fallbacks_masking_failures,
@@ -662,6 +664,48 @@ def test_service_publish_finding_disappears_when_a_transaction_boundary_is_prove
     )
 
     assert find_non_atomic_service_publish_flows(conn) == []
+
+
+def test_retry_write_publish_consumer_risk_disappears_when_retry_is_removed(tmp_path: Path):
+    conn = open_db(tmp_path / "retry-write-publish-consumer.db")
+    orders = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
+    billing = services_repo.ensure_service(conn, "billing", "/tmp/billing", "jvm-spring")
+    retry = ResiliencePolicy(
+        source="OrderService.create", kind="retry", mechanism="reactor",
+        value=2, unit="retries", evidence=STATIC_EVIDENCE,
+    )
+    write = FlowEdge("OrderService.create", "OrderRepository.save", "writes", STATIC_EVIDENCE)
+    publish = FlowEdge("OrderService.create", "order.created", "publishes", STATIC_EVIDENCE)
+    consumer = MessageContract(
+        direction="consumes", channel="order.created", routing_key=None,
+        payload_type="OrderCreated", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, orders, AnalysisResult(resilience_policies=[retry], edges=[write, publish]),
+    )
+    flows_repo.replace_analysis(conn, billing, AnalysisResult(message_contracts=[consumer]))
+
+    findings = find_retry_write_publish_flows_with_consumers(conn)
+
+    assert _kinds(findings) == {"possible_retry_write_publish_reaches_consumer"}
+    assert findings[0]["detail"]["consumers"] == [{
+        "service": "billing", "channel": "order.created",
+    }]
+    assert findings[0]["detail"]["consumer_count"] == 1
+    run_id = recompute_architecture_view(conn)
+    assert "possible_retry_write_publish_reaches_consumer" in {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    }
+
+    timeout = ResiliencePolicy(
+        source="OrderService.create", kind="timeout", mechanism="reactor",
+        value=2_000, unit="milliseconds", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, orders, AnalysisResult(resilience_policies=[timeout], edges=[write, publish]),
+    )
+
+    assert find_retry_write_publish_flows_with_consumers(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

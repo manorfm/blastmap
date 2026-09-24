@@ -662,6 +662,83 @@ def find_retries_on_write_publish_flows(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_retry_write_publish_flows_with_consumers(conn: sqlite3.Connection) -> list[dict]:
+    """Prioritize retrying write/publish flows whose literal channel has consumers.
+
+    Channel matching is exact and intentionally does not infer broker topology,
+    bindings or delivery. Consumers in the publishing service are excluded because
+    this signal is specifically about potential cross-service duplicate impact.
+    """
+    names = _service_names(conn)
+    retries_by_source = _retry_policies_by_source(conn)
+    writes_by_source = _flow_edges_by_source(conn, "writes")
+    publishes_by_source = _flow_edges_by_source(conn, "publishes")
+    consumers_by_channel: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    for consumer in conn.execute(
+        """SELECT service_id, channel, file_path, start_line, end_line
+           FROM static_message_contracts
+           WHERE direction = 'consumes'
+           ORDER BY channel, service_id, file_path, start_line""",
+    ).fetchall():
+        consumers_by_channel[consumer["channel"]].append(consumer)
+
+    findings: list[dict] = []
+    for source_key, policies in retries_by_source.items():
+        writes = writes_by_source.get(source_key)
+        publishes = publishes_by_source.get(source_key)
+        if not writes or not publishes:
+            continue
+        service_id, symbol = source_key
+        visible_writes = writes[:3]
+        for publish in publishes:
+            consumers = [
+                consumer for consumer in consumers_by_channel.get(publish["to_symbol"], [])
+                if consumer["service_id"] != service_id
+            ]
+            if not consumers:
+                continue
+            visible_consumers = consumers[:3]
+            findings.append({
+                "kind": "possible_retry_write_publish_reaches_consumer", "severity": "warning",
+                "services": [names[service_id], *[names[item["service_id"]] for item in visible_consumers]],
+                "reason": (
+                    f"{symbol} writes state and retries publication on channel {publish['to_symbol']}, "
+                    "which has source-proven consumers in other services."
+                ),
+                "detail": {
+                    "flow": {"symbol": symbol},
+                    "channel": publish["to_symbol"],
+                    "retry_policies": [
+                        {"mechanism": policy["mechanism"], "value": policy["value"], "unit": policy["unit"]}
+                        for policy in policies
+                    ],
+                    "writes": [{"target": write["to_symbol"]} for write in visible_writes],
+                    "write_count": len(writes),
+                    "consumers": [
+                        {"service": names[consumer["service_id"]], "channel": consumer["channel"]}
+                        for consumer in visible_consumers
+                    ],
+                    "consumer_count": len(consumers),
+                    "confidence": 0.75,
+                    "evidence": [
+                        *[_edge_evidence(policy) for policy in policies],
+                        *[_edge_evidence(write) for write in visible_writes],
+                        _edge_evidence(publish),
+                        *[_edge_evidence(consumer) for consumer in visible_consumers],
+                    ],
+                    "unknowns": [
+                        "Exact channel equality does not prove broker routing, delivery, ordering or that the consumer processes this producer's message at runtime.",
+                        "Outbox, idempotent producer or consumer de-duplication may already protect against duplicate delivery outside the indexed facts.",
+                    ],
+                    "remediation": [
+                        "Review producer retries and the listed consumers as one duplicate-delivery boundary.",
+                        "Confirm an outbox or idempotency strategy and consumer de-duplication for this event channel.",
+                    ],
+                },
+            })
+    return findings
+
+
 def find_non_atomic_service_publish_flows(conn: sqlite3.Connection) -> list[dict]:
     """Extend the write/publication review to non-entrypoint service symbols.
 
@@ -1798,6 +1875,7 @@ _DETECTORS = (
     find_broad_handlers_that_can_swallow_timeouts,
     find_resilience_policies_on_write_flows,
     find_retries_on_write_publish_flows,
+    find_retry_write_publish_flows_with_consumers,
     find_non_atomic_service_publish_flows,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
