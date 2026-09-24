@@ -104,7 +104,7 @@ Start broad, then narrow the request.
 
 | Need | Start with | Follow with |
 | --- | --- | --- |
-| Start a change plan | `plan_change` | `refine_change_plan`, `describe_change_unit` |
+| Start a change plan | `plan_change` | `refine_change_plan`, `describe_change_unit`, `assess_working_change` |
 | Plan an epic | `get_change_context` | `describe_service`, `describe_entrypoint` |
 | Find likely impact | `find_change_surface` | `get_relationships`, `describe_api` |
 | Understand a request path or its static error mapping | `list_entrypoints` | `describe_entrypoint` |
@@ -140,6 +140,11 @@ finalized decision is immutable within that plan.
 producer/consumer contract queries needed before editing.
 When a primary service has a source-proven internal HTTP call whose remote method and
 route are indexed, `plan_change` also creates a contract-review unit for that boundary.
+After implementation, `assess_working_change` compares a ready plan with a Git diff
+from a supplied base commit, including local tracked and untracked files. It is
+advisory: it reports evidence-backed units not touched, files outside the planned
+service surface, and validation still required; it labels units without source evidence
+as unassessable rather than guessing coverage.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

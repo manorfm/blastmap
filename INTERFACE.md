@@ -45,16 +45,18 @@ treated as deletion.
    pending decision. This updates the existing plan without rerunning retrieval.
 3. Call `describe_change_unit(plan_id, change_unit_id)` for one accepted work item and
    its smallest suggested follow-up context.
-4. Call `list_services(repository?)`; use its repository field to qualify
+4. After implementation, call `assess_working_change(plan_id, repository, since_commit)`
+   to compare the ready plan with a bounded Git diff. It is advisory only.
+5. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
-5. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
+6. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
    entrypoint.
-6. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
+7. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
    reachable deterministic flow evidence.
-7. Use `describe_api`, `describe_persistence`, `describe_messages`,
+8. Use `describe_api`, `describe_persistence`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.
-8. Call `list_security_findings(service)` before changing credentials,
+9. Call `list_security_findings(service)` before changing credentials,
    configuration or an external integration; it returns locations and remediation,
    never source excerpts or secret values.
 
@@ -91,6 +93,14 @@ choice is rejected, requiring a new plan and an explicit impact reassessment.
 the smallest producer/consumer `describe_messages` queries needed to verify an event
 contract, or the client `describe_service` and remote `list_entrypoints` queries for a
 resolved HTTP boundary. It does not scan source, rerun retrieval or call a model.
+
+`assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
+uses only the Git diff from that base (including local tracked and untracked files)
+and persisted source evidence: an evidence-backed unit is covered only when its file
+changed; otherwise it is reported as omitted. Units with no source evidence are
+explicitly unassessable. The result also lists changed files outside services named by
+the plan and every remaining validation obligation. It is an advisory, read-only check,
+never an implementation gate.
 
 ## Compact change context
 

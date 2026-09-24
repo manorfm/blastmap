@@ -7,6 +7,7 @@ import logging
 import re
 import sqlite3
 from collections import deque
+from pathlib import Path
 
 from orbitkb.analysis.smells import find_entrypoint_smells
 from orbitkb.db.repositories import apis as apis_repo
@@ -25,9 +26,11 @@ from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import security_findings as security_findings_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
+from orbitkb.discovery.hashing import git_working_changed_files_with_status
 from orbitkb.generation import change_surface
 from orbitkb.generation.architecture import diff_architecture_runs
 from orbitkb.generation.backend_base import LLMBackend
+from orbitkb.generation.change_assessment import assess_change_units
 from orbitkb.generation.change_context import MAX_CONTEXT_SERVICES, build_change_context
 from orbitkb.generation.change_plan import (
     derive_change_units,
@@ -921,6 +924,41 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
         "minimal_reading": _minimal_unit_reading(change_unit),
         "validation": change_unit["validation"],
     }
+
+
+def assess_working_change(
+    conn: sqlite3.Connection, plan_id: str, repository: str, since_commit: str,
+) -> dict:
+    """Assess an indexed plan against one repository's Git diff without an LLM."""
+    match = re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)
+    if match is None:
+        return {"error": "plan_id must have the form cp_<positive integer>"}
+    stored_plan = change_plans_repo.get_plan(conn, int(match.group(1)))
+    if stored_plan is None:
+        return {"error": f"unknown plan_id: {plan_id}"}
+    if stored_plan["status"] != "ready":
+        return {"error": f"plan must be ready before assessment (status: {stored_plan['status']})"}
+    repo = repositories_repo.get_repository_by_name(conn, repository)
+    if repo is None:
+        return {"error": f"unknown repository: {repository}"}
+    changed_files, error = git_working_changed_files_with_status(Path(repo["root_path"]), since_commit)
+    if error is not None:
+        return {"error": error}
+
+    change_units = json.loads(stored_plan["change_units_json"])
+    service_names = {
+        service
+        for unit in change_units
+        for service in [unit.get("service"), *unit.get("dependencies", [])]
+        if isinstance(service, str)
+    }
+    service_roots = {
+        name: Path(service["root_path"])
+        for name in service_names
+        if (service := services_repo.get_service_by_name(conn, name, repository_id=repo["id"])) is not None
+    }
+    assessment = assess_change_units(Path(repo["root_path"]), changed_files, change_units, service_roots)
+    return {"plan_id": plan_id, "repository": repository, "since_commit": since_commit, **assessment}
 
 
 def _minimal_unit_reading(change_unit: dict) -> list[dict]:

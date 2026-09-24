@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "plan_id",
+    "repository",
+    "since_commit",
+    "changed_files",
+    "covered_change_units",
+    "omitted_change_units",
+    "unassessable_change_units",
+    "files_outside_planned_surface",
+    "pending_validation"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {"type": "string", "pattern": "^cp_[1-9][0-9]*$"},
+    "repository": {"type": "string", "minLength": 1},
+    "since_commit": {"type": "string", "minLength": 1},
+    "changed_files": {"type": "array", "items": {"type": "string"}},
+    "covered_change_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "changed_files"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "changed_files": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "omitted_change_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "evidence_files"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "evidence_files": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "unassessable_change_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "files_outside_planned_surface": {"type": "array", "items": {"type": "string"}},
+    "pending_validation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["change_unit_id", "contracts", "dependencies", "checks"],
+        "additionalProperties": false,
+        "properties": {
+          "change_unit_id": {"type": "string"},
+          "contracts": {"type": "array", "items": {"type": "string"}},
+          "dependencies": {"type": "array", "items": {"type": "string"}},
+          "checks": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

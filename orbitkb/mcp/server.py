@@ -359,10 +359,9 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         """Start an evidence-first, bounded change plan for a free-text task.
 
         The initial response identifies the indexed surface and explicit unknowns;
-        it does not fabricate decision points or code-level change units. Subsequent
-        planning phases will add those only when target symbols and prerequisites can
-        be proved from the knowledge base. Pass repository when service names are
-        duplicated. token_budget is capped at 2200 estimated response tokens.
+        it only adds decision points and change units whose dependencies can be proved
+        from the knowledge base. Pass repository when service names are duplicated.
+        token_budget is capped at 2200 estimated response tokens.
         """
         with closing(_conn()) as conn:
             return queries.plan_change(conn, resolved_backend, task, hint_services, repository, token_budget)
@@ -388,6 +387,17 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         """
         with closing(_conn()) as conn:
             return queries.describe_change_unit(conn, plan_id, change_unit_id)
+
+    @mcp.tool()
+    def assess_working_change(plan_id: str, repository: str, since_commit: str) -> dict:
+        """Compare a ready change plan with one repository's Git diff.
+
+        This read-only, deterministic advisory marks a unit covered only when a
+        source-evidence file changed. It reports unassessable units rather than
+        guessing, and never calls an LLM or blocks an implementation.
+        """
+        with closing(_conn()) as conn:
+            return queries.assess_working_change(conn, plan_id, repository, since_commit)
 
     @mcp.tool()
     def record_change_context_feedback(
