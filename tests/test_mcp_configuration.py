@@ -11,6 +11,7 @@ from orbitkb.db.repositories import (
 from orbitkb.iac.models import (
     KubernetesConfigurationBinding,
     KubernetesConfigurationKeyMismatch,
+    KubernetesConfigurationSourceUnknown,
 )
 from orbitkb.mcp import queries
 
@@ -95,6 +96,29 @@ def test_describe_runtime_configuration_marks_a_source_proven_missing_declared_k
         "status": "key_not_declared",
         "evidence": {"file": "deploy/config.yaml", "start_line": 1, "end_line": 7},
     }
+
+
+def test_describe_runtime_configuration_marks_a_source_not_declared_locally_as_unknown(tmp_path):
+    conn = open_db(tmp_path / "runtime-configuration-source-unknown.db")
+    repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")
+    services.ensure_service(conn, "orders", "/repos/shop/orders", "node-ts", repository_id=repository_id)
+    binding = KubernetesConfigurationBinding(
+        environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="external-config",
+        source_key="orders-topic", workload_kind="Deployment", workload_name="orders", container_name="api",
+        file_path="deploy/orders.yaml", start_line=12, end_line=17, matched_service_name="orders",
+    )
+    kubernetes_configuration.replace_kubernetes_configuration_bindings(conn, repository_id, [binding])
+    kubernetes_configuration.replace_kubernetes_configuration_source_unknowns(conn, repository_id, [
+        KubernetesConfigurationSourceUnknown(
+            environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="external-config",
+            source_key="orders-topic", reference_file_path="deploy/orders.yaml", reference_start_line=12,
+            reference_end_line=17, matched_service_name="orders",
+        ),
+    ])
+
+    result = queries.describe_runtime_configuration(conn, "orders")
+
+    assert result["bindings"][0]["declaration"] == {"status": "not_declared_locally"}
 
 
 def test_describe_configuration_links_matching_code_and_kubernetes_environment_bindings(tmp_path):

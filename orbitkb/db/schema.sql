@@ -285,6 +285,26 @@ CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_key_mismatches_repositor
 CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_key_mismatches_service
     ON kubernetes_configuration_key_mismatches(service_id);
 
+-- A workload source with no matching ConfigMap/Secret declaration in indexed
+-- plain YAML. It is an external-dependency hypothesis, never proof of absence.
+CREATE TABLE IF NOT EXISTS kubernetes_configuration_source_unknowns (
+    id                   INTEGER PRIMARY KEY,
+    repository_id        INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    service_id           INTEGER REFERENCES services(id) ON DELETE SET NULL,
+    environment_key      TEXT NOT NULL,
+    source_kind          TEXT NOT NULL CHECK (source_kind IN ('config_map', 'secret')),
+    source_name          TEXT NOT NULL,
+    source_key           TEXT NOT NULL,
+    reference_file_path  TEXT NOT NULL,
+    reference_start_line INTEGER NOT NULL,
+    reference_end_line   INTEGER NOT NULL,
+    updated_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_source_unknowns_repository
+    ON kubernetes_configuration_source_unknowns(repository_id);
+CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_source_unknowns_service
+    ON kubernetes_configuration_source_unknowns(service_id);
+
 -- One row per class/controller/module cluster of endpoints within a service, synthesized
 -- from the already-generated `apis` summaries of the endpoints it groups (never raw code
 -- read again) — the layer between a single endpoint and the whole service. `file_path` is

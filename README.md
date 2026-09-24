@@ -237,6 +237,8 @@ Secret name/key, workload/container and source evidence, without exposing values
 When exactly one local source declaration exists and it does not list a referenced
 key, the response marks that source-proven mismatch and returns its declaration
 evidence. Sources absent from the indexed repository remain unknown.
+Those absent sources are labeled `not_declared_locally`: they may be managed by a
+different repository, chart, controller or deployment process.
 `find_architecture_smells` also reports this as
 `possible_kubernetes_configuration_key_not_declared`, with the same uncertainty
 about transforms and runtime mutation.

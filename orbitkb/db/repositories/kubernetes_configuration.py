@@ -7,6 +7,7 @@ from orbitkb.db.repositories import services as services_repo
 from orbitkb.iac.models import (
     KubernetesConfigurationBinding,
     KubernetesConfigurationKeyMismatch,
+    KubernetesConfigurationSourceUnknown,
 )
 
 from ._util import now
@@ -109,6 +110,47 @@ def list_kubernetes_configuration_key_mismatches_for_service(
                   reference_start_line, reference_end_line, declaration_file_path,
                   declaration_start_line, declaration_end_line
            FROM kubernetes_configuration_key_mismatches WHERE service_id = ?
+           ORDER BY environment_key, source_name, source_key, reference_file_path, reference_start_line""",
+        (service_id,),
+    ).fetchall()
+
+
+def replace_kubernetes_configuration_source_unknowns(
+    conn: sqlite3.Connection, repository_id: int, unknowns: list[KubernetesConfigurationSourceUnknown],
+) -> None:
+    """Replace possible external configuration dependencies for a repository."""
+    conn.execute("DELETE FROM kubernetes_configuration_source_unknowns WHERE repository_id = ?", (repository_id,))
+    timestamp = now()
+    rows = []
+    for unknown in unknowns:
+        service_id = None
+        if unknown.matched_service_name is not None:
+            service = services_repo.get_service_by_name(
+                conn, unknown.matched_service_name, repository_id=repository_id,
+            )
+            service_id = service["id"] if service is not None else None
+        rows.append((
+            repository_id, service_id, unknown.environment_key, unknown.source_kind, unknown.source_name,
+            unknown.source_key, unknown.reference_file_path, unknown.reference_start_line,
+            unknown.reference_end_line, timestamp,
+        ))
+    conn.executemany(
+        """INSERT INTO kubernetes_configuration_source_unknowns
+           (repository_id, service_id, environment_key, source_kind, source_name, source_key,
+            reference_file_path, reference_start_line, reference_end_line, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    conn.commit()
+
+
+def list_kubernetes_configuration_source_unknowns_for_service(
+    conn: sqlite3.Connection, service_id: int,
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT environment_key, source_kind, source_name, source_key, reference_file_path,
+                  reference_start_line, reference_end_line
+           FROM kubernetes_configuration_source_unknowns WHERE service_id = ?
            ORDER BY environment_key, source_name, source_key, reference_file_path, reference_start_line""",
         (service_id,),
     ).fetchall()

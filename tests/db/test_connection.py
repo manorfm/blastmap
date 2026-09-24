@@ -6,7 +6,7 @@ from orbitkb.db.connection import open_db
 def test_schema_initializes(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
-    assert row["value"] == "25"
+    assert row["value"] == "26"
 
 
 def test_schema_adds_message_version_to_an_existing_static_contract_table(tmp_path: Path):
@@ -21,7 +21,7 @@ def test_schema_adds_message_version_to_an_existing_static_contract_table(tmp_pa
 
     columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(static_message_contracts)")}
     assert "message_version" in columns
-    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "25"
+    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "26"
 
 
 def test_schema_adds_selected_decisions_to_an_existing_change_plan(tmp_path: Path):
@@ -36,7 +36,7 @@ def test_schema_adds_selected_decisions_to_an_existing_change_plan(tmp_path: Pat
 
     columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(change_plan_runs)")}
     assert "selected_decisions_json" in columns
-    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "25"
+    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "26"
 
 
 def test_schema_adds_change_units_to_an_existing_change_plan(tmp_path: Path):
@@ -51,7 +51,7 @@ def test_schema_adds_change_units_to_an_existing_change_plan(tmp_path: Path):
 
     columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(change_plan_runs)")}
     assert "change_units_json" in columns
-    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "25"
+    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "26"
 
 
 def test_schema_upgrades_legacy_entrypoint_constraint_without_losing_contracts(tmp_path: Path):

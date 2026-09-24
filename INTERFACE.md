@@ -103,6 +103,8 @@ dynamic names and unrendered Helm templates remain unknown.
 When a single local source declaration omits a key referenced by that workload, the
 binding reports `key_not_declared` with declaration evidence; absent or ambiguous
 source declarations remain unknown.
+An absent source is labeled `not_declared_locally`, which is an external-dependency
+hypothesis rather than a deployment failure.
 The same source-proven conflict appears in `find_architecture_smells` as
 `possible_kubernetes_configuration_key_not_declared`, with a rollout-oriented
 remediation and explicit runtime uncertainty.

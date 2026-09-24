@@ -722,6 +722,15 @@ def describe_runtime_configuration(
             conn, row["id"],
         )
     }
+    unknowns_by_reference = {
+        (
+            unknown["environment_key"], unknown["source_kind"], unknown["source_name"], unknown["source_key"],
+            unknown["reference_file_path"], unknown["reference_start_line"], unknown["reference_end_line"],
+        ): unknown
+        for unknown in kubernetes_configuration_repo.list_kubernetes_configuration_source_unknowns_for_service(
+            conn, row["id"],
+        )
+    }
     response_bindings = []
     for item in bindings:
         response_binding = {"environment_key": item["environment_key"], **_runtime_configuration_reference(item)}
@@ -738,6 +747,11 @@ def describe_runtime_configuration(
                     "end_line": mismatch["declaration_end_line"],
                 },
             }
+        elif (
+            item["environment_key"], item["source_kind"], item["source_name"], item["source_key"],
+            item["file_path"], item["start_line"], item["end_line"],
+        ) in unknowns_by_reference:
+            response_binding["declaration"] = {"status": "not_declared_locally"}
         response_bindings.append(response_binding)
     return {
         "service": row["name"], "repository": row["repository_name"],
