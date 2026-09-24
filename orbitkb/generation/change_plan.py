@@ -363,6 +363,73 @@ def derive_runtime_configuration_review_units(
     return units
 
 
+def derive_runtime_configuration_mismatch_review_units(
+    mismatches_by_service: dict[str, list[dict]], primary_services: set[str],
+) -> list[dict]:
+    """Turn persisted, source-proven Kubernetes key conflicts into reviews."""
+    units: list[dict] = []
+    for service in sorted(primary_services):
+        grouped: dict[tuple[str, str, str, str], list[dict]] = {}
+        for mismatch in mismatches_by_service.get(service, []):
+            if not isinstance(mismatch, dict):
+                continue
+            environment_key = mismatch.get("environment_key")
+            source_kind = mismatch.get("source_kind")
+            source_name = mismatch.get("source_name")
+            source_key = mismatch.get("source_key")
+            reference = {
+                "file": mismatch.get("reference_file_path"), "start_line": mismatch.get("reference_start_line"),
+                "end_line": mismatch.get("reference_end_line"),
+            }
+            declaration = {
+                "file": mismatch.get("declaration_file_path"), "start_line": mismatch.get("declaration_start_line"),
+                "end_line": mismatch.get("declaration_end_line"),
+            }
+            if (
+                all(isinstance(value, str) and value for value in (environment_key, source_kind, source_name, source_key))
+                and _unique_evidence([reference]) and _unique_evidence([declaration])
+            ):
+                grouped.setdefault((source_kind, source_name, source_key, environment_key), []).append({
+                    "reference": reference, "declaration": declaration,
+                })
+        for (source_kind, source_name, source_key, environment_key), occurrences in sorted(grouped.items()):
+            evidence = _sorted_evidence([
+                evidence_item
+                for occurrence in occurrences
+                for evidence_item in (occurrence["reference"], occurrence["declaration"])
+            ])
+            source_label = "ConfigMap" if source_kind == "config_map" else "Secret"
+            units.append({
+                "id": (
+                    f"runtime-configuration-mismatch:{service}:{source_kind}:{source_name}:{source_key}:"
+                    f"{environment_key}"
+                ),
+                "service": service,
+                "target": {
+                    "role": "configuration", "symbol": f"kubernetes:{source_kind}:{source_name}:{source_key}",
+                    "evidence": evidence,
+                },
+                "action": "review",
+                "reason": (
+                    f"{environment_key} references {source_label} {source_name} key {source_key}, but its single "
+                    "indexed declaration does not list that key."
+                ),
+                "preconditions": [],
+                "related_contracts": [
+                    f"configuration:environment:{environment_key}",
+                    f"configuration:{source_kind}:{source_name}:{source_key}",
+                ],
+                "dependencies": [],
+                "validation": [
+                    f"verify the {source_label} declaration or workload reference is corrected before rollout",
+                    f"verify behavior remains safe when {environment_key} is unavailable",
+                ],
+                "confidence": 0.9,
+                "evidence": evidence,
+            })
+    return units
+
+
 def _unique_evidence(items: list[dict]) -> list[dict]:
     seen: set[tuple[str, int, int]] = set()
     evidence: list[dict] = []

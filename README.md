@@ -164,6 +164,10 @@ When a primary service has an exact source-proven environment-key match between 
 and an attributed Kubernetes workload, `plan_change` adds one configuration review
 unit per key. It verifies compatibility and rollout references without assuming a
 ConfigMap, Secret or deployed value must change.
+When an indexed Kubernetes reference has a source-proven missing key in its single
+local declaration, `plan_change` adds a separate configuration review. It requires
+confirmation before rollout and does not choose whether the source or workload must
+change.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

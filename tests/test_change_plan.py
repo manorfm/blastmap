@@ -30,7 +30,10 @@ from orbitkb.generation.change_plan import (
     derive_runtime_configuration_review_units,
 )
 from orbitkb.generation.llm_harness import load_schema
-from orbitkb.iac.models import KubernetesConfigurationBinding
+from orbitkb.iac.models import (
+    KubernetesConfigurationBinding,
+    KubernetesConfigurationKeyMismatch,
+)
 from orbitkb.mcp import queries
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
 
@@ -380,6 +383,71 @@ def test_plan_change_derives_a_configuration_review_unit_for_an_exact_runtime_bi
     validate(detail, load_schema("describe_change_unit"))
     refined = queries.refine_change_plan(conn, result["plan_id"], [])
     validate(refined, load_schema("refine_change_plan"))
+
+
+def test_plan_change_derives_a_review_for_a_persisted_kubernetes_configuration_mismatch(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "runtime-configuration-mismatch-unit.db")
+    checkout = services_repo.get_service_by_name(conn, "checkout-service")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    conn.execute("UPDATE services SET repository_id = ? WHERE id = ?", (repository_id, checkout["id"]))
+    conn.commit()
+    kubernetes_configuration_repo.replace_kubernetes_configuration_key_mismatches(conn, repository_id, [
+        KubernetesConfigurationKeyMismatch(
+            environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="orders-config",
+            source_key="orders-topic", reference_file_path="deploy/checkout.yaml", reference_start_line=12,
+            reference_end_line=17, declaration_file_path="deploy/config.yaml", declaration_start_line=1,
+            declaration_end_line=7, matched_service_name="checkout-service",
+        ),
+    ])
+
+    result = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Change checkout configuration", repository="shop")
+
+    assert result["change_units"] == [{
+        "id": "runtime-configuration-mismatch:checkout-service:config_map:orders-config:orders-topic:ORDERS_TOPIC",
+        "service": "checkout-service",
+        "target": {
+            "role": "configuration",
+            "symbol": "kubernetes:config_map:orders-config:orders-topic",
+            "evidence": [
+                {"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 17},
+                {"file": "deploy/config.yaml", "start_line": 1, "end_line": 7},
+            ],
+        },
+        "action": "review",
+        "reason": (
+            "ORDERS_TOPIC references ConfigMap orders-config key orders-topic, but its single indexed declaration "
+            "does not list that key."
+        ),
+        "preconditions": [],
+        "related_contracts": [
+            "configuration:environment:ORDERS_TOPIC",
+            "configuration:config_map:orders-config:orders-topic",
+        ],
+        "dependencies": [],
+        "validation": [
+            "verify the ConfigMap declaration or workload reference is corrected before rollout",
+            "verify behavior remains safe when ORDERS_TOPIC is unavailable",
+        ],
+        "confidence": 0.9,
+        "evidence": [
+            {"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 17},
+            {"file": "deploy/config.yaml", "start_line": 1, "end_line": 7},
+        ],
+    }]
+    detail = queries.describe_change_unit(
+        conn,
+        result["plan_id"],
+        "runtime-configuration-mismatch:checkout-service:config_map:orders-config:orders-topic:ORDERS_TOPIC",
+    )
+    assert detail["minimal_reading"] == [{
+        "service": "checkout-service",
+        "purpose": "confirm the indexed Kubernetes configuration mismatch",
+        "recommended_query": {"tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"}},
+    }]
+    validate(detail, load_schema("describe_change_unit"))
 
 
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():

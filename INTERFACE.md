@@ -145,7 +145,8 @@ the smallest producer/consumer `describe_messages` queries needed to verify an e
 contract, or the client `describe_service` and remote `list_entrypoints` queries for a
 resolved HTTP boundary, `describe_persistence` for a schema/migration review, or
 `describe_feature_flags` for a source-proven feature-flag review, or
-`describe_configuration` for a proven code-to-Kubernetes configuration binding. It
+`describe_configuration` for a proven code-to-Kubernetes configuration binding, or
+`describe_runtime_configuration` for a source-proven Kubernetes key mismatch. It
 does not scan source, rerun retrieval or call a model.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
