@@ -550,6 +550,7 @@ class _GoAnalyzer(_FileAnalyzer):
         source_text = source.decode("utf-8", errors="ignore")
         package = _go_package_name(source_text, path)
         imports = _go_imports(source_text)
+        standard_http_imported = _has_standard_net_http_import(source_text)
         cloud_declarations = go_client_declarations(source_text)
         functions: list[_Function] = []
         for node in _walk(tree):
@@ -585,6 +586,13 @@ class _GoAnalyzer(_FileAnalyzer):
                 for contract in (
                     *_go_amqp_publish_contracts(function, path, root, source),
                     *_go_kafka_publish_contracts(function, path, root, source),
+                )
+            ],
+            error_contracts=[
+                contract
+                for function in functions
+                for contract in _go_http_error_contracts(
+                    function, path, root, source, standard_http_imported,
                 )
             ],
         )
@@ -652,6 +660,63 @@ class _GoAnalyzer(_FileAnalyzer):
             if cloud_fact is not None:
                 cloud_facts.append(cloud_fact)
         return edges, cloud_facts
+
+
+def _has_standard_net_http_import(source: str) -> bool:
+    return any(
+        module == "net/http" and alias in {"", "http"}
+        for alias, module in parse_go_import_declarations(source)
+    )
+
+
+def _go_http_error_contracts(
+    function: _Function, path: Path, root: Path, source: bytes, standard_http_imported: bool,
+) -> list[ErrorContract]:
+    """Extract explicit net/http error replies from a typed response writer."""
+    if not standard_http_imported:
+        return []
+    declaration = _text(function.declaration, source)
+    writer = _go_response_writer_name(declaration)
+    if writer is None:
+        return []
+    patterns = (
+        rf"\bhttp\s*\.\s*Error\s*\(\s*{re.escape(writer)}\s*,\s*[^,]+,\s*(?P<status>http\s*\.\s*Status[A-Za-z]+|[45]\d\d)\s*\)",
+        rf"\b{re.escape(writer)}\s*\.\s*WriteHeader\s*\(\s*(?P<status>http\s*\.\s*Status[A-Za-z]+|[45]\d\d)\s*\)",
+    )
+    contracts: list[ErrorContract] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, declaration):
+            status = _go_literal_http_status(match.group("status"))
+            if status is None:
+                continue
+            contracts.append(ErrorContract(
+                source=function.symbol,
+                role="maps",
+                error_kind=_ERROR_KIND_BY_HTTP_STATUS.get(status, "unexpected" if status >= 500 else "unknown"),
+                internal_type=None,
+                protocol="http",
+                transport_code=str(status),
+                public_code=None,
+                exposes_internal_detail=False,
+                retryability="retryable" if status == 429 else "not_retryable",
+                evidence=_declaration_match_evidence(
+                    path, root, function.declaration, declaration, match.start(), match.end(),
+                ),
+            ))
+    return contracts
+
+
+def _go_response_writer_name(declaration: str) -> str | None:
+    signature = declaration.split("{", 1)[0]
+    match = re.search(r"\b(\w+)\s+http\s*\.\s*ResponseWriter\b", signature)
+    return match.group(1) if match else None
+
+
+def _go_literal_http_status(value: str) -> int | None:
+    if value.isdigit():
+        return int(value)
+    name = re.sub(r"(?<!^)([A-Z])", r"_\1", value.replace("http.Status", "")).upper()
+    return _HTTP_STATUS_CODES.get(name)
 
 
 class _KotlinSpringAnalyzer(_FileAnalyzer):

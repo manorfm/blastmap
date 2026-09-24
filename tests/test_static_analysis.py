@@ -1332,6 +1332,46 @@ func register() { router.POST("/orders", Create) }
     assert go.contracts["orders.Create"]["response_statuses"] == [{"code": 201, "name": "CREATED"}]
 
 
+def test_go_analyzer_extracts_literal_http_error_mappings(tmp_path: Path):
+    (tmp_path / "orders.go").write_text(
+        '''package orders
+import "net/http"
+
+func Create(w http.ResponseWriter, r *http.Request) {
+  http.Error(w, "out of stock", http.StatusConflict)
+}
+
+func Find(w http.ResponseWriter, r *http.Request) {
+  w.WriteHeader(http.StatusNotFound)
+}
+
+func Reject(w http.ResponseWriter, r *http.Request) {
+  w.WriteHeader(400)
+}
+
+func Dynamic(w http.ResponseWriter, r *http.Request, status int) {
+  w.WriteHeader(status)
+}
+
+func External(w customWriter, r *http.Request) {
+  w.WriteHeader(http.StatusInternalServerError)
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert [(contract.source, contract.role, contract.error_kind, contract.protocol,
+             contract.transport_code, contract.public_code, contract.exposes_internal_detail,
+             contract.retryability)
+            for contract in result.error_contracts] == [
+        ("orders.Create", "maps", "conflict", "http", "409", None, False, "not_retryable"),
+        ("orders.Find", "maps", "not_found", "http", "404", None, False, "not_retryable"),
+        ("orders.Reject", "maps", "validation", "http", "400", None, False, "not_retryable"),
+    ]
+
+
 def test_native_flow_boundaries_are_extracted_from_declared_control_flow(tmp_path: Path):
     (tmp_path / "OrdersController.java").write_text(
         '''class OrdersController {

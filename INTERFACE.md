@@ -64,6 +64,9 @@ treated as deletion.
    caller mapping; otherwise it returns explicit unknowns rather than inventing a failure.
    Node REST mappings currently require a literal 4xx/5xx Express/Fastify reply through
    `res`, `response` or `reply`; global middleware, throws and dynamic statuses remain unknown.
+   Go mappings currently require literal `net/http` `http.Error` or `WriteHeader` calls
+   on a declared `http.ResponseWriter`; dynamic statuses, custom writers and returned
+   errors remain unknown.
 9. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.

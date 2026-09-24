@@ -256,6 +256,11 @@ second handler parameter (`res`, `response` or `reply`): Express
 It does not infer error semantics from `throw`, promise rejection, global middleware,
 dynamic statuses or the response payload.
 
+For Go HTTP, OrbitKB indexes only literal 4xx/5xx `http.Error` and
+`http.ResponseWriter.WriteHeader` replies when the local source imports `net/http`
+and the function declares an `http.ResponseWriter` parameter. Dynamic statuses,
+custom writers, returned `error` values, `recover` and response bodies remain unknown.
+
 `find_architecture_smells` also flags a source-proven internal HTTP call with no
 literal timeout or retry policy on the same source symbol. This is a prompt to review
 the client boundary, not evidence that production has no protection: defaults and
