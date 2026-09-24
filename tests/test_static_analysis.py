@@ -1574,6 +1574,139 @@ def test_static_analysis_extracts_prisma_sql_migration_operations(tmp_path: Path
     ]
 
 
+def test_static_analysis_enriches_matching_endpoint_with_openapi_contract(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''@RestController
+class OrdersController {
+  @PostMapping("/orders")
+  Order create(Order request) { return request; }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "openapi.yaml").write_text(
+        '''openapi: 3.0.3
+security:
+  - bearerAuth: []
+paths:
+  /orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        required: true
+      responses:
+        "201": {}
+        "409": {}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert result.contracts["OrdersController.create"]["formal_contract"] == {
+        "format": "openapi",
+        "operation_id": "createOrder",
+        "request_body_required": True,
+        "response_statuses": ["201", "409"],
+        "security": "required",
+        "evidence": {"file": "openapi.yaml", "start_line": 7, "end_line": 7},
+    }
+
+
+def test_static_analysis_ignores_openapi_operation_without_an_exact_endpoint_match(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''@RestController
+class OrdersController {
+  @GetMapping("/orders/{id}")
+  Order get(String id) { return new Order(); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "openapi.yaml").write_text(
+        '''openapi: 3.0.3
+paths:
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      responses:
+        "200": {}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert "formal_contract" not in result.contracts["OrdersController.get"]
+
+
+def test_static_analysis_ignores_ambiguous_openapi_operations_for_one_endpoint(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''@RestController
+class OrdersController {
+  @GetMapping("/orders")
+  Order get() { return new Order(); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "openapi.yaml").write_text(
+        '''openapi: 3.0.3
+paths:
+  /orders:
+    get:
+      operationId: getOrder
+      responses:
+        "200": {}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "swagger.yaml").write_text(
+        '''swagger: "2.0"
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      responses:
+        "200": {}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert "formal_contract" not in result.contracts["OrdersController.get"]
+
+
+def test_static_analysis_marks_referenced_openapi_request_body_as_unknown(tmp_path: Path):
+    (tmp_path / "OrdersController.java").write_text(
+        '''@RestController
+class OrdersController {
+  @PostMapping("/orders")
+  Order create(Order request) { return request; }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "openapi.yaml").write_text(
+        '''openapi: 3.0.3
+paths:
+  /orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        $ref: "#/components/requestBodies/CreateOrder"
+      responses:
+        "201": {}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert result.contracts["OrdersController.create"]["formal_contract"]["request_body_required"] is None
+
+
 def test_node_analyzer_extracts_literal_mongoose_collection_ownership(tmp_path: Path):
     (tmp_path / "order-model.ts").write_text(
         '''const Order = mongoose.model("Order", orderSchema, "orders");''', encoding="utf-8",

@@ -114,6 +114,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         """Return one entrypoint plus its deterministic local flow: invocations,
         validation, reads/writes and messages, each with evidence and provenance.
         Includes a GraphQL argument/input/return contract when a local schema proves it.
+        For an exact local HTTP route, includes a matching literal OpenAPI/Swagger
+        operation when one is present in a conventional spec file.
         `max_edges` defaults to 50 and is capped at 200 so a deep flow cannot flood
         agent context; `flow_pagination.truncated` tells the caller to ask again with
         a larger budget. Includes reachable literal resilience limits when source proves

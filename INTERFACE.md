@@ -52,7 +52,11 @@ treated as deletion.
 6. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
    entrypoint.
 7. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
-   reachable deterministic flow evidence.
+   reachable deterministic flow evidence. For an exact AST-proven HTTP route, its
+   `contract.formal_contract` can also expose a matching conventional OpenAPI/Swagger
+   operation's ID, response statuses, request-body requirement, security state and
+   file/line evidence. Referenced request bodies are `null` until a future parser can
+   resolve them safely; ambiguous operations from multiple specifications are omitted.
 8. Use `describe_api`, `describe_persistence`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.

@@ -187,6 +187,14 @@ fallbacks). Timeout fallbacks require a typed `catch`, `onErrorResume` or
 are never indexed. Dynamic global handlers, proxies and gateways remain explicit
 unknowns rather than inferred behavior.
 
+When a conventional `openapi`/`swagger` JSON or YAML file declares the exact method
+and path of an AST-proven HTTP entrypoint, its `contract.formal_contract` adds the
+operation ID, declared response statuses, request-body requirement, security state
+and file/line evidence. Server prefixes, parameter-name variations and endpoints
+documented without a matching implementation remain unlinked. Referenced schemas are
+not expanded; a referenced request body is reported as unknown rather than assumed.
+Conflicting operations from more than one specification are also left unlinked.
+
 Explicit Spring mappings for known timeout exception types retain their literal HTTP
 status, including 500, 503 and 504, so agents can distinguish an internal-error
 translation from an unavailable or gateway-timeout contract.

@@ -7,6 +7,7 @@ calls, persistence operations and messages reachable from their declared handler
 from __future__ import annotations
 
 import ast
+import json
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -18,6 +19,7 @@ import tree_sitter_java
 import tree_sitter_javascript
 import tree_sitter_kotlin
 import tree_sitter_typescript
+import yaml
 from tree_sitter import Language, Node, Parser
 
 from orbitkb.analysis.cloud_detection import (
@@ -2122,6 +2124,7 @@ class StaticAnalysisEngine:
             )
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)
+        _enrich_openapi_contracts(result, root)
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
         result.migration_facts.extend(_migration_facts(_migration_files(root), root))
@@ -2398,6 +2401,147 @@ def _enrich_contract_fields(contracts: dict[str, dict], files: list[Path]) -> No
             value = contract.get(key)
             if value and (fields := shapes.get(value["type"])):
                 value["fields"] = fields
+
+
+_OPENAPI_FILENAMES = frozenset({
+    "openapi.json", "openapi.yaml", "openapi.yml",
+    "swagger.json", "swagger.yaml", "swagger.yml",
+})
+_OPENAPI_HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head", "options", "trace"})
+
+
+@dataclass(frozen=True)
+class _OpenApiOperation:
+    method: str
+    path: str
+    operation_id: str | None
+    request_body_required: bool | None
+    response_statuses: tuple[str, ...]
+    security: str
+    evidence: Evidence
+
+
+def _enrich_openapi_contracts(result: AnalysisResult, root: Path) -> None:
+    """Attach a declared OpenAPI operation only to an exact AST-proven endpoint."""
+    operations_by_endpoint: dict[tuple[str, str], list[_OpenApiOperation]] = {}
+    for operation in _openapi_operations(root):
+        operations_by_endpoint.setdefault((operation.method, operation.path), []).append(operation)
+    for entrypoint in result.entrypoints:
+        operations = operations_by_endpoint.get((entrypoint.method, entrypoint.name), [])
+        if entrypoint.kind != "http" or len(operations) != 1:
+            continue
+        operation = operations[0]
+        contract = result.contracts.setdefault(entrypoint.symbol, {})
+        contract["formal_contract"] = {
+            "format": "openapi",
+            "operation_id": operation.operation_id,
+            "request_body_required": operation.request_body_required,
+            "response_statuses": list(operation.response_statuses),
+            "security": operation.security,
+            "evidence": {
+                "file": operation.evidence.file_path,
+                "start_line": operation.evidence.start_line,
+                "end_line": operation.evidence.end_line,
+            },
+        }
+
+
+def _openapi_operations(root: Path) -> list[_OpenApiOperation]:
+    operations: list[_OpenApiOperation] = []
+    for path in _openapi_files(root):
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        document = _load_openapi_document(path, source)
+        if document is None:
+            continue
+        paths = document.get("paths")
+        if not isinstance(paths, dict):
+            continue
+        for raw_path, path_item in paths.items():
+            if not isinstance(raw_path, str) or not isinstance(path_item, dict):
+                continue
+            for raw_method, operation in path_item.items():
+                method = raw_method.lower() if isinstance(raw_method, str) else ""
+                if method not in _OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
+                    continue
+                operation_id = operation.get("operationId")
+                if not isinstance(operation_id, str):
+                    operation_id = None
+                operations.append(_OpenApiOperation(
+                    method=method.upper(),
+                    path=raw_path,
+                    operation_id=operation_id,
+                    request_body_required=_openapi_request_body_required(operation, path_item),
+                    response_statuses=_openapi_response_statuses(operation),
+                    security=_openapi_security(operation, document),
+                    evidence=_openapi_evidence(path, root, source, operation_id, raw_path),
+                ))
+    return operations
+
+
+def _openapi_files(root: Path) -> list[Path]:
+    return sorted(
+        path
+        for pattern in ("*.json", "*.yaml", "*.yml")
+        for path in root.rglob(pattern)
+        if path.name.lower() in _OPENAPI_FILENAMES
+        and not any(part in SKIP_DIRS for part in path.relative_to(root).parts)
+    )
+
+
+def _load_openapi_document(path: Path, source: str) -> dict | None:
+    try:
+        document = json.loads(source) if path.suffix.lower() == ".json" else yaml.safe_load(source)
+    except (json.JSONDecodeError, yaml.YAMLError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    if not isinstance(document.get("openapi"), str) and str(document.get("swagger")) != "2.0":
+        return None
+    return document
+
+
+def _openapi_request_body_required(operation: dict, path_item: dict) -> bool | None:
+    request_body = operation.get("requestBody")
+    if isinstance(request_body, dict):
+        if "$ref" in request_body:
+            return None
+        return request_body.get("required") is True
+    parameters = [*_openapi_parameters(path_item), *_openapi_parameters(operation)]
+    if any(isinstance(parameter, dict) and "$ref" in parameter for parameter in parameters):
+        return None
+    return any(
+        isinstance(parameter, dict)
+        and parameter.get("in") == "body"
+        and parameter.get("required") is True
+        for parameter in parameters
+    )
+
+
+def _openapi_parameters(container: dict) -> list:
+    parameters = container.get("parameters")
+    return parameters if isinstance(parameters, list) else []
+
+
+def _openapi_response_statuses(operation: dict) -> tuple[str, ...]:
+    responses = operation.get("responses")
+    if not isinstance(responses, dict):
+        return ()
+    return tuple(str(status) for status in responses)
+
+
+def _openapi_security(operation: dict, document: dict) -> str:
+    declaration = operation.get("security") if "security" in operation else document.get("security")
+    if not isinstance(declaration, list):
+        return "unspecified"
+    return "required" if declaration else "not_required"
+
+
+def _openapi_evidence(
+    path: Path, root: Path, source: str, operation_id: str | None, operation_path: str,
+) -> Evidence:
+    path_position = source.find(operation_path)
+    position = source.find(operation_id, path_position) if operation_id else path_position
+    return _line_evidence(path, root, source, max(position, 0))
 
 
 def _dto_shapes(files: list[Path]) -> dict[str, list[dict]]:
