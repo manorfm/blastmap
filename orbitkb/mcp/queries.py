@@ -36,6 +36,7 @@ from orbitkb.generation.change_plan import (
     derive_change_units,
     derive_decision_points,
     derive_error_mapping_review_units,
+    derive_persistence_migration_review_units,
     validate_decision_selections,
 )
 from orbitkb.generation.freshness import compute_freshness
@@ -814,10 +815,26 @@ def plan_change(
         for service in primary_services
         if len(services_repo.list_service_candidates_by_name(conn, service)) == 1
     }
-    change_units = [] if decision_points else [
-        *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
-        *derive_error_mapping_review_units(find_architecture_smells(conn)["findings"], error_mapping_services),
-    ]
+    if decision_points:
+        change_units = []
+    else:
+        persistence_services = {
+            item["service"]
+            for item in change_surface_result["persistence_affected"]
+            if item.get("service") in primary_services and item.get("kind") == "sql_table" and item.get("evidence")
+        }
+        migration_facts_by_service = {
+            service: [dict(fact) for fact in flows_repo.list_static_migration_facts(conn, row["id"])]
+            for service in persistence_services
+            if (row := services_repo.get_service_by_name(conn, service, repository_id=repository_id)) is not None
+        }
+        change_units = [
+            *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
+            *derive_error_mapping_review_units(find_architecture_smells(conn)["findings"], error_mapping_services),
+            *derive_persistence_migration_review_units(
+                change_surface_result["persistence_affected"], migration_facts_by_service, primary_services,
+            ),
+        ]
     plan_run_id = change_plans_repo.record_plan(
         conn, change_surface_result.get("run_id"), status, token_budget, decision_points, change_units,
     )
@@ -1004,6 +1021,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
             "service": producer,
             "purpose": "identify the entrypoint that owns the public error contract",
             "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": producer}},
+        }]
+    if change_unit["target"]["role"] == "persistence":
+        return [{
+            "service": producer,
+            "purpose": "confirm the affected schema and indexed migration operations",
+            "recommended_query": {"tool": "describe_persistence", "arguments": {"service": producer}},
         }]
     reading = [{
         "service": producer,

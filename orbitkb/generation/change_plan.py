@@ -157,3 +157,85 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
             "evidence": evidence,
         })
     return units
+
+
+def derive_persistence_migration_review_units(
+    persistence_affected: list[dict], migration_facts_by_service: dict[str, list[dict]], primary_services: set[str],
+) -> list[dict]:
+    """Return bounded schema-review units only for exact persisted-table matches."""
+    units: list[dict] = []
+    for persisted in persistence_affected:
+        service = persisted.get("service")
+        table_name = persisted.get("entity")
+        evidence = persisted.get("evidence")
+        if (
+            not isinstance(service, str) or service not in primary_services
+            or not isinstance(table_name, str) or persisted.get("kind") != "sql_table"
+            or not isinstance(evidence, list) or not evidence
+        ):
+            continue
+        persistence_evidence = _unique_evidence(evidence)
+        if not persistence_evidence:
+            continue
+        matching_facts = [
+            fact
+            for fact in migration_facts_by_service.get(service, [])
+            if (
+                isinstance(fact, dict)
+                and isinstance(fact.get("table_name"), str)
+                and fact["table_name"].casefold() == table_name.casefold()
+                and isinstance(fact.get("file_path"), str)
+                and isinstance(fact.get("start_line"), int)
+                and isinstance(fact.get("end_line"), int)
+            )
+        ]
+        if not matching_facts:
+            continue
+        migration_evidence = [{
+            "file": fact["file_path"], "start_line": fact["start_line"], "end_line": fact["end_line"],
+        } for fact in matching_facts]
+        all_evidence = _unique_evidence([*persistence_evidence, *migration_evidence])
+        if not all_evidence:
+            continue
+        count = len(matching_facts)
+        operation_word = "operation" if count == 1 else "operations"
+        validation = [
+            f"review {table_name} schema and its {count} indexed migration {operation_word} before altering persistence",
+        ]
+        if any(bool(fact.get("destructive")) for fact in matching_facts):
+            validation.append("verify deployment order, backup, and rollback for destructive migration operations")
+        units.append({
+            "id": f"persistence-migration:{service}:{table_name}",
+            "service": service,
+            "target": {"role": "persistence", "symbol": f"table:{table_name}", "evidence": all_evidence},
+            "action": "review",
+            "reason": (
+                f"{table_name} is on the indexed change surface and has {count} source-proven migration "
+                f"{operation_word}; review schema compatibility before altering it."
+            ),
+            "preconditions": [],
+            "related_contracts": [f"database:{table_name}"],
+            "dependencies": [],
+            "validation": validation,
+            "confidence": 1.0,
+            "evidence": all_evidence,
+        })
+    return units
+
+
+def _unique_evidence(items: list[dict]) -> list[dict]:
+    seen: set[tuple[str, int, int]] = set()
+    evidence: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        file_path = item.get("file")
+        start_line = item.get("start_line")
+        end_line = item.get("end_line")
+        if not isinstance(file_path, str) or not isinstance(start_line, int) or not isinstance(end_line, int):
+            continue
+        key = file_path, start_line, end_line
+        if key not in seen:
+            seen.add(key)
+            evidence.append({"file": file_path, "start_line": start_line, "end_line": end_line})
+    return evidence

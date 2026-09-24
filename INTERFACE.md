@@ -83,6 +83,11 @@ compatibility choice is required; and `insufficient_evidence` means no indexed s
 matched the task. The audit record links to a surface synthesis when one exists and does
 not duplicate task text. The token budget is capped at 2,200 estimated response tokens.
 
+A `persistence` migration-review unit is created only for an affected, evidenced SQL
+table whose name exactly matches a source-proven migration fact in the same primary
+service. Destructive migration facts add deployment, backup and rollback validation;
+the unit is advisory and does not claim that any migration must execute.
+
 `refine_change_plan` accepts only the pending plan's declared IDs and options. It
 requires one selection per decision, persists the selections, then returns `ready`
 with no remaining decisions and a source-bounded producer contract unit. Preserved
@@ -94,7 +99,8 @@ choice is rejected, requiring a new plan and an explicit impact reassessment.
 `describe_change_unit` returns one persisted change unit, its validation checklist and
 the smallest producer/consumer `describe_messages` queries needed to verify an event
 contract, or the client `describe_service` and remote `list_entrypoints` queries for a
-resolved HTTP boundary. It does not scan source, rerun retrieval or call a model.
+resolved HTTP boundary, or `describe_persistence` for a schema/migration review. It
+does not scan source, rerun retrieval or call a model.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

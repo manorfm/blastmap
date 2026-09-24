@@ -8,15 +8,20 @@ from orbitkb.analysis.models import (
     EntryPoint,
     ErrorContract,
     Evidence,
+    MigrationFact,
     StaticServiceCall,
 )
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import change_plans
 from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import messages as messages_repo
+from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import recompute_architecture_view
-from orbitkb.generation.change_plan import derive_error_mapping_review_units
+from orbitkb.generation.change_plan import (
+    derive_error_mapping_review_units,
+    derive_persistence_migration_review_units,
+)
 from orbitkb.generation.llm_harness import load_schema
 from orbitkb.mcp import queries
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
@@ -172,6 +177,69 @@ def test_plan_change_derives_an_error_mapping_review_unit_for_a_proven_4xx_to_5x
     validate(detail, load_schema("describe_change_unit"))
 
 
+def test_plan_change_derives_a_migration_review_unit_for_an_affected_persisted_table(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "migration-unit.db")
+    payments = services_repo.get_service_by_name(conn, "payments-service")
+    messages_repo.replace_messages(conn, payments["id"], [], [])
+    persistence_repo.replace_persistence_entities(
+        conn,
+        payments["id"],
+        [{"name": "payment_method", "kind": "sql_table", "schema_json": []}],
+        [{"file": "payments/models.py", "start_line": 8, "end_line": 12}],
+    )
+    flows_repo.replace_analysis(conn, payments["id"], AnalysisResult(migration_facts=[
+        MigrationFact(
+            "drop_column", "payment_method", "legacy_token", True,
+            Evidence("db/migration/V12__payment_method.sql", 5, 5),
+        ),
+    ]))
+
+    result = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "payments-service", "reason": "owns payment method", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Add a payment method")
+
+    assert result["status"] == "ready"
+    assert result["change_units"] == [{
+        "id": "persistence-migration:payments-service:payment_method",
+        "service": "payments-service",
+        "target": {
+            "role": "persistence",
+            "symbol": "table:payment_method",
+            "evidence": [
+                {"file": "payments/models.py", "start_line": 8, "end_line": 12},
+                {"file": "db/migration/V12__payment_method.sql", "start_line": 5, "end_line": 5},
+            ],
+        },
+        "action": "review",
+        "reason": "payment_method is on the indexed change surface and has 1 source-proven migration operation; review schema compatibility before altering it.",
+        "preconditions": [],
+        "related_contracts": ["database:payment_method"],
+        "dependencies": [],
+        "validation": [
+            "review payment_method schema and its 1 indexed migration operation before altering persistence",
+            "verify deployment order, backup, and rollback for destructive migration operations",
+        ],
+        "confidence": 1.0,
+        "evidence": [
+            {"file": "payments/models.py", "start_line": 8, "end_line": 12},
+            {"file": "db/migration/V12__payment_method.sql", "start_line": 5, "end_line": 5},
+        ],
+    }]
+    detail = queries.describe_change_unit(
+        conn, result["plan_id"], "persistence-migration:payments-service:payment_method",
+    )
+    assert detail["minimal_reading"] == [{
+        "service": "payments-service",
+        "purpose": "confirm the affected schema and indexed migration operations",
+        "recommended_query": {"tool": "describe_persistence", "arguments": {"service": "payments-service"}},
+    }]
+    validate(detail, load_schema("describe_change_unit"))
+    refined = queries.refine_change_plan(conn, result["plan_id"], [])
+    assert refined["change_units"] == result["change_units"]
+    validate(refined, load_schema("refine_change_plan"))
+
+
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():
     assert derive_error_mapping_review_units([
         {
@@ -191,6 +259,28 @@ def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings(
             },
         },
     ], {"payments-service"}) == []
+
+
+def test_migration_units_require_an_exact_affected_table_match_with_source_evidence():
+    assert derive_persistence_migration_review_units(
+        [{
+            "service": "payments-service", "entity": "payment_method", "kind": "sql_table",
+            "evidence": [{"file": "models.py", "start_line": 2, "end_line": 2}],
+        }],
+        {"payments-service": [{
+            "operation": "drop_column", "table_name": "invoices", "column_name": "legacy_id",
+            "destructive": 1, "file_path": "db/migration/V2.sql", "start_line": 1, "end_line": 1,
+        }]},
+        {"payments-service"},
+    ) == []
+    assert derive_persistence_migration_review_units(
+        [{"service": "payments-service", "entity": "payment_method", "kind": "sql_table", "evidence": []}],
+        {"payments-service": [{
+            "operation": "drop_column", "table_name": "payment_method", "column_name": "legacy_id",
+            "destructive": 1, "file_path": "db/migration/V2.sql", "start_line": 1, "end_line": 1,
+        }]},
+        {"payments-service"},
+    ) == []
 
 
 def test_describe_change_unit_uses_http_specific_minimal_queries(tmp_path):

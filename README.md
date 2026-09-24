@@ -149,6 +149,9 @@ route are indexed, `plan_change` also creates a contract-review unit for that bo
 It also adds an error-mapping review only for a high-confidence, source-proven local
 degradation of a known client/domain error into HTTP 5xx. This remains a review because
 middleware, gateways and external contracts can affect the runtime response.
+When an affected SQL table has an exactly matching indexed migration fact,
+`plan_change` adds a schema-review unit. A destructive operation requires deployment,
+backup and rollback validation; it never asserts that the migration needs to run.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

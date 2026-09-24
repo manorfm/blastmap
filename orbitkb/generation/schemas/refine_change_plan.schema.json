@@ -29,7 +29,7 @@
             "required": ["role", "symbol", "evidence"],
             "additionalProperties": false,
             "properties": {
-              "role": {"type": "string", "enum": ["contract", "integration"]},
+              "role": {"type": "string", "enum": ["contract", "integration", "persistence"]},
               "symbol": {"type": "string"},
               "evidence": {"type": "array", "items": {"type": "object"}}
             }
