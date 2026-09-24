@@ -137,7 +137,9 @@ direct literal mount, and inherit that prefix. Dynamic registration, wrappers,
 unmounted/multiply-mounted routers and unresolved handlers are intentionally left out
 rather than guessed into an endpoint.
 The same literal method/path and handler rules cover Fastify instances created from a
-locally imported factory; dynamic prefixes and plugin registration remain out of scope.
+locally imported factory, including `app.route({ method, url, handler })` objects with
+all three fields literal or directly named in the same file. Dynamic fields, prefixes
+and plugin registration remain out of scope.
 NestJS controllers are also indexed when `@Controller` and an HTTP method decorator
 from `@nestjs/common` use literal paths; the combined route is linked to its controller
 method. Dynamic decorator arguments remain explicit unknowns.

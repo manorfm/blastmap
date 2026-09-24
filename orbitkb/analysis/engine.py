@@ -872,9 +872,10 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             result.entrypoints.append(
                 EntryPoint("http", method, route, function.symbol, _evidence(path, root, function.declaration))
             )
+        fastify_receivers = _fastify_route_receivers(source_text)
         route_prefixes = {
             **_express_route_prefixes(source_text),
-            **{receiver: "" for receiver in _fastify_route_receivers(source_text)},
+            **{receiver: "" for receiver in fastify_receivers},
         }
         for node in _walk(tree):
             if node.type != "call_expression":
@@ -887,19 +888,29 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             if "." not in callee_text:
                 continue
             receiver, method = callee_text.rsplit(".", 1)
-            if receiver not in route_prefixes or method not in self.HTTP_ROUTE_METHODS:
+            if receiver not in route_prefixes:
                 continue
             args = arguments.named_children
-            path_value = _string(args[0], source) if args else None
+            if method in self.HTTP_ROUTE_METHODS:
+                http_method = method.upper()
+                path_value = _string(args[0], source) if args else None
+                handler_node = args[-1] if len(args) > 1 else None
+            elif method == "route" and receiver in fastify_receivers:
+                route_definition = _fastify_literal_route_definition(args, source)
+                if route_definition is None:
+                    continue
+                http_method, path_value, handler_node = route_definition
+            else:
+                continue
             if path_value is not None:
                 path_value = _join_route(route_prefixes[receiver], path_value)
-            handler_node = args[-1] if len(args) > 1 else None
             handler = functions_by_name.get(_text(handler_node, source)) if handler_node is not None else None
             if handler is None and handler_node is not None and handler_node.type in {"arrow_function", "function_expression"}:
                 body = handler_node.child_by_field_name("body")
                 if body is not None and path_value is not None:
                     handler = _Function(
-                        f"http.{method}:{path_value}", f"{path.stem}.http.{method}:{path_value}", body, handler_node,
+                        f"http.{http_method.lower()}:{path_value}",
+                        f"{path.stem}.http.{http_method.lower()}:{path_value}", body, handler_node,
                     )
                     self._record_function(
                         result, handler, path, root, source, imports, mongoose_models, prisma_clients,
@@ -908,7 +919,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             if path_value is None or handler is None:
                 continue
             result.entrypoints.append(
-                EntryPoint("http", method.upper(), path_value, handler.symbol, _evidence(path, root, node))
+                EntryPoint("http", http_method, path_value, handler.symbol, _evidence(path, root, node))
             )
         for parent in _walk(tree):
             if parent.type != "pair" or _text(parent.child_by_field_name("key"), source) not in {"Query", "Mutation", "Subscription"}:
@@ -1854,6 +1865,40 @@ def _fastify_route_receivers(source: str) -> frozenset[str]:
             rf"\b(?:const|let|var)\s+(\w+)\s*=\s*{re.escape(factory)}\s*\(", source,
         ))
     return frozenset(receivers)
+
+
+def _fastify_literal_route_definition(args: list[Node], source: bytes) -> tuple[str, str, Node] | None:
+    """Return the complete literal subset of a Fastify ``route`` object.
+
+    Object registration is intentionally accepted only when the three facts needed
+    for a reliable endpoint are present exactly once. Arrays, variables and dynamic
+    object construction are left unresolved instead of being guessed.
+    """
+    if len(args) != 1 or args[0].type != "object":
+        return None
+    fields: dict[str, Node] = {}
+    for pair in args[0].named_children:
+        if pair.type != "pair":
+            continue
+        key = pair.child_by_field_name("key")
+        value = pair.child_by_field_name("value")
+        if key is None or value is None:
+            continue
+        field_name = _text(key, source)
+        if field_name not in {"method", "url", "handler"}:
+            continue
+        if field_name in fields:
+            return None
+        fields[field_name] = value
+    method = _string(fields.get("method"), source)
+    path = _string(fields.get("url"), source)
+    handler = fields.get("handler")
+    if method is None or path is None or handler is None:
+        return None
+    normalized_method = method.upper()
+    if normalized_method not in {route_method.upper() for route_method in _NodeGraphqlAnalyzer.HTTP_ROUTE_METHODS}:
+        return None
+    return normalized_method, path, handler
 
 
 def _node_named_functions(tree: Node, source: bytes, module_name: str) -> list[_Function]:

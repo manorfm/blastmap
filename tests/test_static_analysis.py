@@ -623,6 +623,51 @@ app.post("/orders", createOrder);
     assert result.entrypoints == []
 
 
+def test_node_analyzer_exposes_literal_fastify_route_object_and_named_handler_flow(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import Fastify from "fastify";
+const app = Fastify();
+
+function createOrder(request: FastifyRequest, reply: FastifyReply) {
+  return orderService.create(request.body);
+}
+
+app.route({ method: "POST", url: "/orders", handler: createOrder });
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(entry.kind, entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
+        ("http", "POST", "/orders", "orders.createOrder"),
+    ]
+    assert any(
+        edge.source == "orders.createOrder" and edge.target == "orderService.create"
+        for edge in result.edges
+    )
+
+
+def test_node_analyzer_skips_fastify_route_object_with_dynamic_url(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import Fastify from "fastify";
+const app = Fastify();
+const ordersUrl = "/orders";
+
+function createOrder(request: FastifyRequest, reply: FastifyReply) {
+  return orderService.create(request.body);
+}
+
+app.route({ method: "POST", url: ordersUrl, handler: createOrder });
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.entrypoints == []
+
+
 def test_node_analyzer_exposes_literal_nest_controller_route_and_method_flow(tmp_path: Path):
     (tmp_path / "orders.controller.ts").write_text(
         '''import { Controller, Post } from "@nestjs/common";

@@ -152,9 +152,10 @@ stable route-derived symbol. A router route is an HTTP entrypoint only after one
 literal `app.use(prefix, router)` mount, which is composed into its path; unmounted or
 multiply-mounted routers, dynamic registration, framework wrappers and unresolved
 handlers remain unknown rather than becoming route facts.
-Fastify uses the same literal method/path and handler rules, but only for an instance
-created from a locally imported Fastify factory; plugin registration and dynamic
-prefixes remain unknown.
+Fastify uses the same literal method/path and handler rules, including
+`app.route({ method, url, handler })` objects whose fields are all static, but only for
+an instance created from a locally imported Fastify factory; plugin registration,
+dynamic object fields and dynamic prefixes remain unknown.
 NestJS recognizes a class with a literal `@Controller` prefix and a literal HTTP
 method decorator imported from `@nestjs/common`. It combines those paths and exposes
 the controller method as the entrypoint symbol; dynamic decorator arguments and
