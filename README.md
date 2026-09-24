@@ -241,9 +241,10 @@ absence is unknown, not evidence that deployment configuration is missing.
 `describe_runtime_configuration` lists literal `env` references in indexed plain
 Kubernetes workload manifests. It identifies the environment variable, ConfigMap or
 Secret name/key, workload/container and source evidence, without exposing values.
-Literal `envFrom` imports are listed separately with source, optional prefix, workload
-and evidence, but their individual environment keys remain `unknown`; dynamic names
-and unrendered Helm templates remain unknown.
+Literal `envFrom` imports are listed separately with source, optional prefix, workload,
+container role (`application` or `initialization`) and evidence, but their individual
+environment keys remain `unknown`; dynamic names and unrendered Helm templates remain
+unknown.
 For a literal `optional` field, the import also states whether its source is
 `optional` or `required`; an omitted field is `required` by the Kubernetes default.
 When an `envFrom` source has no matching local declaration, it is labeled

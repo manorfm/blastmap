@@ -102,6 +102,8 @@ name/key, workload/container and file evidence. Literal `envFrom` imports are
 returned separately with `key_coverage: "unknown"`: their source and optional prefix
 are known, but individual environment keys are not. It never reads values; dynamic
 names and unrendered Helm templates remain unknown.
+Their workload may include `container_role: "application"` or `"initialization"`;
+legacy snapshots omit this field rather than guessing it.
 When literal, `availability` is `optional` or `required`; an omitted Kubernetes
 `optional` field is `required` by default. Legacy or nonliteral snapshots leave it
 unknown rather than asserting availability.

@@ -93,6 +93,7 @@ def parse_kubernetes_configuration_references_file(
                 container_name = _scalar(_mapping_value(container, "name"))
                 if container_name is None:
                     continue
+                container_role = "initialization" if container_group == "initContainers" else "application"
                 environment = _mapping_value(container, "env")
                 if isinstance(environment, SequenceNode):
                     for item in environment.value:
@@ -103,7 +104,7 @@ def parse_kubernetes_configuration_references_file(
                 if isinstance(source_imports, SequenceNode):
                     for item in source_imports.value:
                         source_import = _environment_source_import(
-                            item, workload_kind, workload_name, container_name, path,
+                            item, workload_kind, workload_name, container_name, container_role, path,
                         )
                         if source_import is not None:
                             imports.append(source_import)
@@ -168,7 +169,7 @@ def _environment_binding(
 
 
 def _environment_source_import(
-    item: Node, workload_kind: str, workload_name: str, container_name: str, path: Path,
+    item: Node, workload_kind: str, workload_name: str, container_name: str, container_role: str, path: Path,
 ) -> KubernetesConfigurationSourceImport | None:
     if not isinstance(item, MappingNode):
         return None
@@ -187,7 +188,7 @@ def _environment_source_import(
             source_kind=source_kind, source_name=source_name, prefix=prefix,
             workload_kind=workload_kind, workload_name=workload_name, container_name=container_name,
             file_path=str(path), start_line=item.start_mark.line + 1, end_line=item.end_mark.line + 1,
-            optional=optional,
+            container_role=container_role, optional=optional,
         )
     return None
 

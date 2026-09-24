@@ -115,12 +115,12 @@ def test_kubernetes_parser_extracts_env_from_sources_without_inventing_keys(tmp_
         KubernetesConfigurationSourceImport(
             source_kind="config_map", source_name="shared-defaults", prefix="ORDERS_",
             workload_kind="Deployment", workload_name="orders", container_name="api",
-            file_path=str(manifest), start_line=11, end_line=14, optional=False,
+            file_path=str(manifest), start_line=11, end_line=14, container_role="application", optional=False,
         ),
         KubernetesConfigurationSourceImport(
             source_kind="secret", source_name="orders-secrets", prefix=None,
             workload_kind="Deployment", workload_name="orders", container_name="api",
-            file_path=str(manifest), start_line=14, end_line=16, optional=False,
+            file_path=str(manifest), start_line=14, end_line=16, container_role="application", optional=False,
         ),
     ]
 

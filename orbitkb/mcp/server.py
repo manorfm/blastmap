@@ -201,9 +201,10 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
     ) -> dict:
         """List literal Kubernetes workload environment references to ConfigMaps
         and Secrets, plus literal ``envFrom`` sources with unknown per-key coverage.
-        Literal source availability is reported when known; a locally unresolved
-        source is an ownership hypothesis, not a missing-source finding. Values,
-        dynamic names and unrendered Helm templates are excluded.
+        The workload identifies application versus initialization containers when
+        known. Literal source availability is reported when known; a locally
+        unresolved source is an ownership hypothesis, not a missing-source finding.
+        Values, dynamic names and unrendered Helm templates are excluded.
         Both lists are capped at `limit` (default 50) starting at `offset`; pass
         repository when service names duplicate."""
         with closing(_conn()) as conn:

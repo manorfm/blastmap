@@ -200,6 +200,25 @@ def test_describe_runtime_configuration_marks_an_optional_env_from_source(tmp_pa
     assert [source["availability"] for source in result["source_imports"]] == ["optional", "required"]
 
 
+def test_describe_runtime_configuration_identifies_an_init_container_source_import(tmp_path):
+    conn = open_db(tmp_path / "runtime-configuration-init-container-env-from.db")
+    repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")
+    services.ensure_service(conn, "orders", "/repos/shop/orders", "node-ts", repository_id=repository_id)
+    kubernetes_configuration.replace_kubernetes_configuration_source_imports(conn, repository_id, [
+        KubernetesConfigurationSourceImport(
+            source_kind="secret", source_name="migration-secrets", prefix=None, container_role="initialization",
+            workload_kind="Deployment", workload_name="orders", container_name="migrate",
+            file_path="deploy/orders.yaml", start_line=11, end_line=14, matched_service_name="orders",
+        ),
+    ])
+
+    result = queries.describe_runtime_configuration(conn, "orders")
+
+    assert result["source_imports"][0]["workload"] == {
+        "kind": "Deployment", "name": "orders", "container": "migrate", "container_role": "initialization",
+    }
+
+
 def test_describe_configuration_links_matching_code_and_kubernetes_environment_bindings(tmp_path):
     conn = open_db(tmp_path / "configuration-links.db")
     repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")

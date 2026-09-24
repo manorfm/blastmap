@@ -809,11 +809,14 @@ def _runtime_configuration_source_import(
     item: sqlite3.Row, source_import_unknowns_by_reference: set[tuple[str, str, str | None, str, int, int]],
 ) -> dict:
     """Shape an ``envFrom`` source while preserving its intentionally unknown keys."""
+    workload = {
+        "kind": item["workload_kind"], "name": item["workload_name"], "container": item["container_name"],
+    }
+    if item["container_role"] is not None:
+        workload["container_role"] = item["container_role"]
     response = {
         "source": {"kind": item["source_kind"], "name": item["source_name"]},
-        "workload": {
-            "kind": item["workload_kind"], "name": item["workload_name"], "container": item["container_name"],
-        },
+        "workload": workload,
         "evidence": {"file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"]},
         "key_coverage": "unknown",
     }

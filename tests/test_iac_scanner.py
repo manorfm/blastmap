@@ -150,9 +150,10 @@ def test_kubernetes_scanner_tracks_optional_env_from_sources_in_init_containers(
 
     facts = scan_repository_facts(tmp_path, [_candidate("orders-service", service)])
 
-    assert [(issue.source_kind, issue.source_name, issue.prefix, issue.optional, issue.matched_service_name)
+    assert [(issue.source_kind, issue.source_name, issue.prefix, issue.container_role, issue.optional,
+             issue.matched_service_name)
             for issue in facts.configuration_source_import_unknowns] == [
-        ("secret", "external-migration-secrets", None, True, "orders-service"),
+        ("secret", "external-migration-secrets", None, "initialization", True, "orders-service"),
     ]
 
 
