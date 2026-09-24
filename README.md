@@ -104,7 +104,7 @@ Start broad, then narrow the request.
 
 | Need | Start with | Follow with |
 | --- | --- | --- |
-| Start a change plan | `plan_change` | `get_change_context`, `describe_entrypoint` |
+| Start a change plan | `plan_change` | `refine_change_plan`, `get_change_context` |
 | Plan an epic | `get_change_context` | `describe_service`, `describe_entrypoint` |
 | Find likely impact | `find_change_surface` | `get_relationships`, `describe_api` |
 | Understand a request path or its static error mapping | `list_entrypoints` | `describe_entrypoint` |
@@ -132,7 +132,9 @@ returns the evidence-backed affected surface, explicit unknowns and a response b
 it emits a blocking decision only when an indexed primary event producer has known
 consumers, and never guesses code-level change units from service-level matches. Each
 response has a durable plan ID with audit metadata; it links to an existing surface
-run when available and does not duplicate the task text.
+run when available and does not duplicate the task text. `refine_change_plan` records
+one declared option for every pending decision without repeating retrieval or calling
+an LLM; a finalized decision is immutable within that plan.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

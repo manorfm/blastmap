@@ -40,16 +40,19 @@ treated as deletion.
    compact implementation briefing, or `find_change_surface(task, repository?)` when
    only impact inference is needed. All require the repository whenever the KB reports
    duplicate service identities.
-2. Call `list_services(repository?)`; use its repository field to qualify
+2. When `plan_change` returns `needs_decision`, call
+   `refine_change_plan(plan_id, decisions)` with exactly one declared option for every
+   pending decision. This updates the existing plan without rerunning retrieval.
+3. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
-3. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
+4. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
    entrypoint.
-4. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
+5. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
    reachable deterministic flow evidence.
-5. Use `describe_api`, `describe_persistence`, `describe_messages`,
+6. Use `describe_api`, `describe_persistence`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.
-6. Call `list_security_findings(service)` before changing credentials,
+7. Call `list_security_findings(service)` before changing credentials,
    configuration or an external integration; it returns locations and remediation,
    never source excerpts or secret values.
 
@@ -72,6 +75,12 @@ decision; `needs_decision` means the compatibility choice is required; and
 `insufficient_evidence` means no indexed service matched the task. The audit record
 links to a surface synthesis when one exists and does not duplicate task text. The
 token budget is capped at 2,200 estimated response tokens.
+
+`refine_change_plan` accepts only the pending plan's declared IDs and options. It
+requires one selection per decision, persists the selections, then returns `ready`
+with no remaining decisions. It performs no retrieval or model call. Retrying the
+same finalized selections is safe; changing a finalized choice is rejected, requiring
+a new plan and an explicit impact reassessment.
 
 ## Compact change context
 

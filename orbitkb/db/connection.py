@@ -4,7 +4,7 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "16"
+SCHEMA_VERSION = "17"
 DEFAULT_DB_PATH = Path.home() / ".orbitkb" / "orbitkb.db"
 
 
@@ -24,6 +24,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "static_message_contracts", "message_version", "TEXT")
     _add_column_if_missing(conn, "service_index_locks", "process_id", "INTEGER")
     _add_column_if_missing(conn, "change_plan_runs", "decision_points_json", "TEXT NOT NULL DEFAULT '[]'")
+    _add_column_if_missing(conn, "change_plan_runs", "selected_decisions_json", "TEXT NOT NULL DEFAULT '[]'")
     _migrate_architecture_findings_if_needed(conn)
     row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
     if row is None:

@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "required": ["plan_id", "status", "selected_decisions", "remaining_decision_points", "change_units"],
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {"type": "string", "pattern": "^cp_[1-9][0-9]*$"},
+    "status": {"type": "string", "enum": ["ready", "needs_decision", "insufficient_evidence", "stale_knowledge"]},
+    "selected_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "option"],
+        "additionalProperties": false,
+        "properties": {"id": {"type": "string"}, "option": {"type": "string"}}
+      }
+    },
+    "remaining_decision_points": {"type": "array", "items": {"type": "object"}},
+    "change_units": {"type": "array", "items": {"type": "object"}}
+  }
+}

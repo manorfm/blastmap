@@ -38,3 +38,32 @@ def derive_decision_points(contracts_at_risk: list[dict], primary_services: set[
             "evidence": contract.get("evidence", []),
         })
     return decisions
+
+
+def validate_decision_selections(
+    decision_points: list[dict], selections: object,
+) -> tuple[list[dict] | None, str | None]:
+    """Validate one explicit, supported selection for every pending decision."""
+    if not isinstance(selections, list):
+        return None, "decisions must be a list"
+    expected = {decision["id"]: decision for decision in decision_points}
+    chosen: dict[str, str] = {}
+    for selection in selections:
+        if not isinstance(selection, dict) or set(selection) != {"id", "option"}:
+            return None, "each decision selection must contain only id and option"
+        decision_id = selection["id"]
+        option = selection["option"]
+        if not isinstance(decision_id, str) or not isinstance(option, str):
+            return None, "decision id and option must be strings"
+        if decision_id in chosen:
+            return None, f"decision selected more than once: {decision_id}"
+        decision = expected.get(decision_id)
+        if decision is None:
+            return None, f"unknown decision: {decision_id}"
+        if option not in decision["options"]:
+            return None, f"unsupported option for decision: {decision_id}"
+        chosen[decision_id] = option
+    missing = sorted(set(expected) - set(chosen))
+    if missing:
+        return None, f"missing decisions: {', '.join(missing)}"
+    return [{"id": decision["id"], "option": chosen[decision["id"]]} for decision in decision_points], None

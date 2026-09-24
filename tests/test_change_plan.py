@@ -78,6 +78,54 @@ def test_plan_change_requires_a_contract_compatibility_decision_for_affected_eve
     assert json.loads(plan["decision_points_json"]) == result["decision_points"]
 
 
+def test_refine_change_plan_persists_an_explicit_decision_without_retrieval(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "refine.db")
+    backend = FakeBackend({
+        "primary": [{"service": "payments-service", "reason": "owns payment authorization", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    })
+    plan = queries.plan_change(conn, backend, "Add a payment method")
+
+    result = queries.refine_change_plan(conn, plan["plan_id"], [{
+        "id": "event-compatibility:payments-service:payment_authorized",
+        "option": "preserve backward compatibility",
+    }])
+
+    assert backend.calls == 1
+    assert result == {
+        "plan_id": plan["plan_id"],
+        "status": "ready",
+        "selected_decisions": [{
+            "id": "event-compatibility:payments-service:payment_authorized",
+            "option": "preserve backward compatibility",
+        }],
+        "remaining_decision_points": [],
+        "change_units": [],
+    }
+    validate(result, load_schema("refine_change_plan"))
+    persisted = change_plans.get_plan(conn, int(plan["plan_id"].removeprefix("cp_")))
+    assert persisted["status"] == "ready"
+    assert json.loads(persisted["selected_decisions_json"]) == result["selected_decisions"]
+
+
+def test_refine_change_plan_rejects_an_undeclared_option_without_mutating_the_plan(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "invalid-refine.db")
+    plan = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "payments-service", "reason": "owns payment authorization", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Add a payment method")
+
+    result = queries.refine_change_plan(conn, plan["plan_id"], [{
+        "id": "event-compatibility:payments-service:payment_authorized",
+        "option": "break all consumers",
+    }])
+
+    assert result == {"error": "unsupported option for decision: event-compatibility:payments-service:payment_authorized"}
+    persisted = change_plans.get_plan(conn, int(plan["plan_id"].removeprefix("cp_")))
+    assert persisted["status"] == "needs_decision"
+    assert json.loads(persisted["selected_decisions_json"]) == []
+
+
 def test_plan_change_persists_an_insufficient_evidence_plan_without_a_surface_run(tmp_path):
     conn = open_db(tmp_path / "empty.db")
 

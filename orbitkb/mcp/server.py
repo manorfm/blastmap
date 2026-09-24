@@ -368,6 +368,17 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.plan_change(conn, resolved_backend, task, hint_services, repository, token_budget)
 
     @mcp.tool()
+    def refine_change_plan(plan_id: str, decisions: list[dict]) -> dict:
+        """Resolve every pending plan decision without rerunning retrieval or an LLM.
+
+        decisions must select exactly one declared option for each pending decision.
+        Finalized decisions are immutable: retrying the same selection is safe, while
+        changing one requires a new plan so its impact can be evaluated explicitly.
+        """
+        with closing(_conn()) as conn:
+            return queries.refine_change_plan(conn, plan_id, decisions)
+
+    @mcp.tool()
     def record_change_context_feedback(
         run_id: int,
         outcome: str,

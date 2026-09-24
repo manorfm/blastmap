@@ -83,3 +83,9 @@ async def test_plan_change_is_reachable_over_stdio(tmp_path: Path):
             assert result["surface"] == {"primary": [], "secondary": [], "contracts_at_risk": []}
             assert result["decision_points"] == []
             assert result["change_units"] == []
+
+            refined = content_json(await session.call_tool("refine_change_plan", {
+                "plan_id": result["plan_id"], "decisions": [],
+            }))
+            assert refined["status"] == "insufficient_evidence"
+            assert refined["selected_decisions"] == []

@@ -34,3 +34,11 @@ def update_measurements(conn: sqlite3.Connection, plan_id: int, estimated_tokens
 
 def get_plan(conn: sqlite3.Connection, plan_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM change_plan_runs WHERE id = ?", (plan_id,)).fetchone()
+
+
+def finalize_decisions(conn: sqlite3.Connection, plan_id: int, selections: list[dict]) -> None:
+    conn.execute(
+        "UPDATE change_plan_runs SET status = 'ready', selected_decisions_json = ? WHERE id = ?",
+        (json.dumps(selections, sort_keys=True), plan_id),
+    )
+    conn.commit()
