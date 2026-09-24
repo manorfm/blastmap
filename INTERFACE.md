@@ -89,6 +89,9 @@ Java/Kotlin `System.getProperty` reads. It also returns a single literal Spring
 or a Kotlin primary-constructor parameter. A sensitive-looking key is labeled, but
 its value is never indexed or returned. SpEL, composed or multiple placeholders,
 dynamic keys, `.env` files and runtime/config-server resolution remain unknown.
+A literal Spring `@ConfigurationProperties` prefix also yields canonical property
+keys for direct Java fields and Kotlin primary-constructor parameters; dynamic prefixes
+and other binding styles remain unknown.
 
 ## Change plan
 

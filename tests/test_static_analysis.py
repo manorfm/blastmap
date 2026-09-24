@@ -1989,6 +1989,46 @@ def test_static_analysis_extracts_literal_spring_value_property_bindings(tmp_pat
     }
 
 
+def test_static_analysis_extracts_literal_spring_configuration_properties_bindings(tmp_path: Path):
+    (tmp_path / "PaymentProperties.java").write_text(
+        '''@ConfigurationProperties(prefix = "payments")
+class PaymentProperties {
+  private String baseUrl;
+  private int retryCount;
+  private String apiToken;
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "OrderProperties.kt").write_text(
+        '''@ConfigurationProperties("orders")
+class OrderProperties(
+  val topicName: String,
+  val maxRetries: Int,
+)
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "DynamicProperties.java").write_text(
+        '''@ConfigurationProperties(prefix = PROPERTY_PREFIX)
+class DynamicProperties {
+  private String ignored;
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert {(binding.source, binding.key, binding.kind, binding.sensitive) for binding in result.configuration_bindings} == {
+        ("PaymentProperties.baseUrl", "payments.base-url", "property", False),
+        ("PaymentProperties.retryCount", "payments.retry-count", "property", False),
+        ("PaymentProperties.apiToken", "payments.api-token", "property", True),
+        ("OrderProperties.topicName", "orders.topic-name", "property", False),
+        ("OrderProperties.maxRetries", "orders.max-retries", "property", False),
+    }
+
+
 def test_static_analysis_ignores_go_environment_like_calls_without_os_import(tmp_path: Path):
     (tmp_path / "config.go").write_text(
         '''package config

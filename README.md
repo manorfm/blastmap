@@ -208,7 +208,10 @@ keys and a single literal Spring `@Value("${key}")` placeholder on a Java field 
 constructor parameter, or Kotlin primary-constructor parameter. It returns only key
 name, kind, sensitivity indicator and file/line evidence: values, `.env` files,
 SpEL, composed or multiple Spring placeholders, dynamic key names and runtime
-resolution are never indexed or returned.
+resolution are never indexed or returned. A literal Spring
+`@ConfigurationProperties` prefix also yields canonical keys for direct Java fields
+and Kotlin primary-constructor parameters; dynamic prefixes and other binding styles
+remain unknown.
 
 Explicit Spring mappings for known timeout exception types retain their literal HTTP
 status, including 500, 503 and 504, so agents can distinguish an internal-error

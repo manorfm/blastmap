@@ -738,23 +738,29 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
             class_name = _text(class_name_node, source) if class_name_node else path.stem
             implements = _kotlin_supertypes(_text(class_node, source))
             annotations = _class_annotations(class_node, source)
+            configuration_prefix = _spring_configuration_properties_prefix(annotations)
             route_prefix = _spring_route_prefix(annotations)
             qualifiers = _qualifiers(annotations)
             primary = "@Primary" in annotations
             publishers = _spring_amqp_publishers(_text(class_node, source))
             kafka_publishers = _spring_kafka_publishers(_text(class_node, source))
             for parameter in (node for node in _walk(class_node) if node.type == "class_parameter"):
+                parameter_text = _text(parameter, source)
+                name_match = re.search(r"(?:val|var)\s+(\w+)", parameter_text)
+                evidence = _evidence(path, root, parameter)
+                if binding := _configuration_properties_binding(
+                    configuration_prefix, class_name, name_match.group(1) if name_match else None, evidence,
+                ):
+                    result.configuration_bindings.append(binding)
                 types = [node for node in _walk(parameter) if node.type == "user_type"]
                 if types:
-                    name_match = re.search(r"(?:val|var)\s+(\w+)", _text(parameter, source))
                     injection_symbol = f"{class_name}.{name_match.group(1)}" if name_match else class_name
                     contract = _text(types[-1], source)
-                    evidence = _evidence(path, root, parameter)
                     result.edges.append(FlowEdge(injection_symbol, contract, "injects", evidence))
                     result.injections.append(Injection(injection_symbol, contract, _first_qualifier(_text(parameter, source)), evidence))
                     if binding := _spring_value_property_binding(
                         class_name, name_match.group(1) if name_match else None,
-                        _text(parameter, source), evidence,
+                        parameter_text, evidence,
                     ):
                         result.configuration_bindings.append(binding)
             persistence_receivers = _spring_persistence_receivers(result.injections, class_name)
@@ -829,6 +835,7 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
             class_name = _text(class_name_node, source) if class_name_node else path.stem
             implements = _java_interfaces(_text(class_node, source))
             annotations = _class_annotations(class_node, source)
+            configuration_prefix = _spring_configuration_properties_prefix(annotations)
             route_prefix = _spring_route_prefix(annotations)
             qualifiers = _qualifiers(annotations)
             primary = "@Primary" in annotations
@@ -843,6 +850,10 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                     evidence = _evidence(path, root, field)
                     if binding := _spring_value_property_binding(
                         class_name, variable_name, _text(field, source), evidence,
+                    ):
+                        result.configuration_bindings.append(binding)
+                    if binding := _configuration_properties_binding(
+                        configuration_prefix, class_name, variable_name, evidence,
                     ):
                         result.configuration_bindings.append(binding)
                 if types and names:
@@ -2910,6 +2921,10 @@ _SPRING_VALUE_PROPERTY = re.compile(
     r'@Value\s*\(\s*(?:value\s*=\s*)?"\$\{'
     r'(?P<key>[A-Za-z_][A-Za-z0-9_.-]{0,127})(?::[^{}"]*)?\}"\s*\)',
 )
+_SPRING_CONFIGURATION_PROPERTIES = re.compile(
+    r'@ConfigurationProperties\s*\(\s*(?:(?:prefix|value)\s*=\s*)?'
+    r'"(?P<prefix>[A-Za-z_][A-Za-z0-9_.-]{0,127})"\s*\)',
+)
 
 
 @dataclass(frozen=True)
@@ -2939,6 +2954,32 @@ def _spring_value_property_binding(
         sensitive=_SENSITIVE_CONFIGURATION_KEY.search(key) is not None,
         evidence=evidence,
     )
+
+
+def _spring_configuration_properties_prefix(annotations: str) -> str | None:
+    """Return one explicit Spring configuration-properties prefix, if present."""
+    match = _SPRING_CONFIGURATION_PROPERTIES.search(annotations)
+    return match.group("prefix") if match else None
+
+
+def _configuration_properties_binding(
+    prefix: str | None, owner: str, member: str | None, evidence: Evidence,
+) -> ConfigurationBinding | None:
+    """Build the canonical property key for one direct configuration member."""
+    if prefix is None or member is None:
+        return None
+    key = f"{prefix}.{_canonical_spring_property_segment(member)}"
+    return ConfigurationBinding(
+        source=f"{owner}.{member}",
+        key=key,
+        kind="property",
+        sensitive=_SENSITIVE_CONFIGURATION_KEY.search(key) is not None,
+        evidence=evidence,
+    )
+
+
+def _canonical_spring_property_segment(member: str) -> str:
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", member).replace("_", "-").lower()
 
 
 def _literal_configuration_bindings(symbols: list[Symbol], root: Path) -> list[ConfigurationBinding]:
