@@ -3,11 +3,13 @@ from pathlib import Path
 from orbitkb.iac.kubernetes import (
     is_helm_template,
     parse_kubernetes_configuration_bindings_file,
+    parse_kubernetes_configuration_source_imports_file,
     parse_kubernetes_configuration_sources_file,
 )
 from orbitkb.iac.models import (
     KubernetesConfigurationBinding,
     KubernetesConfigurationSource,
+    KubernetesConfigurationSourceImport,
 )
 
 
@@ -85,6 +87,40 @@ def test_kubernetes_parser_extracts_literal_deployment_environment_references(tm
             environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="orders-config",
             source_key="orders-topic", workload_kind="Deployment", workload_name="orders", container_name="api",
             file_path=str(manifest), start_line=17, end_line=22,
+        ),
+    ]
+
+
+def test_kubernetes_parser_extracts_env_from_sources_without_inventing_keys(tmp_path: Path):
+    manifest = tmp_path / "deployment.yaml"
+    manifest.write_text(
+        "apiVersion: apps/v1\n"
+        "kind: Deployment\n"
+        "metadata:\n"
+        "  name: orders\n"
+        "spec:\n"
+        "  template:\n"
+        "    spec:\n"
+        "      containers:\n"
+        "        - name: api\n"
+        "          envFrom:\n"
+        "            - configMapRef:\n"
+        "                name: shared-defaults\n"
+        "              prefix: ORDERS_\n"
+        "            - secretRef:\n"
+        "                name: orders-secrets\n"
+    )
+
+    assert parse_kubernetes_configuration_source_imports_file(manifest) == [
+        KubernetesConfigurationSourceImport(
+            source_kind="config_map", source_name="shared-defaults", prefix="ORDERS_",
+            workload_kind="Deployment", workload_name="orders", container_name="api",
+            file_path=str(manifest), start_line=11, end_line=14,
+        ),
+        KubernetesConfigurationSourceImport(
+            source_kind="secret", source_name="orders-secrets", prefix=None,
+            workload_kind="Deployment", workload_name="orders", container_name="api",
+            file_path=str(manifest), start_line=14, end_line=16,
         ),
     ]
 

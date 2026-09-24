@@ -237,7 +237,9 @@ absence is unknown, not evidence that deployment configuration is missing.
 `describe_runtime_configuration` lists literal `env` references in indexed plain
 Kubernetes workload manifests. It identifies the environment variable, ConfigMap or
 Secret name/key, workload/container and source evidence, without exposing values.
-`envFrom`, dynamic names and unrendered Helm templates remain unknown.
+Literal `envFrom` imports are listed separately with source, optional prefix, workload
+and evidence, but their individual environment keys remain `unknown`; dynamic names
+and unrendered Helm templates remain unknown.
 When exactly one local source declaration exists and it does not list a referenced
 key, the response marks that source-proven mismatch and returns its declaration
 evidence. Sources absent from the indexed repository remain unknown.

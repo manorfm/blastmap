@@ -18,6 +18,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from orbitkb.iac.models import (
     KubernetesConfigurationBinding,
     KubernetesConfigurationSource,
+    KubernetesConfigurationSourceImport,
 )
 
 _TEMPLATE_MARKER = "{{"
@@ -50,12 +51,26 @@ def parse_kubernetes_configuration_bindings_file(path: Path) -> list[KubernetesC
     Parsing YAML nodes retains evidence locations without relying on text matching.
     Only a fully literal variable name, resource name and key are retained.
     """
-    text = path.read_text()
+    bindings, _imports = parse_kubernetes_configuration_references_file(path)
+    return bindings
+
+
+def parse_kubernetes_configuration_source_imports_file(path: Path) -> list[KubernetesConfigurationSourceImport]:
+    """Read literal ``envFrom`` sources without inferring their imported keys."""
+    _bindings, imports = parse_kubernetes_configuration_references_file(path)
+    return imports
+
+
+def parse_kubernetes_configuration_references_file(
+    path: Path,
+) -> tuple[list[KubernetesConfigurationBinding], list[KubernetesConfigurationSourceImport]]:
+    """Parse literal ``env`` and ``envFrom`` references in one YAML composition."""
     try:
-        documents = list(yaml.compose_all(text))
+        documents = list(yaml.compose_all(path.read_text()))
     except yaml.YAMLError:
-        return []
+        return [], []
     bindings: list[KubernetesConfigurationBinding] = []
+    imports: list[KubernetesConfigurationSourceImport] = []
     for document in documents:
         if not isinstance(document, MappingNode):
             continue
@@ -76,14 +91,23 @@ def parse_kubernetes_configuration_bindings_file(path: Path) -> list[KubernetesC
                 if not isinstance(container, MappingNode):
                     continue
                 container_name = _scalar(_mapping_value(container, "name"))
-                environment = _mapping_value(container, "env")
-                if container_name is None or not isinstance(environment, SequenceNode):
+                if container_name is None:
                     continue
-                for item in environment.value:
-                    binding = _environment_binding(item, workload_kind, workload_name, container_name, path)
-                    if binding is not None:
-                        bindings.append(binding)
-    return bindings
+                environment = _mapping_value(container, "env")
+                if isinstance(environment, SequenceNode):
+                    for item in environment.value:
+                        binding = _environment_binding(item, workload_kind, workload_name, container_name, path)
+                        if binding is not None:
+                            bindings.append(binding)
+                source_imports = _mapping_value(container, "envFrom")
+                if isinstance(source_imports, SequenceNode):
+                    for item in source_imports.value:
+                        source_import = _environment_source_import(
+                            item, workload_kind, workload_name, container_name, path,
+                        )
+                        if source_import is not None:
+                            imports.append(source_import)
+    return bindings, imports
 
 
 def parse_kubernetes_configuration_sources_file(path: Path) -> list[KubernetesConfigurationSource]:
@@ -139,6 +163,28 @@ def _environment_binding(
             source_key=source_key, workload_kind=workload_kind, workload_name=workload_name,
             container_name=container_name, file_path=str(path), start_line=item.start_mark.line + 1,
             end_line=item.end_mark.line + 1,
+        )
+    return None
+
+
+def _environment_source_import(
+    item: Node, workload_kind: str, workload_name: str, container_name: str, path: Path,
+) -> KubernetesConfigurationSourceImport | None:
+    if not isinstance(item, MappingNode):
+        return None
+    prefix_node = _mapping_value(item, "prefix")
+    prefix = _scalar(prefix_node) if prefix_node is not None else None
+    for source_kind, reference_name in (("config_map", "configMapRef"), ("secret", "secretRef")):
+        reference = _mapping_value(item, reference_name)
+        if not isinstance(reference, MappingNode):
+            continue
+        source_name = _scalar(_mapping_value(reference, "name"))
+        if source_name is None:
+            return None
+        return KubernetesConfigurationSourceImport(
+            source_kind=source_kind, source_name=source_name, prefix=prefix,
+            workload_kind=workload_kind, workload_name=workload_name, container_name=container_name,
+            file_path=str(path), start_line=item.start_mark.line + 1, end_line=item.end_mark.line + 1,
         )
     return None
 

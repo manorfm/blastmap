@@ -714,6 +714,10 @@ def describe_runtime_configuration(
         kubernetes_configuration_repo.list_kubernetes_configuration_bindings_for_service(conn, row["id"]),
         limit, offset,
     )
+    source_imports, source_import_page = _paginate(
+        kubernetes_configuration_repo.list_kubernetes_configuration_source_imports_for_service(conn, row["id"]),
+        limit, offset,
+    )
     mismatches_by_reference = {
         (
             mismatch["environment_key"], mismatch["source_kind"], mismatch["source_name"], mismatch["source_key"],
@@ -754,11 +758,19 @@ def describe_runtime_configuration(
         ) in unknowns_by_reference:
             response_binding["declaration"] = {"status": "not_declared_locally"}
         response_bindings.append(response_binding)
-    return {
+    response = {
         "service": row["name"], "repository": row["repository_name"],
         "bindings": response_bindings,
         **page,
     }
+    if source_imports:
+        response["source_imports"] = [_runtime_configuration_source_import(item) for item in source_imports]
+        response["source_import_total"] = source_import_page["total"]
+        response["source_import_truncated"] = source_import_page["truncated"]
+        response["unknowns"] = [
+            "envFrom imports source keys without explicit per-key references; exact environment keys are not indexed.",
+        ]
+    return response
 
 
 def _runtime_configuration_reference(item: sqlite3.Row) -> dict:
@@ -773,6 +785,21 @@ def _runtime_configuration_reference(item: sqlite3.Row) -> dict:
             "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],
         },
     }
+
+
+def _runtime_configuration_source_import(item: sqlite3.Row) -> dict:
+    """Shape an ``envFrom`` source while preserving its intentionally unknown keys."""
+    response = {
+        "source": {"kind": item["source_kind"], "name": item["source_name"]},
+        "workload": {
+            "kind": item["workload_kind"], "name": item["workload_name"], "container": item["container_name"],
+        },
+        "evidence": {"file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"]},
+        "key_coverage": "unknown",
+    }
+    if item["prefix"] is not None:
+        response["prefix"] = item["prefix"]
+    return response
 
 
 def describe_feature_flags(

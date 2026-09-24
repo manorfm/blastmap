@@ -706,6 +706,9 @@ def index_path(
     kubernetes_configuration_repo.replace_kubernetes_configuration_bindings(
         conn, repository_id, iac_facts.configuration_bindings,
     )
+    kubernetes_configuration_repo.replace_kubernetes_configuration_source_imports(
+        conn, repository_id, iac_facts.configuration_source_imports,
+    )
     kubernetes_configuration_repo.replace_kubernetes_configuration_key_mismatches(
         conn, repository_id, iac_facts.configuration_key_mismatches,
     )

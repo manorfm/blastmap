@@ -53,6 +53,27 @@ class KubernetesConfigurationBinding:
 
 
 @dataclass(frozen=True)
+class KubernetesConfigurationSourceImport:
+    """A literal ``envFrom`` source whose imported keys remain unknown.
+
+    Kubernetes expands the source keys at runtime, optionally adding ``prefix``.
+    This fact deliberately stores no key names or values and must not be joined to
+    code environment-key reads.
+    """
+
+    source_kind: str
+    source_name: str
+    prefix: str | None
+    workload_kind: str
+    workload_name: str
+    container_name: str
+    file_path: str
+    start_line: int
+    end_line: int
+    matched_service_name: str | None = None
+
+
+@dataclass(frozen=True)
 class KubernetesConfigurationSource:
     """A plain-manifest ConfigMap or Secret declaration without its values."""
 

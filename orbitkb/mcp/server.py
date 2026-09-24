@@ -200,9 +200,10 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
     ) -> dict:
         """List literal Kubernetes workload environment references to ConfigMaps
-        and Secrets. Values, ``envFrom``, dynamic names and unrendered Helm templates
-        are excluded. Capped at `limit` bindings (default 50) starting at `offset`;
-        pass repository when service names duplicate."""
+        and Secrets, plus literal ``envFrom`` sources with unknown per-key coverage.
+        Values, dynamic names and unrendered Helm templates are excluded. Both lists
+        are capped at `limit` (default 50) starting at `offset`; pass repository when
+        service names duplicate."""
         with closing(_conn()) as conn:
             return queries.describe_runtime_configuration(conn, service, limit, offset, repository)
 
