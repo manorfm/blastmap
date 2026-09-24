@@ -1,4 +1,6 @@
 """Contract tests for the bounded, evidence-first change planning entrypoint."""
+import json
+
 from jsonschema import validate
 
 from orbitkb.db.connection import open_db
@@ -46,6 +48,34 @@ def test_plan_change_rejects_an_invalid_token_budget_without_calling_the_backend
         "error": "token_budget must be between 1 and 2200 (got 0)",
     }
     assert backend.calls == 0
+
+
+def test_plan_change_requires_a_contract_compatibility_decision_for_affected_event_consumers(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "event-decision.db")
+    backend = FakeBackend({
+        "primary": [{"service": "payments-service", "reason": "owns payment authorization", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    })
+
+    result = queries.plan_change(conn, backend, "Add a payment method")
+
+    assert result["status"] == "needs_decision"
+    assert result["decision_points"] == [{
+        "id": "event-compatibility:payments-service:payment_authorized",
+        "question": "Will the payment_authorized event payload or compatibility change?",
+        "why_blocking": "notification-service consumes this event; compatibility determines whether it must change.",
+        "options": [
+            "preserve backward compatibility",
+            "version the event contract and update consumers",
+        ],
+        "recommended_default": "preserve backward compatibility unless a versioned rollout is approved",
+        "owner": "payments-service",
+        "evidence": [],
+    }]
+    validate(result, load_schema("plan_change"))
+
+    plan = change_plans.get_plan(conn, int(result["plan_id"].removeprefix("cp_")))
+    assert json.loads(plan["decision_points_json"]) == result["decision_points"]
 
 
 def test_plan_change_persists_an_insufficient_evidence_plan_without_a_surface_run(tmp_path):

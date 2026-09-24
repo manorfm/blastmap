@@ -26,7 +26,23 @@
         "contracts_at_risk": {"type": "array", "items": {"type": "object"}}
       }
     },
-    "decision_points": {"type": "array", "items": {"type": "object"}},
+    "decision_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "question", "why_blocking", "options", "recommended_default", "owner", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "question": {"type": "string"},
+          "why_blocking": {"type": "string"},
+          "options": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+          "recommended_default": {"type": "string"},
+          "owner": {"type": "string"},
+          "evidence": {"type": "array", "items": {"type": "object"}}
+        }
+      }
+    },
     "change_units": {"type": "array", "items": {"type": "object"}},
     "unknowns": {"type": "array", "items": {"type": "object"}},
     "budget": {

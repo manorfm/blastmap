@@ -129,8 +129,8 @@ does not call an LLM for retrieval.
 
 `plan_change` is the stable entrypoint for the planning workflow. Its initial version
 returns the evidence-backed affected surface, explicit unknowns and a response budget;
-it intentionally emits no decision points or code-level change units until those can
-be derived from indexed symbols rather than guessed from service-level matches. Each
+it emits a blocking decision only when an indexed primary event producer has known
+consumers, and never guesses code-level change units from service-level matches. Each
 response has a durable plan ID with audit metadata; it links to an existing surface
 run when available and does not duplicate the task text.
 

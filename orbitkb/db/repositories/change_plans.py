@@ -1,6 +1,7 @@
 """Audit metadata for durable change-plan identifiers."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from ._util import now
@@ -11,12 +12,13 @@ def record_plan(
     change_surface_run_id: int | None,
     status: str,
     requested_tokens: int,
+    decision_points: list[dict],
 ) -> int:
     cur = conn.execute(
         """INSERT INTO change_plan_runs
-           (change_surface_run_id, status, requested_tokens, estimated_tokens, truncated, created_at)
-           VALUES (?, ?, ?, 0, 0, ?)""",
-        (change_surface_run_id, status, requested_tokens, now()),
+           (change_surface_run_id, status, requested_tokens, estimated_tokens, truncated, decision_points_json, created_at)
+           VALUES (?, ?, ?, 0, 0, ?, ?)""",
+        (change_surface_run_id, status, requested_tokens, json.dumps(decision_points, sort_keys=True), now()),
     )
     conn.commit()
     return cur.lastrowid

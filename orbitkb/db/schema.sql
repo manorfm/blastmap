@@ -416,6 +416,7 @@ CREATE TABLE IF NOT EXISTS change_plan_runs (
     requested_tokens      INTEGER NOT NULL CHECK (requested_tokens > 0),
     estimated_tokens      INTEGER NOT NULL CHECK (estimated_tokens >= 0),
     truncated             INTEGER NOT NULL CHECK (truncated IN (0, 1)),
+    decision_points_json  TEXT NOT NULL DEFAULT '[]',
     created_at            TEXT NOT NULL
 );
 

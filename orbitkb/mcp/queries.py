@@ -29,6 +29,7 @@ from orbitkb.generation import change_surface
 from orbitkb.generation.architecture import diff_architecture_runs
 from orbitkb.generation.backend_base import LLMBackend
 from orbitkb.generation.change_context import MAX_CONTEXT_SERVICES, build_change_context
+from orbitkb.generation.change_plan import derive_decision_points
 from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.provenance import infer_provenance
 from orbitkb.generation.verification import (
@@ -778,9 +779,12 @@ def plan_change(
     if "error" in change_surface_result:
         return change_surface_result
     primary = change_surface_result["primary"]
-    status = "ready" if primary else "insufficient_evidence"
+    decision_points = derive_decision_points(
+        change_surface_result["contracts_at_risk"], {finding["service"] for finding in primary},
+    )
+    status = "insufficient_evidence" if not primary else "needs_decision" if decision_points else "ready"
     plan_run_id = change_plans_repo.record_plan(
-        conn, change_surface_result.get("run_id"), status, token_budget,
+        conn, change_surface_result.get("run_id"), status, token_budget, decision_points,
     )
     response = {
         "plan_id": f"cp_{plan_run_id}",
@@ -790,7 +794,7 @@ def plan_change(
             "secondary": change_surface_result["secondary"],
             "contracts_at_risk": change_surface_result["contracts_at_risk"],
         },
-        "decision_points": [],
+        "decision_points": decision_points,
         "change_units": [],
         "unknowns": change_surface_result["unknowns"],
         "budget": {"requested_tokens": token_budget, "estimated_tokens": 0, "truncated": False},
