@@ -84,6 +84,11 @@ with zero cost for that call. Any candidate-context change produces a different 
 and requires a new synthesis. Flow, contracts, persistence, freshness, unknowns and
 recommended next queries are still derived from the current KB on every response.
 
+When the optional local semantic embedding backend is available, OrbitKB blends its
+bounded semantic candidates with keyword/graph candidates before synthesis. It does
+not use an LLM for this step, and the response still exposes at most the configured
+candidate budget; without that optional backend, retrieval remains keyword/graph only.
+
 ## Context-budget calibration
 
 Every `get_change_context` response has `telemetry: {recorded, run_id?}`. Its

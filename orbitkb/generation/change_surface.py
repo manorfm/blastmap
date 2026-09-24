@@ -33,7 +33,7 @@ from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, loa
 from orbitkb.generation.next_queries import NextQueryRecommender
 from orbitkb.generation.retrieval import (
     CandidateRetrieval,
-    FallbackRetrieval,
+    HybridRetrieval,
     KeywordGraphRetrieval,
     SemanticRetrieval,
 )
@@ -459,14 +459,14 @@ def _derive_unknowns_from_unmapped(unmapped_internal_hint: list[dict]) -> list[d
 
 
 def _default_retrieval(embedding_backend: EmbeddingBackend | None) -> CandidateRetrieval:
-    """Keyword retrieval is always free and stays the primary strategy; semantic
-    retrieval (local embeddings, see generation/embeddings.py) is only added as a
-    FallbackRetrieval secondary when the optional `semantic` extra is installed —
-    a query whose vocabulary already matches something indexed never pays the extra
-    encode cost."""
+    """Blend keyword and local semantic candidates when the optional extra exists.
+
+    The encoder is local rather than an LLM call. Combining both lists avoids letting
+    a broad lexical graph expansion hide an otherwise relevant semantic candidate.
+    """
     if embedding_backend is None:
         return KeywordGraphRetrieval()
-    return FallbackRetrieval(KeywordGraphRetrieval(), SemanticRetrieval(embedding_backend))
+    return HybridRetrieval(KeywordGraphRetrieval(), SemanticRetrieval(embedding_backend))
 
 
 def _describe_outcome(conn: sqlite3.Connection, run_id: int) -> str:

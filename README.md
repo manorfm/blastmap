@@ -121,6 +121,10 @@ and code location are included. It does not reread the source tree while answeri
 Repeated `find_change_surface` requests with the same backend and unchanged candidate
 context reuse their prior structured synthesis at zero model-call cost; current graph,
 freshness and contract facts are still recomputed for each response.
+With the optional local semantic backend installed, semantic and keyword/graph
+candidates are blended before that synthesis, so a broad lexical match does not hide a
+relevant meaning-based candidate. This stays within the normal candidate budget and
+does not call an LLM for retrieval.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

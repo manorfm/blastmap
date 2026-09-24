@@ -120,9 +120,8 @@ class KeywordGraphRetrieval:
 
 class SemanticRetrieval:
     """Cosine-ranks the task against every indexed service's local embedding (see
-    generation/embeddings.py, db/repositories/embeddings.py). Meant to be used only
-    as FallbackRetrieval's secondary strategy, since — unlike KeywordGraphRetrieval —
-    it costs a local encode instead of being free SQL.
+    generation/embeddings.py, db/repositories/embeddings.py). It can complement
+    KeywordGraphRetrieval without a model call, but does cost one local encode.
 
     SIMILARITY_FLOOR is a starting constant, not a trained value — same honesty as
     generation.architecture.FAN_THRESHOLD.
@@ -159,6 +158,39 @@ class SemanticRetrieval:
 
         combined = hints + [name for name in ranked if name not in hints]
         return combined[:max_candidates]
+
+
+class HybridRetrieval:
+    """Blend bounded lexical and semantic candidate lists without losing either.
+
+    Each strategy sees the same cap, then their candidates are interleaved. This
+    preserves progressive-disclosure limits while keeping a semantic match visible
+    when lexical graph expansion finds many related services.
+    """
+
+    def __init__(self, lexical: CandidateRetrieval, semantic: CandidateRetrieval) -> None:
+        self._lexical = lexical
+        self._semantic = semantic
+
+    def candidates(
+        self,
+        conn: sqlite3.Connection,
+        task: str,
+        hint_services: list[str] | None,
+        max_candidates: int,
+        repository_id: int | None = None,
+    ) -> list[str]:
+        lexical = self._lexical.candidates(conn, task, hint_services, max_candidates, repository_id)
+        semantic = self._semantic.candidates(conn, task, hint_services, max_candidates, repository_id)
+        combined: list[str] = []
+        for index in range(max(len(lexical), len(semantic))):
+            for candidates in (lexical, semantic):
+                if index >= len(candidates) or candidates[index] in combined:
+                    continue
+                combined.append(candidates[index])
+                if len(combined) == max_candidates:
+                    return combined
+        return combined
 
 
 class FallbackRetrieval:

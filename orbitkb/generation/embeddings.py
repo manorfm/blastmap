@@ -1,8 +1,7 @@
 """Local, zero-marginal-cost semantic embeddings: turns text into a vector so
-find_change_surface can fall back to meaning-based candidate retrieval when FTS5
-keyword matching finds nothing (see generation/retrieval.SemanticRetrieval and
-db/repositories/embeddings.py). No paid API: FastEmbedBackend runs a small ONNX
-model entirely on CPU via the optional `fastembed` package (`pip install
+find_change_surface can combine meaning-based candidates with FTS5 keyword matches
+(see generation/retrieval.SemanticRetrieval and db/repositories/embeddings.py). No
+paid API: FastEmbedBackend runs a small ONNX model entirely on CPU via the optional `fastembed` package (`pip install
 orbitkb[semantic]`) — its weights are downloaded once from Hugging Face on first
 use and cached locally after that; every later call is fully offline.
 

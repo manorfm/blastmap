@@ -5,12 +5,17 @@ from pathlib import Path
 
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import embeddings as embeddings_repo
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
-from orbitkb.db.repositories import embeddings as embeddings_repo
-from orbitkb.generation.retrieval import FallbackRetrieval, KeywordGraphRetrieval, SemanticRetrieval
+from orbitkb.generation.retrieval import (
+    FallbackRetrieval,
+    HybridRetrieval,
+    KeywordGraphRetrieval,
+    SemanticRetrieval,
+)
 
 
 def _seed_db(db_path: Path):
@@ -175,3 +180,17 @@ def test_fallback_retrieval_uses_semantic_when_keyword_retrieval_finds_nothing(t
 
     assert backend.calls == 1
     assert candidates == ["notification-service"]
+
+
+def test_hybrid_retrieval_keeps_a_semantic_candidate_when_keywords_also_match(tmp_path: Path):
+    conn = _seed_db(tmp_path / "hybrid.db")
+    _seed_embeddings(conn, {"notification-service": [1.0, 0.0]})
+    backend = FakeEmbeddingBackend({"checkout payment flow": [1.0, 0.0]})
+    retrieval = HybridRetrieval(KeywordGraphRetrieval(), SemanticRetrieval(backend))
+
+    candidates = retrieval.candidates(conn, "checkout payment flow", hint_services=None, max_candidates=4)
+
+    assert backend.calls == 1
+    assert "checkout-service" in candidates
+    assert "notification-service" in candidates
+    assert len(candidates) <= 4
