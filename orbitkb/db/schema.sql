@@ -237,6 +237,30 @@ CREATE TABLE IF NOT EXISTS cloud_iac_resources (
 CREATE INDEX IF NOT EXISTS idx_cloud_iac_resources_repository ON cloud_iac_resources(repository_id);
 CREATE INDEX IF NOT EXISTS idx_cloud_iac_resources_service ON cloud_iac_resources(service_id);
 
+-- Literal Kubernetes Pod-template environment references. Values are never
+-- indexed: a row only states that a workload variable comes from a ConfigMap
+-- or Secret key declared in the manifest.
+CREATE TABLE IF NOT EXISTS kubernetes_configuration_bindings (
+    id              INTEGER PRIMARY KEY,
+    repository_id   INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    service_id      INTEGER REFERENCES services(id) ON DELETE SET NULL,
+    environment_key TEXT NOT NULL,
+    source_kind     TEXT NOT NULL CHECK (source_kind IN ('config_map', 'secret')),
+    source_name     TEXT NOT NULL,
+    source_key      TEXT NOT NULL,
+    workload_kind   TEXT NOT NULL,
+    workload_name   TEXT NOT NULL,
+    container_name  TEXT NOT NULL,
+    file_path       TEXT NOT NULL,
+    start_line      INTEGER NOT NULL,
+    end_line        INTEGER NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_bindings_repository
+    ON kubernetes_configuration_bindings(repository_id);
+CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_bindings_service
+    ON kubernetes_configuration_bindings(service_id);
+
 -- One row per class/controller/module cluster of endpoints within a service, synthesized
 -- from the already-generated `apis` summaries of the endpoints it groups (never raw code
 -- read again) — the layer between a single endpoint and the whole service. `file_path` is

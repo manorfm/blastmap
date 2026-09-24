@@ -29,3 +29,24 @@ class IacResource:
     # for presence-only attributes, str for value-matters ones. Empty when the
     # resource type has none tracked, never a guessed/default-filled value.
     attributes: dict[str, bool | str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class KubernetesConfigurationBinding:
+    """A literal workload environment variable backed by a Kubernetes resource.
+
+    This records only the reference declared in a Pod template. It never reads a
+    ConfigMap or Secret value and does not claim the resource exists at runtime.
+    """
+
+    environment_key: str
+    source_kind: str
+    source_name: str
+    source_key: str
+    workload_kind: str
+    workload_name: str
+    container_name: str
+    file_path: str
+    start_line: int
+    end_line: int
+    matched_service_name: str | None = None

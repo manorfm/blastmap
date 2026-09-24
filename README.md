@@ -110,6 +110,7 @@ Start broad, then narrow the request.
 | Understand a request path or its static error mapping | `list_entrypoints` | `describe_entrypoint` |
 | Inspect data or events | `describe_persistence`, `describe_messages` | `get_relationships` |
 | Inspect runtime configuration use | `describe_configuration` | `describe_entrypoint`, `list_security_findings` |
+| Inspect Kubernetes configuration sources | `describe_runtime_configuration` | `describe_configuration`, `describe_entrypoint` |
 | Inspect feature-flag reads | `describe_feature_flags` | `describe_entrypoint`, `list_security_findings` |
 | Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |
@@ -217,6 +218,11 @@ resolution are never indexed or returned. A literal Spring
 `@ConfigurationProperties` prefix also yields canonical keys for direct Java fields
 and Kotlin primary-constructor parameters; dynamic prefixes and other binding styles
 remain unknown.
+
+`describe_runtime_configuration` lists literal `env` references in indexed plain
+Kubernetes workload manifests. It identifies the environment variable, ConfigMap or
+Secret name/key, workload/container and source evidence, without exposing values.
+`envFrom`, dynamic names and unrendered Helm templates remain unknown.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and

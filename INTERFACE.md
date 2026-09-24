@@ -12,7 +12,7 @@ A service is identified by `(repository, name)`, not by its name alone. Every
 optional `repository` filter. Every service-scoped tool accepts optional
 `repository`: `describe_service`, `list_apis`, `describe_api`, `list_entrypoints`,
 `describe_entrypoint`, `describe_persistence`, `describe_messages`,
-`describe_configuration`, `describe_feature_flags`, `describe_cloud_dependencies`, `list_security_findings` and `get_relationships`. An unqualified duplicate returns
+`describe_configuration`, `describe_runtime_configuration`, `describe_feature_flags`, `describe_cloud_dependencies`, `list_security_findings` and `get_relationships`. An unqualified duplicate returns
 an ambiguity error with candidate repository names; agents must pass one of them.
 `trace_flow` independently accepts `from_repository` and `to_repository`.
 
@@ -70,7 +70,7 @@ treated as deletion.
    GraphQL mappings currently require a thrown `GraphQLError` explicitly imported from
    `graphql` with a literal `extensions.code`; generic throws, dynamic extensions and
    global formatters remain unknown.
-9. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_feature_flags`, `describe_messages`,
+9. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_runtime_configuration`, `describe_feature_flags`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.
 10. Call `list_security_findings(service)` before changing credentials,
@@ -92,6 +92,11 @@ dynamic keys, `.env` files and runtime/config-server resolution remain unknown.
 A literal Spring `@ConfigurationProperties` prefix also yields canonical property
 keys for direct Java fields and Kotlin primary-constructor parameters; dynamic prefixes
 and other binding styles remain unknown.
+
+`describe_runtime_configuration` returns literal `env` references from plain
+Kubernetes workload manifests, including the variable name, ConfigMap or Secret
+name/key, workload/container and file evidence. It never reads values; `envFrom`,
+dynamic names and unrendered Helm templates remain unknown.
 
 `describe_feature_flags` returns literal reads through a locally proven feature-flag
 SDK, currently LaunchDarkly's Node server SDK. It returns key, provider and source

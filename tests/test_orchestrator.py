@@ -12,6 +12,9 @@ from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import components as components_repo
 from orbitkb.db.repositories import embeddings as embeddings_repo
+from orbitkb.db.repositories import (
+    kubernetes_configuration as kubernetes_configuration_repo,
+)
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.discovery.registry import detector_for
@@ -103,6 +106,25 @@ def test_message_provider_is_persisted_from_the_llm_result(tmp_path: Path):
     orders = services_repo.get_service_by_name(conn, "orders-service")
     messages = messages_repo.list_messages(conn, orders["id"])
     assert messages[0]["provider"] == "kafka"
+
+
+def test_index_path_persists_kubernetes_runtime_configuration_bindings(tmp_path: Path):
+    root = tmp_path / "sample-project"
+    shutil.copytree(SAMPLE_ROOT, root)
+    (root / "orders-service" / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders\nspec:\n"
+        "  template:\n    spec:\n      containers:\n        - name: api\n          env:\n"
+        "            - name: ORDERS_TOPIC\n              valueFrom:\n                configMapKeyRef:\n"
+        "                  name: orders-config\n                  key: orders-topic\n"
+    )
+    conn = open_db(tmp_path / "test.db")
+
+    index_path(conn, root, FakeOrchestratorBackend())
+
+    orders = services_repo.get_service_by_name(conn, "orders-service")
+    bindings = kubernetes_configuration_repo.list_kubernetes_configuration_bindings_for_service(conn, orders["id"])
+    assert [(binding["environment_key"], binding["source_kind"], binding["source_name"], binding["source_key"])
+            for binding in bindings] == [("ORDERS_TOPIC", "config_map", "orders-config", "orders-topic")]
 
 
 def test_messaging_prompt_includes_provider_hints_and_config_evidence(tmp_path: Path):

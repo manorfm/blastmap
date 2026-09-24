@@ -18,6 +18,9 @@ from orbitkb.db.repositories import cloud_iac as cloud_iac_repo
 from orbitkb.db.repositories import components as components_repo
 from orbitkb.db.repositories import context_telemetry as context_telemetry_repo
 from orbitkb.db.repositories import flows as flows_repo
+from orbitkb.db.repositories import (
+    kubernetes_configuration as kubernetes_configuration_repo,
+)
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import repositories as repositories_repo
@@ -668,6 +671,43 @@ def describe_configuration(
                 "sensitive": bool(item["sensitive"]), "evidence": {
                     "file": item["file_path"], "start_line": item["start_line"],
                     "end_line": item["end_line"],
+                },
+            }
+            for item in bindings
+        ],
+        **page,
+    }
+
+
+def describe_runtime_configuration(
+    conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
+    repository: str | None = None,
+) -> dict:
+    """Return source-proven Kubernetes configuration references without values."""
+    error = _validate_pagination(limit, offset)
+    if error:
+        return {"error": error}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
+    bindings, page = _paginate(
+        kubernetes_configuration_repo.list_kubernetes_configuration_bindings_for_service(conn, row["id"]),
+        limit, offset,
+    )
+    return {
+        "service": row["name"], "repository": row["repository_name"],
+        "bindings": [
+            {
+                "environment_key": item["environment_key"],
+                "source": {
+                    "kind": item["source_kind"], "name": item["source_name"], "key": item["source_key"],
+                },
+                "workload": {
+                    "kind": item["workload_kind"], "name": item["workload_name"],
+                    "container": item["container_name"],
+                },
+                "evidence": {
+                    "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],
                 },
             }
             for item in bindings

@@ -195,6 +195,17 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.describe_configuration(conn, service, limit, offset, repository)
 
     @mcp.tool()
+    def describe_runtime_configuration(
+        service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
+    ) -> dict:
+        """List literal Kubernetes workload environment references to ConfigMaps
+        and Secrets. Values, ``envFrom``, dynamic names and unrendered Helm templates
+        are excluded. Capped at `limit` bindings (default 50) starting at `offset`;
+        pass repository when service names duplicate."""
+        with closing(_conn()) as conn:
+            return queries.describe_runtime_configuration(conn, service, limit, offset, repository)
+
+    @mcp.tool()
     def describe_feature_flags(
         service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
     ) -> dict:

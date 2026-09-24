@@ -15,6 +15,9 @@ from orbitkb.db.repositories import embeddings as embeddings_repo
 from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import index_runs as index_runs_repo
 from orbitkb.db.repositories import indexed_files as indexed_files_repo
+from orbitkb.db.repositories import (
+    kubernetes_configuration as kubernetes_configuration_repo,
+)
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import repositories as repositories_repo
@@ -36,7 +39,7 @@ from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.backend_base import LLMBackend, LLMUsage
 from orbitkb.generation.embeddings import EmbeddingBackend
 from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, load_schema
-from orbitkb.iac.scanner import scan_repository
+from orbitkb.iac.scanner import scan_repository_facts
 from orbitkb.security.findings import find_security_findings
 from orbitkb.security.redaction import redact_sensitive_values
 
@@ -698,7 +701,11 @@ def index_path(
     # (and therefore a real service_id to attribute a matched resource to) —
     # IaC commonly lives outside any single service's own root, so this can't
     # be folded into index_service's per-service pass.
-    cloud_iac_repo.replace_iac_resources(conn, repository_id, scan_repository(resolved_path, candidates))
+    iac_facts = scan_repository_facts(resolved_path, candidates)
+    cloud_iac_repo.replace_iac_resources(conn, repository_id, iac_facts.resources)
+    kubernetes_configuration_repo.replace_kubernetes_configuration_bindings(
+        conn, repository_id, iac_facts.configuration_bindings,
+    )
     # index_service's own recompute_architecture_view call (above, per service)
     # necessarily runs *before* this repository's IaC scan on a fresh index —
     # cloud_iac_resources findings computed there would be stale by exactly one

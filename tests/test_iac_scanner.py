@@ -2,7 +2,7 @@ from pathlib import Path
 
 from orbitkb.discovery.node_ts import NodeTsDetector
 from orbitkb.discovery.walker import ServiceCandidate
-from orbitkb.iac.scanner import scan_repository
+from orbitkb.iac.scanner import scan_repository, scan_repository_facts
 
 
 def _candidate(name: str, path: Path) -> ServiceCandidate:
@@ -61,6 +61,25 @@ def test_plain_kubernetes_manifest_yields_no_resources_and_is_not_mis_parsed(tmp
     )
 
     assert scan_repository(tmp_path, []) == []
+
+
+def test_kubernetes_environment_references_are_attributed_to_the_containing_service(tmp_path: Path):
+    orders_service = tmp_path / "orders-service"
+    orders_service.mkdir()
+    (orders_service / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders\nspec:\n"
+        "  template:\n    spec:\n      containers:\n        - name: api\n          env:\n"
+        "            - name: ORDERS_TOPIC\n              valueFrom:\n                configMapKeyRef:\n"
+        "                  name: orders-config\n                  key: orders-topic\n"
+    )
+
+    facts = scan_repository_facts(tmp_path, [_candidate("orders-service", orders_service)])
+
+    assert facts.resources == []
+    assert [(binding.environment_key, binding.source_kind, binding.source_name, binding.source_key,
+             binding.matched_service_name) for binding in facts.configuration_bindings] == [
+        ("ORDERS_TOPIC", "config_map", "orders-config", "orders-topic", "orders-service"),
+    ]
 
 
 def test_helm_template_is_skipped_not_mis_parsed(tmp_path: Path):
