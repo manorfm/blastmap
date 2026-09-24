@@ -15,7 +15,10 @@ from pathlib import Path
 import yaml
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
-from orbitkb.iac.models import KubernetesConfigurationBinding
+from orbitkb.iac.models import (
+    KubernetesConfigurationBinding,
+    KubernetesConfigurationSource,
+)
 
 _TEMPLATE_MARKER = "{{"
 _POD_TEMPLATE_PATHS = {
@@ -81,6 +84,37 @@ def parse_kubernetes_configuration_bindings_file(path: Path) -> list[KubernetesC
                     if binding is not None:
                         bindings.append(binding)
     return bindings
+
+
+def parse_kubernetes_configuration_sources_file(path: Path) -> list[KubernetesConfigurationSource]:
+    """Return declared ConfigMap/Secret key names without parsing any values."""
+    text = path.read_text()
+    try:
+        documents = list(yaml.compose_all(text))
+    except yaml.YAMLError:
+        return []
+    sources: list[KubernetesConfigurationSource] = []
+    for document in documents:
+        if not isinstance(document, MappingNode):
+            continue
+        resource_kind = _scalar(_mapping_value(document, "kind"))
+        source_kind = {"ConfigMap": "config_map", "Secret": "secret"}.get(resource_kind)
+        metadata = _mapping_value(document, "metadata")
+        source_name = _scalar(_mapping_value(metadata, "name")) if isinstance(metadata, MappingNode) else None
+        if source_kind is None or source_name is None:
+            continue
+        keys = sorted({
+            key
+            for section in ("data", "stringData", "binaryData")
+            if isinstance(values := _mapping_value(document, section), MappingNode)
+            for key_node, _value_node in values.value
+            if (key := _scalar(key_node)) is not None
+        })
+        sources.append(KubernetesConfigurationSource(
+            source_kind=source_kind, source_name=source_name, keys=tuple(keys), file_path=str(path),
+            start_line=document.start_mark.line + 1, end_line=document.end_mark.line + 1,
+        ))
+    return sources
 
 
 def _environment_binding(

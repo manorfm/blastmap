@@ -3,8 +3,12 @@ from pathlib import Path
 from orbitkb.iac.kubernetes import (
     is_helm_template,
     parse_kubernetes_configuration_bindings_file,
+    parse_kubernetes_configuration_sources_file,
 )
-from orbitkb.iac.models import KubernetesConfigurationBinding
+from orbitkb.iac.models import (
+    KubernetesConfigurationBinding,
+    KubernetesConfigurationSource,
+)
 
 
 def test_plain_manifest_is_not_a_helm_template(tmp_path: Path):
@@ -81,5 +85,25 @@ def test_kubernetes_parser_extracts_literal_deployment_environment_references(tm
             environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="orders-config",
             source_key="orders-topic", workload_kind="Deployment", workload_name="orders", container_name="api",
             file_path=str(manifest), start_line=17, end_line=22,
+        ),
+    ]
+
+
+def test_kubernetes_parser_extracts_config_map_and_secret_key_names_without_values(tmp_path: Path):
+    manifest = tmp_path / "configuration.yaml"
+    manifest.write_text(
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: orders-config\ndata:\n"
+        "  orders-topic: orders.created\n---\napiVersion: v1\nkind: Secret\nmetadata:\n"
+        "  name: orders-secrets\nstringData:\n  stripe-key: not-indexed\n"
+    )
+
+    assert parse_kubernetes_configuration_sources_file(manifest) == [
+        KubernetesConfigurationSource(
+            source_kind="config_map", source_name="orders-config", keys=("orders-topic",),
+            file_path=str(manifest), start_line=1, end_line=7,
+        ),
+        KubernetesConfigurationSource(
+            source_kind="secret", source_name="orders-secrets", keys=("stripe-key",),
+            file_path=str(manifest), start_line=8, end_line=14,
         ),
     ]

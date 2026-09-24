@@ -50,3 +50,15 @@ class KubernetesConfigurationBinding:
     start_line: int
     end_line: int
     matched_service_name: str | None = None
+
+
+@dataclass(frozen=True)
+class KubernetesConfigurationSource:
+    """A plain-manifest ConfigMap or Secret declaration without its values."""
+
+    source_kind: str
+    source_name: str
+    keys: tuple[str, ...]
+    file_path: str
+    start_line: int
+    end_line: int
