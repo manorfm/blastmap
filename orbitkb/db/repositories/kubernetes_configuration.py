@@ -89,14 +89,15 @@ def replace_kubernetes_configuration_source_imports(
             service_id = service["id"] if service is not None else None
         rows.append((
             repository_id, service_id, source_import.source_kind, source_import.source_name, source_import.prefix,
-            source_import.workload_kind, source_import.workload_name, source_import.container_name,
+            None if source_import.optional is None else int(source_import.optional), source_import.workload_kind,
+            source_import.workload_name, source_import.container_name,
             source_import.file_path, source_import.start_line, source_import.end_line, timestamp,
         ))
     conn.executemany(
         """INSERT INTO kubernetes_configuration_source_imports
-           (repository_id, service_id, source_kind, source_name, prefix, workload_kind, workload_name,
+           (repository_id, service_id, source_kind, source_name, prefix, optional, workload_kind, workload_name,
             container_name, file_path, start_line, end_line, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()
@@ -106,7 +107,7 @@ def list_kubernetes_configuration_source_imports_for_service(
     conn: sqlite3.Connection, service_id: int,
 ) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT source_kind, source_name, prefix, workload_kind, workload_name, container_name,
+        """SELECT source_kind, source_name, prefix, optional, workload_kind, workload_name, container_name,
                   file_path, start_line, end_line
            FROM kubernetes_configuration_source_imports WHERE service_id = ?
            ORDER BY source_kind, source_name, prefix, file_path, start_line""",
@@ -130,13 +131,14 @@ def replace_kubernetes_configuration_source_import_unknowns(
             service_id = service["id"] if service is not None else None
         rows.append((
             repository_id, service_id, unknown.source_kind, unknown.source_name, unknown.prefix,
-            unknown.reference_file_path, unknown.reference_start_line, unknown.reference_end_line, timestamp,
+            None if unknown.optional is None else int(unknown.optional), unknown.reference_file_path,
+            unknown.reference_start_line, unknown.reference_end_line, timestamp,
         ))
     conn.executemany(
         """INSERT INTO kubernetes_configuration_source_import_unknowns
-           (repository_id, service_id, source_kind, source_name, prefix, reference_file_path,
+           (repository_id, service_id, source_kind, source_name, prefix, optional, reference_file_path,
             reference_start_line, reference_end_line, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()
@@ -146,7 +148,7 @@ def list_kubernetes_configuration_source_import_unknowns_for_service(
     conn: sqlite3.Connection, service_id: int,
 ) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT source_kind, source_name, prefix, reference_file_path, reference_start_line, reference_end_line
+        """SELECT source_kind, source_name, prefix, optional, reference_file_path, reference_start_line, reference_end_line
            FROM kubernetes_configuration_source_import_unknowns WHERE service_id = ?
            ORDER BY source_kind, source_name, prefix, reference_file_path, reference_start_line""",
         (service_id,),

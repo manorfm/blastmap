@@ -819,6 +819,8 @@ def _runtime_configuration_source_import(
     }
     if item["prefix"] is not None:
         response["prefix"] = item["prefix"]
+    if item["optional"] is not None:
+        response["availability"] = "optional" if item["optional"] else "required"
     if (
         item["source_kind"], item["source_name"], item["prefix"],
         item["file_path"], item["start_line"], item["end_line"],

@@ -181,10 +181,13 @@ def _environment_source_import(
         source_name = _scalar(_mapping_value(reference, "name"))
         if source_name is None:
             return None
+        optional_node = _mapping_value(reference, "optional")
+        optional = False if optional_node is None else _literal_bool(optional_node)
         return KubernetesConfigurationSourceImport(
             source_kind=source_kind, source_name=source_name, prefix=prefix,
             workload_kind=workload_kind, workload_name=workload_name, container_name=container_name,
             file_path=str(path), start_line=item.start_mark.line + 1, end_line=item.end_mark.line + 1,
+            optional=optional,
         )
     return None
 
@@ -207,3 +210,10 @@ def _mapping_value(node: MappingNode, key: str) -> Node | None:
 
 def _scalar(node: Node | None) -> str | None:
     return node.value if isinstance(node, ScalarNode) and isinstance(node.value, str) and node.value else None
+
+
+def _literal_bool(node: Node | None) -> bool | None:
+    """Return a YAML boolean only when its scalar form is unambiguous."""
+    if not isinstance(node, ScalarNode) or node.tag != "tag:yaml.org,2002:bool":
+        return None
+    return {"true": True, "false": False}.get(node.value.lower())

@@ -115,13 +115,41 @@ def test_kubernetes_parser_extracts_env_from_sources_without_inventing_keys(tmp_
         KubernetesConfigurationSourceImport(
             source_kind="config_map", source_name="shared-defaults", prefix="ORDERS_",
             workload_kind="Deployment", workload_name="orders", container_name="api",
-            file_path=str(manifest), start_line=11, end_line=14,
+            file_path=str(manifest), start_line=11, end_line=14, optional=False,
         ),
         KubernetesConfigurationSourceImport(
             source_kind="secret", source_name="orders-secrets", prefix=None,
             workload_kind="Deployment", workload_name="orders", container_name="api",
-            file_path=str(manifest), start_line=14, end_line=16,
+            file_path=str(manifest), start_line=14, end_line=16, optional=False,
         ),
+    ]
+
+
+def test_kubernetes_parser_preserves_literal_env_from_optional_semantics(tmp_path: Path):
+    manifest = tmp_path / "deployment.yaml"
+    manifest.write_text(
+        "apiVersion: apps/v1\n"
+        "kind: Deployment\n"
+        "metadata:\n"
+        "  name: orders\n"
+        "spec:\n"
+        "  template:\n"
+        "    spec:\n"
+        "      containers:\n"
+        "        - name: api\n"
+        "          envFrom:\n"
+        "            - configMapRef:\n"
+        "                name: optional-defaults\n"
+        "                optional: true\n"
+        "            - secretRef:\n"
+        "                name: required-secrets\n"
+    )
+
+    imports = parse_kubernetes_configuration_source_imports_file(manifest)
+
+    assert [(source.source_name, source.optional) for source in imports] == [
+        ("optional-defaults", True),
+        ("required-secrets", False),
     ]
 
 

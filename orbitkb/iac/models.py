@@ -70,6 +70,10 @@ class KubernetesConfigurationSourceImport:
     file_path: str
     start_line: int
     end_line: int
+    # False when a plain manifest omits ``optional`` (the Kubernetes default),
+    # True when it explicitly tolerates an absent source, None when unavailable
+    # in a legacy snapshot or not a literal boolean.
+    optional: bool | None = None
     matched_service_name: str | None = None
 
 
@@ -83,6 +87,7 @@ class KubernetesConfigurationSourceImportUnknown:
     reference_file_path: str
     reference_start_line: int
     reference_end_line: int
+    optional: bool | None = None
     matched_service_name: str | None = None
 
 

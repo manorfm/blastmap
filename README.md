@@ -243,6 +243,8 @@ Secret name/key, workload/container and source evidence, without exposing values
 Literal `envFrom` imports are listed separately with source, optional prefix, workload
 and evidence, but their individual environment keys remain `unknown`; dynamic names
 and unrendered Helm templates remain unknown.
+For a literal `optional` field, the import also states whether its source is
+`optional` or `required`; an omitted field is `required` by the Kubernetes default.
 When an `envFrom` source has no matching local declaration, it is labeled
 `not_declared_locally` as an external-ownership hypothesis, not a missing-source
 deployment failure.
