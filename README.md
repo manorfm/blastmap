@@ -195,6 +195,12 @@ documented without a matching implementation remain unlinked. Referenced schemas
 not expanded; a referenced request body is reported as unknown rather than assumed.
 Conflicting operations from more than one specification are also left unlinked.
 
+Literal Protobuf service RPC signatures are exposed as `grpc` entrypoints, with
+package, request/response types, streaming flags, imports and source evidence. They
+describe the declared wire contract only: OrbitKB does not infer a server handler,
+client or runtime registration from a `.proto` file. Duplicate service/RPC declarations
+are omitted rather than arbitrarily selecting one.
+
 Explicit Spring mappings for known timeout exception types retain their literal HTTP
 status, including 500, 503 and 504, so agents can distinguish an internal-error
 translation from an unavailable or gateway-timeout contract.

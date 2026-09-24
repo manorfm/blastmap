@@ -1707,6 +1707,63 @@ paths:
     assert result.contracts["OrdersController.create"]["formal_contract"]["request_body_required"] is None
 
 
+def test_static_analysis_extracts_literal_protobuf_service_rpcs(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+import "common/money.proto";
+// rpc Ignored(FakeRequest) returns (FakeResponse);
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+  rpc Watch(stream WatchRequest) returns (stream WatchResponse);
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert [
+        (entry.kind, entry.method, entry.name, entry.symbol,
+         entry.evidence.file_path, entry.evidence.start_line)
+        for entry in result.entrypoints
+    ] == [
+        ("grpc", "RPC", "inventory.v1.Inventory.Reserve", "proto.inventory.v1.Inventory.Reserve",
+         "inventory.proto", 7),
+        ("grpc", "RPC", "inventory.v1.Inventory.Watch", "proto.inventory.v1.Inventory.Watch",
+         "inventory.proto", 8),
+    ]
+    assert result.contracts["proto.inventory.v1.Inventory.Reserve"]["formal_contract"] == {
+        "format": "protobuf",
+        "package": "inventory.v1",
+        "service": "Inventory",
+        "rpc": "Reserve",
+        "request": {"type": "ReserveRequest", "streaming": False},
+        "response": {"type": "ReserveResponse", "streaming": False},
+        "imports": ["common/money.proto"],
+        "evidence": {"file": "inventory.proto", "start_line": 7, "end_line": 7},
+    }
+
+
+def test_static_analysis_ignores_ambiguous_protobuf_rpc_declarations(tmp_path: Path):
+    for name in ("inventory.proto", "inventory-duplicate.proto"):
+        (tmp_path / name).write_text(
+            '''syntax = "proto3";
+package inventory.v1;
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+            encoding="utf-8",
+        )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert result.entrypoints == []
+    assert result.contracts == {}
+
+
 def test_node_analyzer_extracts_literal_mongoose_collection_ownership(tmp_path: Path):
     (tmp_path / "order-model.ts").write_text(
         '''const Order = mongoose.model("Order", orderSchema, "orders");''', encoding="utf-8",

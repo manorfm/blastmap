@@ -2125,6 +2125,7 @@ class StaticAnalysisEngine:
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)
         _enrich_openapi_contracts(result, root)
+        _enrich_protobuf_contracts(result, root)
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
         result.migration_facts.extend(_migration_facts(_migration_files(root), root))
@@ -2542,6 +2543,148 @@ def _openapi_evidence(
     path_position = source.find(operation_path)
     position = source.find(operation_id, path_position) if operation_id else path_position
     return _line_evidence(path, root, source, max(position, 0))
+
+
+_PROTO_PACKAGE = re.compile(r"^\s*package\s+(?P<package>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*;", re.MULTILINE)
+_PROTO_IMPORT = re.compile(r'^\s*import\s+(?:(?:public|weak)\s+)?"(?P<path>[^"\\]+)"\s*;', re.MULTILINE)
+_PROTO_SERVICE = re.compile(r"\bservice\s+(?P<service>[A-Za-z_]\w*)\s*\{")
+_PROTO_RPC = re.compile(
+    r"\brpc\s+(?P<rpc>[A-Za-z_]\w*)\s*\(\s*(?P<request_stream>stream\s+)?"
+    r"(?P<request>\.?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\)\s*returns\s*\(\s*"
+    r"(?P<response_stream>stream\s+)?(?P<response>\.?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\)\s*;",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class _ProtobufRpc:
+    entrypoint: EntryPoint
+    contract: dict
+
+
+def _enrich_protobuf_contracts(result: AnalysisResult, root: Path) -> None:
+    """Expose only uniquely declared, literal RPC signatures from local .proto files."""
+    candidates = _protobuf_rpcs(root)
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        symbol = candidate.entrypoint.symbol
+        counts[symbol] = counts.get(symbol, 0) + 1
+    for candidate in candidates:
+        entrypoint = candidate.entrypoint
+        if counts[entrypoint.symbol] != 1:
+            continue
+        result.entrypoints.append(entrypoint)
+        result.contracts[entrypoint.symbol] = {"formal_contract": candidate.contract}
+
+
+def _protobuf_rpcs(root: Path) -> list[_ProtobufRpc]:
+    rpcs: list[_ProtobufRpc] = []
+    for path in _protobuf_files(root):
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        without_comments = _mask_proto_comments(source)
+        code = _mask_proto_strings(without_comments)
+        package_match = _PROTO_PACKAGE.search(code)
+        package = package_match.group("package") if package_match else None
+        imports = [match.group("path") for match in _PROTO_IMPORT.finditer(without_comments)]
+        for service_match in _PROTO_SERVICE.finditer(code):
+            closing_brace = _matching_brace(code, service_match.end() - 1)
+            if closing_brace is None:
+                continue
+            service = service_match.group("service")
+            qualified_service = f"{package}.{service}" if package else service
+            body = code[service_match.end() : closing_brace]
+            for rpc_match in _PROTO_RPC.finditer(body):
+                rpc = rpc_match.group("rpc")
+                offset = service_match.end() + rpc_match.start()
+                name = f"{qualified_service}.{rpc}"
+                symbol = f"proto.{name}"
+                evidence = _line_evidence(path, root, source, offset)
+                rpcs.append(_ProtobufRpc(
+                    entrypoint=EntryPoint("grpc", "RPC", name, symbol, evidence),
+                    contract={
+                        "format": "protobuf",
+                        "package": package,
+                        "service": service,
+                        "rpc": rpc,
+                        "request": {
+                            "type": rpc_match.group("request"),
+                            "streaming": rpc_match.group("request_stream") is not None,
+                        },
+                        "response": {
+                            "type": rpc_match.group("response"),
+                            "streaming": rpc_match.group("response_stream") is not None,
+                        },
+                        "imports": imports,
+                        "evidence": {
+                            "file": evidence.file_path,
+                            "start_line": evidence.start_line,
+                            "end_line": evidence.end_line,
+                        },
+                    },
+                ))
+    return rpcs
+
+
+def _protobuf_files(root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in root.rglob("*.proto")
+        if not any(part in SKIP_DIRS for part in path.relative_to(root).parts)
+    )
+
+
+def _mask_proto_comments(source: str) -> str:
+    """Blank comments while preserving strings and line offsets in a .proto file."""
+    masked = list(source)
+
+    def blank(index: int) -> None:
+        if masked[index] != "\n":
+            masked[index] = " "
+
+    index = 0
+    while index < len(source):
+        if source[index] == '"':
+            index += 1
+            while index < len(source):
+                if source[index] == "\\":
+                    index += 2
+                    continue
+                if source[index] == '"':
+                    index += 1
+                    break
+                index += 1
+        elif source.startswith("//", index):
+            while index < len(source) and source[index] != "\n":
+                blank(index)
+                index += 1
+        elif source.startswith("/*", index):
+            while index < len(source) and not source.startswith("*/", index):
+                blank(index)
+                index += 1
+            if index < len(source):
+                blank(index)
+                if index + 1 < len(source):
+                    blank(index + 1)
+                index += 2
+        else:
+            index += 1
+    return "".join(masked)
+
+
+def _mask_proto_strings(source: str) -> str:
+    return re.sub(r'"(?:\\.|[^"\\])*"', lambda match: re.sub(r"[^\n]", " ", match.group()), source)
+
+
+def _matching_brace(source: str, opening_brace: int) -> int | None:
+    depth = 0
+    for index in range(opening_brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
 
 
 def _dto_shapes(files: list[Path]) -> dict[str, list[dict]]:

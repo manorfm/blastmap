@@ -49,8 +49,9 @@ treated as deletion.
    to compare the ready plan with a bounded Git diff. It is advisory only.
 5. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
-6. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
-   entrypoint.
+6. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, gRPC, message, CLI or
+   job entrypoint. A `grpc` entrypoint sourced from Protobuf describes only its declared
+   wire signature; handler and client linkage remain unknown until separately proven.
 7. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
    reachable deterministic flow evidence. For an exact AST-proven HTTP route, its
    `contract.formal_contract` can also expose a matching conventional OpenAPI/Swagger
