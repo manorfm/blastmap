@@ -253,6 +253,9 @@ different repository, chart, controller or deployment process.
 absent local source as the low-confidence, informational
 `possible_kubernetes_configuration_source_not_declared_locally`; both require
 confirmation because transforms and runtime mutation may change the deployment.
+An unresolved `envFrom` source is also reported separately as the informational,
+low-confidence `possible_kubernetes_configuration_source_import_not_declared_locally`.
+It identifies source ownership only; imported environment keys remain unknown.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and

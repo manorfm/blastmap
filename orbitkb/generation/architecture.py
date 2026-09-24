@@ -1944,6 +1944,49 @@ def find_kubernetes_configuration_source_unknowns(conn: sqlite3.Connection) -> l
     return findings
 
 
+def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connection) -> list[dict]:
+    """Return low-confidence possible external ``envFrom`` dependencies."""
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT service_id, source_kind, source_name, prefix, reference_file_path,
+                  reference_start_line, reference_end_line
+           FROM kubernetes_configuration_source_import_unknowns
+           WHERE service_id IS NOT NULL
+           ORDER BY service_id, source_name, prefix, reference_file_path, reference_start_line"""
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        service = names[row["service_id"]]
+        source_label = "ConfigMap" if row["source_kind"] == "config_map" else "Secret"
+        prefix_text = f" with prefix {row['prefix']}" if row["prefix"] is not None else ""
+        detail = {
+            "source_kind": row["source_kind"], "source_name": row["source_name"], "confidence": 0.4,
+            "evidence": [{
+                "file": row["reference_file_path"], "start_line": row["reference_start_line"],
+                "end_line": row["reference_end_line"],
+            }],
+            "unknowns": [
+                "The source may be managed by another repository, Helm chart, controller, or deployment process.",
+                "envFrom does not expose its imported environment keys as static facts.",
+            ],
+            "remediation": [
+                "Confirm which delivery boundary owns this ConfigMap or Secret before relying on its imported keys.",
+            ],
+        }
+        if row["prefix"] is not None:
+            detail["prefix"] = row["prefix"]
+        findings.append({
+            "kind": "possible_kubernetes_configuration_source_import_not_declared_locally", "severity": "info",
+            "services": [service],
+            "reason": (
+                f"{service} imports keys from {source_label} {row['source_name']} through envFrom{prefix_text}, "
+                "but no matching source declaration was indexed locally."
+            ),
+            "detail": detail,
+        })
+    return findings
+
+
 def find_shared_cloud_resource(conn: sqlite3.Connection) -> list[dict]:
     """Two or more different services whose code proves they talk to the same
     named cloud resource — coupling through a shared queue/topic/bucket, the
@@ -2174,6 +2217,7 @@ _DETECTORS = (
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
     find_kubernetes_configuration_key_mismatches,
     find_kubernetes_configuration_source_unknowns,
+    find_kubernetes_configuration_source_import_unknowns,
     find_cloud_dead_letter_queue_missing, find_public_object_storage,
     find_unencrypted_cloud_resource, find_missing_bucket_versioning,
 )

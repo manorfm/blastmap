@@ -29,6 +29,7 @@ from orbitkb.generation.architecture import (
     find_fan_imbalance,
     find_flow_hypotheses,
     find_kubernetes_configuration_key_mismatches,
+    find_kubernetes_configuration_source_import_unknowns,
     find_kubernetes_configuration_source_unknowns,
     find_message_consumers_without_recovery_policy,
     find_read_entrypoint_side_effects,
@@ -37,6 +38,7 @@ from orbitkb.generation.architecture import (
 )
 from orbitkb.iac.models import (
     KubernetesConfigurationKeyMismatch,
+    KubernetesConfigurationSourceImportUnknown,
     KubernetesConfigurationSourceUnknown,
 )
 from orbitkb.mcp import queries
@@ -142,6 +144,44 @@ def test_kubernetes_configuration_source_unknown_is_a_low_confidence_architectur
     recompute_architecture_view(conn)
     response = queries.find_architecture_smells(conn)
     assert response["findings"][-1]["kind"] == "possible_kubernetes_configuration_source_not_declared_locally"
+
+
+def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_insight(tmp_path: Path):
+    conn = open_db(tmp_path / "configuration-source-import-unknown.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "orders", "/tmp/shop/orders", "node-ts", repository_id=repository_id)
+    kubernetes_configuration_repo.replace_kubernetes_configuration_source_import_unknowns(conn, repository_id, [
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix="ORDERS_",
+            reference_file_path="deploy/orders.yaml", reference_start_line=12, reference_end_line=15,
+            matched_service_name="orders",
+        ),
+    ])
+
+    assert find_kubernetes_configuration_source_import_unknowns(conn) == [{
+        "kind": "possible_kubernetes_configuration_source_import_not_declared_locally",
+        "severity": "info",
+        "services": ["orders"],
+        "reason": (
+            "orders imports keys from ConfigMap external-config through envFrom with prefix ORDERS_, but no matching "
+            "source declaration was indexed locally."
+        ),
+        "detail": {
+            "source_kind": "config_map", "source_name": "external-config", "prefix": "ORDERS_",
+            "confidence": 0.4,
+            "evidence": [{"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15}],
+            "unknowns": [
+                "The source may be managed by another repository, Helm chart, controller, or deployment process.",
+                "envFrom does not expose its imported environment keys as static facts.",
+            ],
+            "remediation": [
+                "Confirm which delivery boundary owns this ConfigMap or Secret before relying on its imported keys.",
+            ],
+        },
+    }]
+    recompute_architecture_view(conn)
+    response = queries.find_architecture_smells(conn)
+    assert response["findings"][-1]["kind"] == "possible_kubernetes_configuration_source_import_not_declared_locally"
 
 
 def test_find_cycles_ignores_a_simple_chain(tmp_path: Path):

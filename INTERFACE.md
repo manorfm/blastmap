@@ -115,6 +115,9 @@ The source-proven conflict appears in `find_architecture_smells` as
 remediation and explicit runtime uncertainty. An absent local source appears
 separately as the informational, low-confidence
 `possible_kubernetes_configuration_source_not_declared_locally`.
+An unresolved `envFrom` source appears as the distinct informational,
+low-confidence `possible_kubernetes_configuration_source_import_not_declared_locally`;
+it is an ownership hypothesis and does not infer imported keys.
 
 `describe_feature_flags` returns literal reads through a locally proven feature-flag
 SDK, currently LaunchDarkly's Node server SDK. It returns key, provider and source
