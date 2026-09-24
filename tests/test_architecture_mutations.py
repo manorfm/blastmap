@@ -11,6 +11,7 @@ from orbitkb.analysis.models import (
     EntryPoint,
     ErrorContract,
     Evidence,
+    FlowBoundary,
     FlowEdge,
     ResiliencePolicy,
     StaticServiceCall,
@@ -28,6 +29,7 @@ from orbitkb.generation.architecture import (
     find_error_semantics_lost,
     find_fan_imbalance,
     find_message_consumers_without_recovery_policy,
+    find_non_atomic_service_publish_flows,
     find_overbroad_exception_handlers,
     find_read_entrypoint_side_effects,
     find_resilience_policies_on_write_flows,
@@ -630,6 +632,36 @@ def test_retry_write_publish_risk_disappears_when_retry_is_removed(tmp_path: Pat
     )
 
     assert find_retries_on_write_publish_flows(conn) == []
+
+
+def test_service_publish_finding_disappears_when_a_transaction_boundary_is_proven(tmp_path: Path):
+    conn = open_db(tmp_path / "service-publish.db")
+    orders = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
+    write = FlowEdge(
+        "OrderService.create", "OrderRepository.save", "writes", STATIC_EVIDENCE,
+    )
+    publish = FlowEdge(
+        "OrderService.create", "order.created", "publishes", STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, orders, AnalysisResult(edges=[write, publish]))
+
+    findings = find_non_atomic_service_publish_flows(conn)
+
+    assert _kinds(findings) == {"possible_non_atomic_service_publish"}
+    assert findings[0]["detail"]["flow"] == {"symbol": "OrderService.create"}
+    assert findings[0]["detail"]["writes"] == [{"target": "OrderRepository.save"}]
+    assert findings[0]["detail"]["publishes"] == [{"target": "order.created"}]
+    run_id = recompute_architecture_view(conn)
+    assert {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    } == {"possible_non_atomic_service_publish"}
+
+    transaction = FlowBoundary("OrderService.create", "transaction", STATIC_EVIDENCE)
+    flows_repo.replace_analysis(
+        conn, orders, AnalysisResult(edges=[write, publish], boundaries=[transaction]),
+    )
+
+    assert find_non_atomic_service_publish_flows(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

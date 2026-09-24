@@ -284,6 +284,12 @@ publication targets with their totals. The result does not establish ordering,
 atomicity, an outbox or producer/consumer de-duplication; it focuses review on their
 combined retry boundary.
 
+`possible_non_atomic_service_publish` extends the transaction/outbox review to a
+non-entrypoint service symbol with source-proven local write and event publication but
+no source-proven transaction boundary. Entrypoint-owned operations remain covered by
+`possible_non_atomic_publish`, avoiding duplicate findings. An outbox, compensation or
+other delivery guarantee outside the indexed facts remains an explicit unknown.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally

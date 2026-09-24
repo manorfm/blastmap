@@ -215,6 +215,11 @@ publishes an event. It is a focused outbox and duplicate-delivery review: source
 do not establish ordering, atomicity or whether producer/consumer deduplication is
 already in place.
 
+The same transaction/outbox review now covers delegated service methods that write and
+publish without a source-proven transaction boundary. Entrypoints remain covered by the
+existing direct-flow signal, so OrbitKB does not duplicate that finding. As elsewhere,
+an outbox or compensation outside the indexed facts remains an explicit unknown.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,

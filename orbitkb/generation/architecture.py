@@ -662,6 +662,65 @@ def find_retries_on_write_publish_flows(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_non_atomic_service_publish_flows(conn: sqlite3.Connection) -> list[dict]:
+    """Extend the write/publication review to non-entrypoint service symbols.
+
+    Entrypoint-owned operations are already covered by ``find_flow_hypotheses``.
+    This detector covers delegated application/service methods while avoiding a
+    duplicate finding for the entrypoint itself.
+    """
+    names = _service_names(conn)
+    writes_by_source = _flow_edges_by_source(conn, "writes")
+    publishes_by_source = _flow_edges_by_source(conn, "publishes")
+    entrypoint_sources = {
+        (row["service_id"], row["symbol"])
+        for row in conn.execute("SELECT service_id, symbol FROM entrypoints").fetchall()
+    }
+    transactional_sources = {
+        (row["service_id"], row["source"])
+        for row in conn.execute(
+            "SELECT service_id, source FROM flow_boundaries WHERE kind = 'transaction'"
+        ).fetchall()
+    }
+    findings: list[dict] = []
+    for source_key, writes in writes_by_source.items():
+        publishes = publishes_by_source.get(source_key)
+        if not publishes or source_key in entrypoint_sources or source_key in transactional_sources:
+            continue
+        service_id, symbol = source_key
+        visible_writes = writes[:3]
+        visible_publishes = publishes[:3]
+        findings.append({
+            "kind": "possible_non_atomic_service_publish", "severity": "warning",
+            "services": [names[service_id]],
+            "reason": (
+                f"Service symbol {symbol} writes local state and publishes an event without "
+                "a source-proven transaction boundary; review outbox or equivalent recovery."
+            ),
+            "detail": {
+                "flow": {"symbol": symbol},
+                "writes": [{"target": write["to_symbol"]} for write in visible_writes],
+                "write_count": len(writes),
+                "publishes": [{"target": publish["to_symbol"]} for publish in visible_publishes],
+                "publish_count": len(publishes),
+                "confidence": 0.5,
+                "evidence": [
+                    *[_edge_evidence(write) for write in visible_writes],
+                    *[_edge_evidence(publish) for publish in visible_publishes],
+                ],
+                "unknowns": [
+                    "Static analysis cannot establish the runtime transaction scope, operation order or broker delivery semantics.",
+                    "An outbox, compensation or other delivery guarantee may exist outside the indexed source facts.",
+                ],
+                "remediation": [
+                    "Validate a transactional outbox or equivalent recovery guarantee for this write and publication.",
+                    "Document compensation and duplicate-delivery behavior when the operations cannot share one transaction.",
+                ],
+            },
+        })
+    return findings
+
+
 def find_error_semantics_lost(conn: sqlite3.Connection) -> list[dict]:
     """Find a source-proven client/domain error degraded to an HTTP 5xx mapping.
 
@@ -1739,6 +1798,7 @@ _DETECTORS = (
     find_broad_handlers_that_can_swallow_timeouts,
     find_resilience_policies_on_write_flows,
     find_retries_on_write_publish_flows,
+    find_non_atomic_service_publish_flows,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
     find_cloud_dead_letter_queue_missing, find_public_object_storage,
