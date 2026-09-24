@@ -840,6 +840,8 @@ class _JvmSpringAnalyzer:
 
 
 class _NodeGraphqlAnalyzer(_FileAnalyzer):
+    HTTP_ROUTE_METHODS: ClassVar[frozenset[str]] = frozenset({"get", "post", "put", "patch", "delete"})
+
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
         if path.suffix in {".graphql", ".gql"}:
             return _GraphqlContractExtractor().analyze(path, root)
@@ -855,6 +857,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         client_declarations = node_stateful_client_declarations(source_text)
         command_imports = node_command_imports(source_text)
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
+        functions_by_name: dict[str, _Function] = {}
         for node in _walk(tree):
             if node.type != "function_declaration":
                 continue
@@ -864,6 +867,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 continue
             name = _text(name_node, source)
             function = _Function(name, f"{path.stem}.{name}", body, node)
+            functions_by_name[name] = function
             result.symbols.append(_symbol(function, path, root, imports=imports))
             function_edges, function_cloud_facts = self._edges_for_node(
                 function, path, root, source, mongoose_models, prisma_clients, client_declarations, command_imports,
@@ -871,6 +875,28 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             result.edges.extend(function_edges)
             result.cloud_facts.extend(function_cloud_facts)
             result.boundaries.extend(self._boundaries_for(function, path, root, source))
+        express_receivers = _express_route_receivers(source_text)
+        for node in _walk(tree):
+            if node.type != "call_expression":
+                continue
+            callee = node.child_by_field_name("function")
+            arguments = node.child_by_field_name("arguments")
+            if callee is None or arguments is None:
+                continue
+            callee_text = _text(callee, source)
+            if "." not in callee_text:
+                continue
+            receiver, method = callee_text.rsplit(".", 1)
+            if receiver not in express_receivers or method not in self.HTTP_ROUTE_METHODS:
+                continue
+            args = arguments.named_children
+            path_value = _string(args[0], source) if args else None
+            handler = functions_by_name.get(_text(args[-1], source)) if len(args) > 1 else None
+            if path_value is None or handler is None:
+                continue
+            result.entrypoints.append(
+                EntryPoint("http", method.upper(), path_value, handler.symbol, _evidence(path, root, node))
+            )
         for parent in _walk(tree):
             if parent.type != "pair" or _text(parent.child_by_field_name("key"), source) not in {"Query", "Mutation", "Subscription"}:
                 continue
@@ -1743,6 +1769,25 @@ def _node_named_imports(source: str) -> tuple[tuple[str, str], ...]:
         (local_name, f"{module_name}.{original_name}")
         for local_name, module_name, original_name in parse_node_named_imports(source)
     )
+
+
+def _express_route_receivers(source: str) -> frozenset[str]:
+    """Return locally proven Express applications or routers.
+
+    Route calls on arbitrary objects are too common to treat as HTTP facts. This
+    deliberately accepts only a variable initialized by a locally imported Express
+    factory; framework wrappers and dynamic construction remain unresolved.
+    """
+    imported = re.search(
+        r"(?:import\s+(?:\*\s+as\s+)?express\s+from\s*|(?:const|let)\s+express\s*=\s*require\s*\()"
+        r"[\"']express[\"']",
+        source,
+    )
+    if imported is None:
+        return frozenset()
+    return frozenset(re.findall(
+        r"\b(?:const|let|var)\s+(\w+)\s*=\s*express(?:\.Router)?\s*\(", source,
+    ))
 
 
 class StaticAnalysisEngine:
