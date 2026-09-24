@@ -1483,6 +1483,44 @@ def test_static_persistence_facts_require_local_entity_evidence(tmp_path: Path):
     assert {(fact.name, fact.kind, fact.owner) for fact in result.persistence_facts} == {("orders", "sql_table", "Order")}
 
 
+def test_static_analysis_extracts_literal_sql_migration_operations_with_destructive_flags(tmp_path: Path):
+    migration = tmp_path / "db" / "migration" / "V12__payment_method.sql"
+    migration.parent.mkdir(parents=True)
+    migration.write_text(
+        '''-- DROP TABLE ignored_comment;
+CREATE TABLE payment_method (id UUID PRIMARY KEY);
+ALTER TABLE payment_method ADD COLUMN provider VARCHAR(32);
+CREATE INDEX payment_method_provider_idx ON payment_method (provider);
+ALTER TABLE payment_method DROP COLUMN legacy_token;
+DROP TABLE retired_payment_method;
+INSERT INTO migration_audit (message) VALUES ('DROP TABLE only_in_a_message');
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [
+        (fact.operation, fact.table_name, fact.column_name, fact.destructive,
+         fact.evidence.file_path, fact.evidence.start_line)
+        for fact in result.migration_facts
+    ] == [
+        ("create_table", "payment_method", None, False, "db/migration/V12__payment_method.sql", 2),
+        ("add_column", "payment_method", "provider", False, "db/migration/V12__payment_method.sql", 3),
+        ("create_index", "payment_method", None, False, "db/migration/V12__payment_method.sql", 4),
+        ("drop_column", "payment_method", "legacy_token", True, "db/migration/V12__payment_method.sql", 5),
+        ("drop_table", "retired_payment_method", None, True, "db/migration/V12__payment_method.sql", 6),
+    ]
+
+
+def test_static_analysis_ignores_sql_outside_a_recognized_migration_location(tmp_path: Path):
+    (tmp_path / "schema.sql").write_text("DROP TABLE not_a_migration;", encoding="utf-8")
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert result.migration_facts == []
+
+
 def test_node_analyzer_extracts_literal_mongoose_collection_ownership(tmp_path: Path):
     (tmp_path / "order-model.ts").write_text(
         '''const Order = mongoose.model("Order", orderSchema, "orders");''', encoding="utf-8",

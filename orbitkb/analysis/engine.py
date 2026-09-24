@@ -46,6 +46,7 @@ from orbitkb.analysis.models import (
     FlowEdge,
     Injection,
     MessageContract,
+    MigrationFact,
     PersistenceFact,
     ResiliencePolicy,
     StaticServiceCall,
@@ -2123,6 +2124,7 @@ class StaticAnalysisEngine:
         _enrich_rabbitmq_contracts(result.contracts, files)
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
+        result.migration_facts.extend(_migration_facts(_migration_sql_files(root), root))
         result.cloud_facts.extend(detect_cloud_facts(files, root))
         result = BoundedFlowResolver().resolve(result)
         if stack == "jvm-spring":
@@ -2527,6 +2529,113 @@ def _persistence_facts(files: list[Path], root: Path) -> list[PersistenceFact]:
             facts.append(PersistenceFact(collection, "document", owner, _line_evidence(path, root, source, match.start())))
         facts.extend(_prisma_persistence_facts(source, path, root))
     return facts
+
+
+_SQL_IDENTIFIER = (
+    r'(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][A-Za-z0-9_$]*)'
+    r'(?:\s*\.\s*(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][A-Za-z0-9_$]*))*'
+)
+_SQL_MIGRATION_OPERATIONS = (
+    ("create_table", re.compile(
+        rf"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<table>{_SQL_IDENTIFIER})", re.IGNORECASE,
+    ), False, None),
+    ("add_column", re.compile(
+        rf"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<table>{_SQL_IDENTIFIER})\s+ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(?P<column>{_SQL_IDENTIFIER})",
+        re.IGNORECASE,
+    ), False, "column"),
+    ("drop_column", re.compile(
+        rf"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<table>{_SQL_IDENTIFIER})\s+DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?(?P<column>{_SQL_IDENTIFIER})",
+        re.IGNORECASE,
+    ), True, "column"),
+    ("drop_table", re.compile(
+        rf"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<table>{_SQL_IDENTIFIER})", re.IGNORECASE,
+    ), True, None),
+    ("create_index", re.compile(
+        rf"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?{_SQL_IDENTIFIER}\s+ON\s+(?P<table>{_SQL_IDENTIFIER})",
+        re.IGNORECASE,
+    ), False, None),
+)
+_MIGRATION_DIRECTORY_NAMES = frozenset({"migration", "migrations", "changelog", "changelogs"})
+_FLYWAY_FILENAME = re.compile(r"V\d+(?:_\d+)*__.+\.sql$", re.IGNORECASE)
+
+
+def _migration_sql_files(root: Path) -> list[Path]:
+    """Select conventional SQL migration locations, never arbitrary schema scripts."""
+    return [
+        path
+        for path in root.rglob("*.sql")
+        if not any(part in SKIP_DIRS for part in path.relative_to(root).parts)
+        and (
+            any(part.lower() in _MIGRATION_DIRECTORY_NAMES for part in path.relative_to(root).parts[:-1])
+            or _FLYWAY_FILENAME.fullmatch(path.name) is not None
+        )
+    ]
+
+
+def _migration_facts(files: list[Path], root: Path) -> list[MigrationFact]:
+    facts_with_offsets: list[tuple[int, MigrationFact]] = []
+    for path in files:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        analyzable = _mask_sql_comments(source)
+        for operation, pattern, destructive, column_group in _SQL_MIGRATION_OPERATIONS:
+            for match in pattern.finditer(analyzable):
+                column = _normalize_sql_identifier(match.group(column_group)) if column_group else None
+                facts_with_offsets.append((match.start(), MigrationFact(
+                    operation=operation,
+                    table_name=_normalize_sql_identifier(match.group("table")),
+                    column_name=column,
+                    destructive=destructive,
+                    evidence=_line_evidence(path, root, source, match.start()),
+                )))
+    return [fact for _offset, fact in sorted(facts_with_offsets, key=lambda item: (item[1].evidence.file_path, item[0]))]
+
+
+def _mask_sql_comments(source: str) -> str:
+    """Blank comments and single-quoted literals while preserving every line offset."""
+    masked = list(source)
+
+    def _blank(index: int) -> None:
+        if masked[index] != "\n":
+            masked[index] = " "
+
+    index = 0
+    while index < len(source):
+        if source.startswith("--", index):
+            while index < len(source) and source[index] != "\n":
+                _blank(index)
+                index += 1
+        elif source.startswith("/*", index):
+            _blank(index)
+            _blank(index + 1)
+            index += 2
+            while index < len(source) and not source.startswith("*/", index):
+                _blank(index)
+                index += 1
+            if index < len(source):
+                _blank(index)
+                if index + 1 < len(source):
+                    _blank(index + 1)
+                index += 2
+        elif source[index] == "'":
+            _blank(index)
+            index += 1
+            while index < len(source):
+                _blank(index)
+                if source[index] == "'":
+                    if index + 1 < len(source) and source[index + 1] == "'":
+                        _blank(index + 1)
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+        else:
+            index += 1
+    return "".join(masked)
+
+
+def _normalize_sql_identifier(identifier: str) -> str:
+    return ".".join(part.strip().strip('"`[]') for part in identifier.split("."))
 
 
 def _prisma_persistence_facts(source: str, path: Path, root: Path) -> list[PersistenceFact]:

@@ -101,6 +101,21 @@ CREATE TABLE IF NOT EXISTS static_persistence_facts (
     updated_at  TEXT NOT NULL
 );
 
+-- Literal operations from conventional SQL migration directories. These are source
+-- facts, not an assertion that the migration ran in any environment.
+CREATE TABLE IF NOT EXISTS static_migration_facts (
+    id          INTEGER PRIMARY KEY,
+    service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    operation   TEXT NOT NULL CHECK (operation IN ('create_table', 'add_column', 'drop_column', 'drop_table', 'create_index')),
+    table_name  TEXT NOT NULL,
+    column_name TEXT,
+    destructive INTEGER NOT NULL CHECK (destructive IN (0, 1)),
+    file_path   TEXT NOT NULL,
+    start_line  INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
 -- `provider` is the concrete message broker/vendor (kafka, rabbitmq, sqs, sns,
 -- service_bus, activemq, nats), inferred by the LLM from real code the same way
 -- service_calls.target_kind is — 'unknown' means the code only showed a
@@ -583,6 +598,7 @@ CREATE INDEX IF NOT EXISTS idx_service_calls_from ON service_calls(from_service_
 CREATE INDEX IF NOT EXISTS idx_service_calls_to_name ON service_calls(to_service_name);
 CREATE INDEX IF NOT EXISTS idx_service_calls_to_id ON service_calls(to_service_id);
 CREATE INDEX IF NOT EXISTS idx_persistence_service ON persistence_entities(service_id);
+CREATE INDEX IF NOT EXISTS idx_static_migration_facts_service ON static_migration_facts(service_id);
 CREATE INDEX IF NOT EXISTS idx_messages_service ON messages(service_id);
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel);
 CREATE INDEX IF NOT EXISTS idx_indexed_files_service ON indexed_files(service_id);

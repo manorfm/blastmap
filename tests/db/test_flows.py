@@ -5,6 +5,7 @@ from orbitkb.analysis.models import (
     Evidence,
     FlowEdge,
     MessageContract,
+    MigrationFact,
 )
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import flows, services
@@ -69,3 +70,28 @@ def test_static_cloud_facts_are_replaced_with_the_flow_snapshot(tmp_path):
 
     flows.replace_analysis(conn, service_id, AnalysisResult())
     assert flows.list_static_cloud_facts(conn, service_id) == []
+
+
+def test_static_migration_facts_are_replaced_with_the_flow_snapshot(tmp_path):
+    conn = open_db(tmp_path / "migrations.db")
+    service_id = services.ensure_service(conn, "orders", "/repos/orders", "jvm-spring")
+    evidence = Evidence("db/migration/V4__orders.sql", 3, 3)
+
+    flows.replace_analysis(conn, service_id, AnalysisResult(migration_facts=[
+        MigrationFact("add_column", "orders", "external_id", False, evidence),
+        MigrationFact("drop_column", "orders", "legacy_id", True, Evidence(evidence.file_path, 4, 4)),
+    ]))
+
+    assert [dict(row) for row in flows.list_static_migration_facts(conn, service_id)] == [
+        {
+            "operation": "add_column", "table_name": "orders", "column_name": "external_id",
+            "destructive": 0, "file_path": "db/migration/V4__orders.sql", "start_line": 3, "end_line": 3,
+        },
+        {
+            "operation": "drop_column", "table_name": "orders", "column_name": "legacy_id",
+            "destructive": 1, "file_path": "db/migration/V4__orders.sql", "start_line": 4, "end_line": 4,
+        },
+    ]
+
+    flows.replace_analysis(conn, service_id, AnalysisResult())
+    assert flows.list_static_migration_facts(conn, service_id) == []

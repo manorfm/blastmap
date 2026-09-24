@@ -471,6 +471,9 @@ def describe_persistence(
     if service_error:
         return service_error
     entities, page = _paginate(persistence_repo.list_persistence(conn, row["id"]), limit, offset)
+    migration_facts, migration_page = _paginate(
+        flows_repo.list_static_migration_facts(conn, row["id"]), limit, offset,
+    )
     return {
         "service": row["name"], "repository": row["repository_name"], "entities": [
             {
@@ -485,6 +488,17 @@ def describe_persistence(
             }}
             for item in flows_repo.list_static_persistence_facts(conn, row["id"])
         ],
+        "migration_facts": [
+            {
+                "operation": item["operation"], "table_name": item["table_name"],
+                "column_name": item["column_name"], "destructive": bool(item["destructive"]),
+                "evidence": {
+                    "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],
+                },
+            }
+            for item in migration_facts
+        ],
+        "migration_pagination": migration_page,
         **page,
     }
 

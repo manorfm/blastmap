@@ -127,6 +127,17 @@ class PersistenceFact:
 
 
 @dataclass(frozen=True)
+class MigrationFact:
+    """A literal, local SQL migration operation; no execution state is inferred."""
+
+    operation: str
+    table_name: str
+    column_name: str | None
+    destructive: bool
+    evidence: Evidence
+
+
+@dataclass(frozen=True)
 class CloudFact:
     """A cloud SDK operation proven by locally-declared type or import — see
     orbitkb/analysis/cloud_taxonomy.py for the vendor-sourced vocabulary this
@@ -156,6 +167,7 @@ class AnalysisResult:
     static_service_calls: list[StaticServiceCall] = field(default_factory=list)
     resilience_policies: list[ResiliencePolicy] = field(default_factory=list)
     persistence_facts: list[PersistenceFact] = field(default_factory=list)
+    migration_facts: list[MigrationFact] = field(default_factory=list)
     cloud_facts: list[CloudFact] = field(default_factory=list)
 
     def extend(self, other: AnalysisResult) -> None:
@@ -170,4 +182,5 @@ class AnalysisResult:
         self.static_service_calls.extend(other.static_service_calls)
         self.resilience_policies.extend(other.resilience_policies)
         self.persistence_facts.extend(other.persistence_facts)
+        self.migration_facts.extend(other.migration_facts)
         self.cloud_facts.extend(other.cloud_facts)
