@@ -155,6 +155,10 @@ middleware, gateways and external contracts can affect the runtime response.
 When an affected SQL table has an exactly matching indexed migration fact,
 `plan_change` adds a schema-review unit. A destructive operation requires deployment,
 backup and rollback validation; it never asserts that the migration needs to run.
+When a primary service has a source-proven feature-flag read, `plan_change` adds one
+review unit per provider/key, grouping the read locations. It asks for confirmation of
+targeting, default behavior and rollout only when the guarded behavior changes; it
+never infers that the flag itself must be modified.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

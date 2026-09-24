@@ -36,6 +36,7 @@ from orbitkb.generation.change_plan import (
     derive_change_units,
     derive_decision_points,
     derive_error_mapping_review_units,
+    derive_feature_flag_review_units,
     derive_persistence_migration_review_units,
     validate_decision_selections,
 )
@@ -1027,12 +1028,18 @@ def plan_change(
             for service in persistence_services
             if (row := services_repo.get_service_by_name(conn, service, repository_id=repository_id)) is not None
         }
+        feature_flags_by_service = {
+            service: [dict(flag) for flag in flows_repo.list_static_feature_flags(conn, row["id"])]
+            for service in primary_services
+            if (row := services_repo.get_service_by_name(conn, service, repository_id=repository_id)) is not None
+        }
         change_units = [
             *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
             *derive_error_mapping_review_units(find_architecture_smells(conn)["findings"], error_mapping_services),
             *derive_persistence_migration_review_units(
                 change_surface_result["persistence_affected"], migration_facts_by_service, primary_services,
             ),
+            *derive_feature_flag_review_units(feature_flags_by_service, primary_services),
         ]
     plan_run_id = change_plans_repo.record_plan(
         conn, change_surface_result.get("run_id"), status, token_budget, decision_points, change_units,
@@ -1226,6 +1233,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
             "service": producer,
             "purpose": "confirm the affected schema and indexed migration operations",
             "recommended_query": {"tool": "describe_persistence", "arguments": {"service": producer}},
+        }]
+    if change_unit["target"]["role"] == "feature_flag":
+        return [{
+            "service": producer,
+            "purpose": "confirm the indexed feature flag and its guarded behavior",
+            "recommended_query": {"tool": "describe_feature_flags", "arguments": {"service": producer}},
         }]
     reading = [{
         "service": producer,

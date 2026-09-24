@@ -223,6 +223,61 @@ def derive_persistence_migration_review_units(
     return units
 
 
+def derive_feature_flag_review_units(
+    feature_flags_by_service: dict[str, list[dict]], primary_services: set[str],
+) -> list[dict]:
+    """Return one bounded review per source-proven flag read by a primary service.
+
+    A static read proves only that code is guarded by a flag. It cannot prove the
+    flag's runtime value, targeting, or rollout intent, so the resulting unit is
+    always a review rather than a prescribed configuration change.
+    """
+    units: list[dict] = []
+    for service in sorted(primary_services):
+        grouped: dict[tuple[str, str], list[dict]] = {}
+        for flag in feature_flags_by_service.get(service, []):
+            if not isinstance(flag, dict):
+                continue
+            provider = flag.get("provider")
+            key = flag.get("key")
+            if not isinstance(provider, str) or not provider or not isinstance(key, str) or not key:
+                continue
+            evidence = {
+                "file": flag.get("file_path"),
+                "start_line": flag.get("start_line"),
+                "end_line": flag.get("end_line"),
+            }
+            if not _unique_evidence([evidence]):
+                continue
+            grouped.setdefault((provider, key), []).append(evidence)
+        for (provider, key), evidence_items in sorted(grouped.items()):
+            evidence = sorted(
+                _unique_evidence(evidence_items), key=lambda item: (item["file"], item["start_line"], item["end_line"]),
+            )
+            location_count = len(evidence)
+            location_word = "location" if location_count == 1 else "locations"
+            units.append({
+                "id": f"feature-flag:{service}:{provider}:{key}",
+                "service": service,
+                "target": {"role": "feature_flag", "symbol": f"{provider}:{key}", "evidence": evidence},
+                "action": "review",
+                "reason": (
+                    f"{key} is read through {provider} at {location_count} indexed {location_word}; "
+                    "review targeting, default behavior, and rollout if the guarded behavior changes."
+                ),
+                "preconditions": [],
+                "related_contracts": [f"feature_flag:{provider}:{key}"],
+                "dependencies": [],
+                "validation": [
+                    f"verify {key} targeting, default behavior, and rollout state match the requested change",
+                    f"verify guarded code remains safe when {key} is disabled",
+                ],
+                "confidence": 1.0,
+                "evidence": evidence,
+            })
+    return units
+
+
 def _unique_evidence(items: list[dict]) -> list[dict]:
     seen: set[tuple[str, int, int]] = set()
     evidence: list[dict] = []

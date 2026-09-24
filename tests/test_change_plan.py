@@ -8,6 +8,7 @@ from orbitkb.analysis.models import (
     EntryPoint,
     ErrorContract,
     Evidence,
+    FeatureFlag,
     MigrationFact,
     StaticServiceCall,
 )
@@ -237,6 +238,68 @@ def test_plan_change_derives_a_migration_review_unit_for_an_affected_persisted_t
     validate(detail, load_schema("describe_change_unit"))
     refined = queries.refine_change_plan(conn, result["plan_id"], [])
     assert refined["change_units"] == result["change_units"]
+    validate(refined, load_schema("refine_change_plan"))
+
+
+def test_plan_change_derives_one_feature_flag_review_unit_for_a_primary_service(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "feature-flag-unit.db")
+    checkout = services_repo.get_service_by_name(conn, "checkout-service")
+    flows_repo.replace_analysis(conn, checkout["id"], AnalysisResult(feature_flags=[
+        FeatureFlag(
+            source="CheckoutService.submit", key="checkout.new-payment-flow", provider="launchdarkly",
+            evidence=Evidence("src/checkout.ts", 18, 18),
+        ),
+        FeatureFlag(
+            source="CheckoutService.preview", key="checkout.new-payment-flow", provider="launchdarkly",
+            evidence=Evidence("src/checkout.ts", 31, 31),
+        ),
+    ]))
+
+    result = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Change the checkout payment flow")
+
+    assert result["status"] == "ready"
+    assert result["change_units"] == [{
+        "id": "feature-flag:checkout-service:launchdarkly:checkout.new-payment-flow",
+        "service": "checkout-service",
+        "target": {
+            "role": "feature_flag",
+            "symbol": "launchdarkly:checkout.new-payment-flow",
+            "evidence": [
+                {"file": "src/checkout.ts", "start_line": 18, "end_line": 18},
+                {"file": "src/checkout.ts", "start_line": 31, "end_line": 31},
+            ],
+        },
+        "action": "review",
+        "reason": (
+            "checkout.new-payment-flow is read through launchdarkly at 2 indexed locations; "
+            "review targeting, default behavior, and rollout if the guarded behavior changes."
+        ),
+        "preconditions": [],
+        "related_contracts": ["feature_flag:launchdarkly:checkout.new-payment-flow"],
+        "dependencies": [],
+        "validation": [
+            "verify checkout.new-payment-flow targeting, default behavior, and rollout state match the requested change",
+            "verify guarded code remains safe when checkout.new-payment-flow is disabled",
+        ],
+        "confidence": 1.0,
+        "evidence": [
+            {"file": "src/checkout.ts", "start_line": 18, "end_line": 18},
+            {"file": "src/checkout.ts", "start_line": 31, "end_line": 31},
+        ],
+    }]
+    detail = queries.describe_change_unit(
+        conn, result["plan_id"], "feature-flag:checkout-service:launchdarkly:checkout.new-payment-flow",
+    )
+    assert detail["minimal_reading"] == [{
+        "service": "checkout-service",
+        "purpose": "confirm the indexed feature flag and its guarded behavior",
+        "recommended_query": {"tool": "describe_feature_flags", "arguments": {"service": "checkout-service"}},
+    }]
+    validate(detail, load_schema("describe_change_unit"))
+    refined = queries.refine_change_plan(conn, result["plan_id"], [])
     validate(refined, load_schema("refine_change_plan"))
 
 

@@ -132,8 +132,9 @@ choice is rejected, requiring a new plan and an explicit impact reassessment.
 `describe_change_unit` returns one persisted change unit, its validation checklist and
 the smallest producer/consumer `describe_messages` queries needed to verify an event
 contract, or the client `describe_service` and remote `list_entrypoints` queries for a
-resolved HTTP boundary, or `describe_persistence` for a schema/migration review. It
-does not scan source, rerun retrieval or call a model.
+resolved HTTP boundary, `describe_persistence` for a schema/migration review, or
+`describe_feature_flags` for a source-proven feature-flag review. It does not scan
+source, rerun retrieval or call a model.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)
