@@ -864,6 +864,14 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
                 client_declarations, command_imports,
             )
+        for function, method, route in _nest_http_entrypoint_functions(tree, source, imports):
+            self._record_function(
+                result, function, path, root, source, imports, mongoose_models, prisma_clients,
+                client_declarations, command_imports,
+            )
+            result.entrypoints.append(
+                EntryPoint("http", method, route, function.symbol, _evidence(path, root, function.declaration))
+            )
         route_prefixes = {
             **_express_route_prefixes(source_text),
             **{receiver: "" for receiver in _fastify_route_receivers(source_text)},
@@ -1788,6 +1796,8 @@ def _go_route_groups(tree: Node, source: bytes) -> dict[str, str]:
 def _join_route(prefix: str | None, route: str | None) -> str | None:
     if route is None or prefix is None:
         return route
+    if not route:
+        return prefix.rstrip("/") or "/"
     return f"{prefix.rstrip('/')}/{route.lstrip('/')}"
 
 
@@ -1866,6 +1876,107 @@ def _node_named_functions(tree: Node, source: bytes, module_name: str) -> list[_
         name = _text(name_node, source)
         functions.append(_Function(name, f"{module_name}.{name}", body, node))
     return functions
+
+
+_NEST_HTTP_DECORATORS = {
+    "Get": "GET", "Post": "POST", "Put": "PUT", "Patch": "PATCH", "Delete": "DELETE",
+}
+
+
+def _nest_http_entrypoint_functions(
+    tree: Node, source: bytes, imports: tuple[tuple[str, str], ...],
+) -> list[tuple[_Function, str, str]]:
+    """Extract literal Nest controller routes using imported decorator identities."""
+    source_text = source.decode("utf-8", errors="ignore")
+    if re.search(r"\bfrom\s*[\"']@nestjs/common[\"']", source_text) is None:
+        return []
+    nest_imports = {
+        local: imported.rsplit(".", 1)[-1]
+        for local, imported in imports
+        if imported.startswith("common.")
+    }
+    if "Controller" not in nest_imports.values():
+        return []
+    entrypoints: list[tuple[_Function, str, str]] = []
+    for class_node in _walk(tree):
+        if class_node.type != "class_declaration":
+            continue
+        controller_prefix = _nest_decorator_path(
+            _preceding_decorators(class_node), source, nest_imports, "Controller",
+        )
+        if controller_prefix is None:
+            continue
+        class_name_node = class_node.child_by_field_name("name")
+        class_body = class_node.child_by_field_name("body")
+        if class_name_node is None or class_body is None:
+            continue
+        class_name = _text(class_name_node, source)
+        decorators: list[Node] = []
+        for child in class_body.named_children:
+            if child.type == "decorator":
+                decorators.append(child)
+                continue
+            if child.type != "method_definition":
+                decorators.clear()
+                continue
+            route = _nest_method_route(decorators, source, nest_imports)
+            decorators.clear()
+            if route is None:
+                continue
+            method_name = child.child_by_field_name("name")
+            body = child.child_by_field_name("body")
+            if method_name is None or body is None:
+                continue
+            name = _text(method_name, source)
+            function = _Function(name, f"{class_name}.{name}", body, child)
+            method, path = route
+            entrypoints.append((function, method, _join_route(controller_prefix, path)))
+    return entrypoints
+
+
+def _preceding_decorators(node: Node) -> list[Node]:
+    """Return the contiguous decorators immediately preceding a declaration."""
+    parent = node.parent
+    if parent is None:
+        return []
+    siblings = parent.named_children
+    index = next((i for i, child in enumerate(siblings) if child.start_byte == node.start_byte), None)
+    if index is None:
+        return []
+    decorators: list[Node] = []
+    for sibling in reversed(siblings[:index]):
+        if sibling.type != "decorator":
+            break
+        decorators.append(sibling)
+    return list(reversed(decorators))
+
+
+def _nest_decorator_path(
+    decorators: list[Node], source: bytes, imported_names: dict[str, str], expected: str,
+) -> str | None:
+    for decorator in decorators:
+        call = next((child for child in decorator.named_children if child.type == "call_expression"), None)
+        if call is None:
+            continue
+        function = call.child_by_field_name("function")
+        arguments = call.child_by_field_name("arguments")
+        if function is None or arguments is None or imported_names.get(_text(function, source)) != expected:
+            continue
+        args = arguments.named_children
+        if not args:
+            return ""
+        return _string(args[0], source) if len(args) == 1 else None
+    return None
+
+
+def _nest_method_route(
+    decorators: list[Node], source: bytes, imported_names: dict[str, str],
+) -> tuple[str, str] | None:
+    for decorator_name, method in _NEST_HTTP_DECORATORS.items():
+        path = _nest_decorator_path(decorators, source, imported_names, decorator_name)
+        if path is not None:
+            return method, path
+    return None
 
 
 class StaticAnalysisEngine:

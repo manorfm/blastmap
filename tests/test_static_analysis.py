@@ -623,6 +623,32 @@ app.post("/orders", createOrder);
     assert result.entrypoints == []
 
 
+def test_node_analyzer_exposes_literal_nest_controller_route_and_method_flow(tmp_path: Path):
+    (tmp_path / "orders.controller.ts").write_text(
+        '''import { Controller, Post } from "@nestjs/common";
+
+@Controller("/orders")
+export class OrdersController {
+  @Post()
+  create(input: CreateOrder) {
+    return this.orderService.create(input);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(entry.kind, entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
+        ("http", "POST", "/orders", "OrdersController.create"),
+    ]
+    assert any(
+        edge.source == "OrdersController.create" and edge.target == "this.orderService.create"
+        for edge in result.edges
+    )
+
+
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
     source = tmp_path / "consumer.go"
     source.write_text(

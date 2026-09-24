@@ -155,6 +155,10 @@ handlers remain unknown rather than becoming route facts.
 Fastify uses the same literal method/path and handler rules, but only for an instance
 created from a locally imported Fastify factory; plugin registration and dynamic
 prefixes remain unknown.
+NestJS recognizes a class with a literal `@Controller` prefix and a literal HTTP
+method decorator imported from `@nestjs/common`. It combines those paths and exposes
+the controller method as the entrypoint symbol; dynamic decorator arguments and
+unrecognized decorator imports remain unknown.
 
 ## Entrypoint response
 

@@ -138,6 +138,9 @@ unmounted/multiply-mounted routers and unresolved handlers are intentionally lef
 rather than guessed into an endpoint.
 The same literal method/path and handler rules cover Fastify instances created from a
 locally imported factory; dynamic prefixes and plugin registration remain out of scope.
+NestJS controllers are also indexed when `@Controller` and an HTTP method decorator
+from `@nestjs/common` use literal paths; the combined route is linked to its controller
+method. Dynamic decorator arguments remain explicit unknowns.
 
 For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven error
 contracts (raised or explicitly mapped exception types and explicit local timeout

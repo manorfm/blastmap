@@ -86,6 +86,12 @@ class BoundedFlowResolver:
         if len(primary_candidates) == 1:
             return replace(edge, target=primary_candidates.pop(), confidence="high")
 
+        # A receiver-qualified call that did not resolve through an import or an
+        # injection remains an observed external/local-object boundary. Falling back
+        # to its method name alone can turn `this.client.create()` into an unrelated
+        # local `Controller.create()` symbol.
+        if separator:
+            return edge
         candidates = sorted(symbol for symbol in implementations if symbol.endswith(f".{method}"))
         if len(candidates) == 1:
             return replace(edge, target=candidates[0], confidence="medium")
