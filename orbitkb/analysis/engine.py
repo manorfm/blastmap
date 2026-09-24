@@ -2124,7 +2124,7 @@ class StaticAnalysisEngine:
         _enrich_rabbitmq_contracts(result.contracts, files)
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
-        result.migration_facts.extend(_migration_facts(_migration_sql_files(root), root))
+        result.migration_facts.extend(_migration_facts(_migration_files(root), root))
         result.cloud_facts.extend(detect_cloud_facts(files, root))
         result = BoundedFlowResolver().resolve(result)
         if stack == "jvm-spring":
@@ -2557,17 +2557,45 @@ _SQL_MIGRATION_OPERATIONS = (
 )
 _MIGRATION_DIRECTORY_NAMES = frozenset({"migration", "migrations", "changelog", "changelogs"})
 _FLYWAY_FILENAME = re.compile(r"V\d+(?:_\d+)*__.+\.sql$", re.IGNORECASE)
+_LIQUIBASE_DATABASE_CHANGELOG = re.compile(
+    r"<(?:[A-Za-z_][A-Za-z0-9_-]*:)?databaseChangeLog\b", re.IGNORECASE,
+)
+_LIQUIBASE_CHANGESET = re.compile(
+    r"<changeSet\b[^>]*>(?P<body>.*?)</changeSet\s*>", re.IGNORECASE | re.DOTALL,
+)
+_LIQUIBASE_SIMPLE_OPERATION = re.compile(
+    r"<(?P<tag>createTable|dropTable|createIndex|dropColumn)\b(?P<attributes>[^>]*)/?>",
+    re.IGNORECASE,
+)
+_LIQUIBASE_ADD_COLUMN = re.compile(
+    r"<addColumn\b(?P<attributes>[^>]*)>(?P<body>.*?)</addColumn\s*>", re.IGNORECASE | re.DOTALL,
+)
+_LIQUIBASE_COLUMN = re.compile(r"<column\b(?P<attributes>[^>]*)/?>", re.IGNORECASE)
+_LIQUIBASE_ATTRIBUTE = re.compile(
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
+    re.DOTALL,
+)
+_LIQUIBASE_IDENTIFIER = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_$-]*(?:\.[A-Za-z_][A-Za-z0-9_$-]*)*",
+)
+_LIQUIBASE_SIMPLE_OPERATIONS = {
+    "createtable": ("create_table", False, None),
+    "droptable": ("drop_table", True, None),
+    "createindex": ("create_index", False, None),
+    "dropcolumn": ("drop_column", True, "columnname"),
+}
 
 
-def _migration_sql_files(root: Path) -> list[Path]:
-    """Select conventional SQL migration locations, never arbitrary schema scripts."""
+def _migration_files(root: Path) -> list[Path]:
+    """Select conventional SQL and Liquibase XML migration locations only."""
     return [
         path
-        for path in root.rglob("*.sql")
+        for pattern in ("*.sql", "*.xml")
+        for path in root.rglob(pattern)
         if not any(part in SKIP_DIRS for part in path.relative_to(root).parts)
         and (
             any(part.lower() in _MIGRATION_DIRECTORY_NAMES for part in path.relative_to(root).parts[:-1])
-            or _FLYWAY_FILENAME.fullmatch(path.name) is not None
+            or (path.suffix.lower() == ".sql" and _FLYWAY_FILENAME.fullmatch(path.name) is not None)
         )
     ]
 
@@ -2576,18 +2604,95 @@ def _migration_facts(files: list[Path], root: Path) -> list[MigrationFact]:
     facts_with_offsets: list[tuple[int, MigrationFact]] = []
     for path in files:
         source = path.read_text(encoding="utf-8", errors="ignore")
-        analyzable = _mask_sql_comments(source)
-        for operation, pattern, destructive, column_group in _SQL_MIGRATION_OPERATIONS:
-            for match in pattern.finditer(analyzable):
-                column = _normalize_sql_identifier(match.group(column_group)) if column_group else None
-                facts_with_offsets.append((match.start(), MigrationFact(
-                    operation=operation,
-                    table_name=_normalize_sql_identifier(match.group("table")),
-                    column_name=column,
-                    destructive=destructive,
-                    evidence=_line_evidence(path, root, source, match.start()),
-                )))
+        if path.suffix.lower() == ".sql":
+            facts_with_offsets.extend(_sql_migration_facts(source, path, root))
+        elif _LIQUIBASE_DATABASE_CHANGELOG.search(source):
+            facts_with_offsets.extend(_liquibase_migration_facts(source, path, root))
     return [fact for _offset, fact in sorted(facts_with_offsets, key=lambda item: (item[1].evidence.file_path, item[0]))]
+
+
+def _sql_migration_facts(source: str, path: Path, root: Path) -> list[tuple[int, MigrationFact]]:
+    facts: list[tuple[int, MigrationFact]] = []
+    analyzable = _mask_sql_comments(source)
+    for operation, pattern, destructive, column_group in _SQL_MIGRATION_OPERATIONS:
+        for match in pattern.finditer(analyzable):
+            column = _normalize_sql_identifier(match.group(column_group)) if column_group else None
+            facts.append((match.start(), MigrationFact(
+                operation=operation,
+                table_name=_normalize_sql_identifier(match.group("table")),
+                column_name=column,
+                destructive=destructive,
+                evidence=_line_evidence(path, root, source, match.start()),
+            )))
+    return facts
+
+
+def _liquibase_migration_facts(source: str, path: Path, root: Path) -> list[tuple[int, MigrationFact]]:
+    """Extract only literal Liquibase XML changes nested in declared change sets."""
+    facts: list[tuple[int, MigrationFact]] = []
+    analyzable = _mask_xml_comments(source)
+    for change_set in _LIQUIBASE_CHANGESET.finditer(analyzable):
+        body = change_set.group("body")
+        body_offset = change_set.start("body")
+        for match in _LIQUIBASE_SIMPLE_OPERATION.finditer(body):
+            operation, destructive, column_attribute = _LIQUIBASE_SIMPLE_OPERATIONS[
+                match.group("tag").lower()
+            ]
+            attributes = _liquibase_attributes(match.group("attributes"))
+            table_name = _literal_liquibase_identifier(attributes.get("tablename"))
+            column_name = (
+                _literal_liquibase_identifier(attributes.get(column_attribute))
+                if column_attribute
+                else None
+            )
+            if table_name is None or (column_attribute and column_name is None):
+                continue
+            offset = body_offset + match.start()
+            facts.append((offset, MigrationFact(
+                operation=operation,
+                table_name=table_name,
+                column_name=column_name,
+                destructive=destructive,
+                evidence=_line_evidence(path, root, source, offset),
+            )))
+        for add_column in _LIQUIBASE_ADD_COLUMN.finditer(body):
+            attributes = _liquibase_attributes(add_column.group("attributes"))
+            table_name = _literal_liquibase_identifier(attributes.get("tablename"))
+            if table_name is None:
+                continue
+            for column in _LIQUIBASE_COLUMN.finditer(add_column.group("body")):
+                column_name = _literal_liquibase_identifier(
+                    _liquibase_attributes(column.group("attributes")).get("name"),
+                )
+                if column_name is None:
+                    continue
+                offset = body_offset + add_column.start("body") + column.start()
+                facts.append((offset, MigrationFact(
+                    operation="add_column",
+                    table_name=table_name,
+                    column_name=column_name,
+                    destructive=False,
+                    evidence=_line_evidence(path, root, source, offset),
+                )))
+    return facts
+
+
+def _liquibase_attributes(source: str) -> dict[str, str]:
+    return {
+        match.group("name").lower(): match.group("value").strip()
+        for match in _LIQUIBASE_ATTRIBUTE.finditer(source)
+    }
+
+
+def _literal_liquibase_identifier(value: str | None) -> str | None:
+    if value is None or _LIQUIBASE_IDENTIFIER.fullmatch(value) is None:
+        return None
+    return value
+
+
+def _mask_xml_comments(source: str) -> str:
+    """Blank XML comments while preserving line offsets for source evidence."""
+    return re.sub(r"<!--.*?-->", lambda match: re.sub(r"[^\n]", " ", match.group()), source, flags=re.DOTALL)
 
 
 def _mask_sql_comments(source: str) -> str:

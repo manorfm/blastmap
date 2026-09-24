@@ -154,7 +154,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
     ) -> dict:
         """Full field-level schema of everything one microservice persists (tables/
-        documents/caches), plus source-proven SQL migration operations, including the concrete engine (postgres/mysql/mongodb/
+        documents/caches), plus source-proven SQL or Liquibase XML migration operations, including the concrete engine (postgres/mysql/mongodb/
         cassandra/dynamodb/redis/elasticsearch/sqlite/unknown) — describe_service only names
         these, this returns the actual fields. Migration facts are independently
         paginated and state only literal source operations, never execution state.

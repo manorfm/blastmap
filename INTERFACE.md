@@ -513,11 +513,13 @@ providers yield `sql_table` facts while MongoDB yields `document` facts. These d
 not replace the generated persistence entities.
 
 `migration_facts` is a separately paginated list of literal operations from SQL files
-under conventional migration/changelog directories (or Flyway `V...__...sql` names).
-It reports only proven create-table, add/drop-column, drop-table and create-index
-operations, with file/line evidence. `destructive: true` is limited to literal drop
-column/table operations. It does not claim that a migration executed, succeeded, or is
-safe for the data currently deployed.
+(including Prisma migrations) and Liquibase XML `changeSet` entries under conventional
+migration/changelog directories, plus Flyway `V...__...sql` names. It reports only
+proven create-table, add/drop-column, drop-table and create-index operations, with
+file/line evidence. Parameterized Liquibase values and YAML changelogs are not
+inferred. `destructive: true` is limited to literal drop column/table operations. It
+does not claim that a migration executed, succeeded, or is safe for the data currently
+deployed.
 
 `describe_entrypoint` accepts `max_edges` (default 50, maximum 200). Its
 `flow_pagination.truncated` field is `true` when more reachable flow exists, so an

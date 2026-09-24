@@ -1521,6 +1521,59 @@ def test_static_analysis_ignores_sql_outside_a_recognized_migration_location(tmp
     assert result.migration_facts == []
 
 
+def test_static_analysis_extracts_literal_liquibase_xml_migration_operations(tmp_path: Path):
+    changelog = tmp_path / "db" / "changelog" / "payment-method.xml"
+    changelog.parent.mkdir(parents=True)
+    changelog.write_text(
+        '''<databaseChangeLog>
+  <changeSet id="payment-method" author="orbitkb">
+    <createTable tableName="payment_method"/>
+    <addColumn tableName="payment_method"><column name="provider"/></addColumn>
+    <createIndex tableName="payment_method" indexName="payment_method_provider_idx"/>
+    <dropColumn tableName="payment_method" columnName="legacy_token"/>
+    <dropTable tableName="retired_payment_method"/>
+    <!-- <dropTable tableName="ignored_comment"/> -->
+    <dropTable tableName="${runtime_table}"/>
+  </changeSet>
+</databaseChangeLog>
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [
+        (fact.operation, fact.table_name, fact.column_name, fact.destructive,
+         fact.evidence.file_path, fact.evidence.start_line)
+        for fact in result.migration_facts
+    ] == [
+        ("create_table", "payment_method", None, False, "db/changelog/payment-method.xml", 3),
+        ("add_column", "payment_method", "provider", False, "db/changelog/payment-method.xml", 4),
+        ("create_index", "payment_method", None, False, "db/changelog/payment-method.xml", 5),
+        ("drop_column", "payment_method", "legacy_token", True, "db/changelog/payment-method.xml", 6),
+        ("drop_table", "retired_payment_method", None, True, "db/changelog/payment-method.xml", 7),
+    ]
+
+
+def test_static_analysis_extracts_prisma_sql_migration_operations(tmp_path: Path):
+    migration = tmp_path / "prisma" / "migrations" / "20260924120000_payment_method" / "migration.sql"
+    migration.parent.mkdir(parents=True)
+    migration.write_text(
+        'CREATE TABLE "payment_method" ("id" TEXT PRIMARY KEY);\n', encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [
+        (fact.operation, fact.table_name, fact.column_name, fact.destructive,
+         fact.evidence.file_path, fact.evidence.start_line)
+        for fact in result.migration_facts
+    ] == [
+        ("create_table", "payment_method", None, False,
+         "prisma/migrations/20260924120000_payment_method/migration.sql", 1),
+    ]
+
+
 def test_node_analyzer_extracts_literal_mongoose_collection_ownership(tmp_path: Path):
     (tmp_path / "order-model.ts").write_text(
         '''const Order = mongoose.model("Order", orderSchema, "orders");''', encoding="utf-8",

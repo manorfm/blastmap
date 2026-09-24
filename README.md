@@ -127,11 +127,12 @@ candidates are blended before that synthesis, so a broad lexical match does not 
 relevant meaning-based candidate. This stays within the normal candidate budget and
 does not call an LLM for retrieval.
 
-`describe_persistence` also exposes bounded, source-proven SQL migration facts from
-conventional migration/changelog directories and Flyway-style filenames. It reports
-only literal table, column and index operations; drop table/column is marked as
-destructive. These facts never claim that a migration has run or is safe for deployed
-data.
+`describe_persistence` also exposes bounded, source-proven migration facts from SQL
+files (including Prisma migrations) and Liquibase XML change sets in conventional
+migration/changelog directories, plus Flyway-style filenames. It reports only literal
+table, column and index operations; drop table/column is marked as destructive.
+Parameterized Liquibase values and YAML changelogs are intentionally not inferred.
+These facts never claim that a migration has run or is safe for deployed data.
 
 `plan_change` is the stable entrypoint for the planning workflow. Its initial version
 returns the evidence-backed affected surface, explicit unknowns and a response budget;
