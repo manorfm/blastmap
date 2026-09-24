@@ -648,6 +648,32 @@ app.route({ method: "POST", url: "/orders", handler: createOrder });
     )
 
 
+def test_node_analyzer_exposes_literal_fastify_route_object_with_multiple_methods(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import Fastify from "fastify";
+const app = Fastify();
+
+function readOrder(request: FastifyRequest, reply: FastifyReply) {
+  return orderService.find(request.params.id);
+}
+
+app.route({ method: ["GET", "POST"], url: "/orders/:id", handler: readOrder });
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
+        ("GET", "/orders/:id", "orders.readOrder"),
+        ("POST", "/orders/:id", "orders.readOrder"),
+    ]
+    assert any(
+        edge.source == "orders.readOrder" and edge.target == "orderService.find"
+        for edge in result.edges
+    )
+
+
 def test_node_analyzer_skips_fastify_route_object_with_dynamic_url(tmp_path: Path):
     (tmp_path / "orders.ts").write_text(
         '''import Fastify from "fastify";
