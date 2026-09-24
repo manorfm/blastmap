@@ -787,8 +787,14 @@ def plan_change(
         change_surface_result["contracts_at_risk"], {finding["service"] for finding in primary},
     )
     status = "insufficient_evidence" if not primary else "needs_decision" if decision_points else "ready"
+    repository_id = None
+    if repository is not None:
+        repository_id = repositories_repo.get_repository_by_name(conn, repository)["id"]
+    change_units = [] if decision_points else _derive_http_contract_review_units(
+        conn, [finding["service"] for finding in primary], repository_id,
+    )
     plan_run_id = change_plans_repo.record_plan(
-        conn, change_surface_result.get("run_id"), status, token_budget, decision_points,
+        conn, change_surface_result.get("run_id"), status, token_budget, decision_points, change_units,
     )
     response = {
         "plan_id": f"cp_{plan_run_id}",
@@ -799,7 +805,7 @@ def plan_change(
             "contracts_at_risk": change_surface_result["contracts_at_risk"],
         },
         "decision_points": decision_points,
-        "change_units": [],
+        "change_units": change_units,
         "unknowns": change_surface_result["unknowns"],
         "budget": {"requested_tokens": token_budget, "estimated_tokens": 0, "truncated": False},
     }
@@ -809,6 +815,55 @@ def plan_change(
         conn, plan_run_id, response["budget"]["estimated_tokens"], response["budget"]["truncated"],
     )
     return response
+
+
+def _derive_http_contract_review_units(
+    conn: sqlite3.Connection, primary_services: list[str], repository_id: int | None,
+) -> list[dict]:
+    """Return review units for fully resolved, source-proven internal HTTP calls."""
+    units: list[dict] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for service_name in primary_services:
+        source_service = services_repo.get_service_by_name(conn, service_name, repository_id=repository_id)
+        if source_service is None:
+            continue
+        for call in flows_repo.list_static_service_calls(conn, source_service["id"]):
+            method = call["target_method"]
+            path = call["target_path"]
+            if call["protocol"] != "http" or not isinstance(method, str) or not isinstance(path, str):
+                continue
+            target_service, _candidates = services_repo.resolve_service_reference(
+                conn, call["target_service"], source_service["repository_id"],
+            )
+            if target_service is None or flows_repo.get_entrypoint(
+                conn, target_service["id"], "http", method, path,
+            ) is None:
+                continue
+            key = service_name, target_service["name"], method, path
+            if key in seen:
+                continue
+            seen.add(key)
+            evidence = [{
+                "file": call["file_path"], "start_line": call["start_line"], "end_line": call["end_line"],
+            }]
+            contract = f"{method} {path}"
+            units.append({
+                "id": f"http-contract:{service_name}:{target_service['name']}:{method}:{path}",
+                "service": service_name,
+                "target": {"role": "integration", "symbol": call["source"], "evidence": evidence},
+                "action": "review",
+                "reason": (
+                    f"a source-proven HTTP call reaches {target_service['name']} {contract}; "
+                    "review both sides if this boundary changes."
+                ),
+                "preconditions": [],
+                "related_contracts": [contract],
+                "dependencies": [target_service["name"]],
+                "validation": [f"verify client and {target_service['name']} agree on {contract}"],
+                "confidence": 1.0,
+                "evidence": evidence,
+            })
+    return units
 
 
 def refine_change_plan(conn: sqlite3.Connection, plan_id: str, decisions: list[dict]) -> dict:
@@ -870,6 +925,20 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
 
 def _minimal_unit_reading(change_unit: dict) -> list[dict]:
     producer = change_unit["service"]
+    if change_unit["target"]["role"] == "integration":
+        target_service = change_unit["dependencies"][0]
+        return [
+            {
+                "service": producer,
+                "purpose": "confirm the literal outbound HTTP client",
+                "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
+            },
+            {
+                "service": target_service,
+                "purpose": "confirm the resolved target endpoint contract",
+                "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": target_service}},
+            },
+        ]
     reading = [{
         "service": producer,
         "purpose": "confirm the producer contract",

@@ -3,8 +3,16 @@ import json
 
 from jsonschema import validate
 
+from orbitkb.analysis.models import (
+    AnalysisResult,
+    EntryPoint,
+    Evidence,
+    StaticServiceCall,
+)
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import change_plans
+from orbitkb.db.repositories import flows as flows_repo
+from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.llm_harness import load_schema
 from orbitkb.mcp import queries
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
@@ -48,6 +56,85 @@ def test_plan_change_rejects_an_invalid_token_budget_without_calling_the_backend
         "error": "token_budget must be between 1 and 2200 (got 0)",
     }
     assert backend.calls == 0
+
+
+def test_plan_change_derives_an_http_contract_review_unit_for_a_resolved_static_endpoint(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "http-unit.db")
+    checkout = services_repo.get_service_by_name(conn, "checkout-service")
+    payments = services_repo.get_service_by_name(conn, "payments-service")
+    evidence = Evidence("CheckoutService.java", 18, 18)
+    flows_repo.replace_analysis(conn, checkout["id"], AnalysisResult(static_service_calls=[
+        StaticServiceCall(
+            source="CheckoutService.submit", target_service="payments-service", protocol="http",
+            target_method="POST", target_path="/authorizations", evidence=evidence,
+        ),
+    ]))
+    flows_repo.replace_analysis(conn, payments["id"], AnalysisResult(entrypoints=[
+        EntryPoint("http", "POST", "/authorizations", "PaymentsController.authorize", evidence),
+    ]))
+    backend = FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    })
+
+    result = queries.plan_change(conn, backend, "Add a payment method")
+
+    assert result["status"] == "ready"
+    assert result["change_units"] == [{
+        "id": "http-contract:checkout-service:payments-service:POST:/authorizations",
+        "service": "checkout-service",
+        "target": {
+            "role": "integration",
+            "symbol": "CheckoutService.submit",
+            "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+        },
+        "action": "review",
+        "reason": "a source-proven HTTP call reaches payments-service POST /authorizations; review both sides if this boundary changes.",
+        "preconditions": [],
+        "related_contracts": ["POST /authorizations"],
+        "dependencies": ["payments-service"],
+        "validation": ["verify client and payments-service agree on POST /authorizations"],
+        "confidence": 1.0,
+        "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+    }]
+
+
+def test_describe_change_unit_uses_http_specific_minimal_queries(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "http-unit-detail.db")
+    checkout = services_repo.get_service_by_name(conn, "checkout-service")
+    payments = services_repo.get_service_by_name(conn, "payments-service")
+    evidence = Evidence("CheckoutService.java", 18, 18)
+    flows_repo.replace_analysis(conn, checkout["id"], AnalysisResult(static_service_calls=[
+        StaticServiceCall(
+            source="CheckoutService.submit", target_service="payments-service", protocol="http",
+            target_method="POST", target_path="/authorizations", evidence=evidence,
+        ),
+    ]))
+    flows_repo.replace_analysis(conn, payments["id"], AnalysisResult(entrypoints=[
+        EntryPoint("http", "POST", "/authorizations", "PaymentsController.authorize", evidence),
+    ]))
+    plan = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Add a payment method")
+
+    result = queries.describe_change_unit(
+        conn, plan["plan_id"], "http-contract:checkout-service:payments-service:POST:/authorizations",
+    )
+
+    assert result["minimal_reading"] == [
+        {
+            "service": "checkout-service",
+            "purpose": "confirm the literal outbound HTTP client",
+            "recommended_query": {"tool": "describe_service", "arguments": {"service": "checkout-service"}},
+        },
+        {
+            "service": "payments-service",
+            "purpose": "confirm the resolved target endpoint contract",
+            "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": "payments-service"}},
+        },
+    ]
+    validate(result, load_schema("describe_change_unit"))
 
 
 def test_plan_change_requires_a_contract_compatibility_decision_for_affected_event_consumers(tmp_path):

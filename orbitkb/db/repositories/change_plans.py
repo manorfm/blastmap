@@ -13,12 +13,17 @@ def record_plan(
     status: str,
     requested_tokens: int,
     decision_points: list[dict],
+    change_units: list[dict],
 ) -> int:
     cur = conn.execute(
         """INSERT INTO change_plan_runs
-           (change_surface_run_id, status, requested_tokens, estimated_tokens, truncated, decision_points_json, created_at)
-           VALUES (?, ?, ?, 0, 0, ?, ?)""",
-        (change_surface_run_id, status, requested_tokens, json.dumps(decision_points, sort_keys=True), now()),
+           (change_surface_run_id, status, requested_tokens, estimated_tokens, truncated,
+            decision_points_json, change_units_json, created_at)
+           VALUES (?, ?, ?, 0, 0, ?, ?, ?)""",
+        (
+            change_surface_run_id, status, requested_tokens, json.dumps(decision_points, sort_keys=True),
+            json.dumps(change_units, sort_keys=True), now(),
+        ),
     )
     conn.commit()
     return cur.lastrowid

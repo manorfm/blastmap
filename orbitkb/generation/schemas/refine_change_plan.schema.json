@@ -29,12 +29,12 @@
             "required": ["role", "symbol", "evidence"],
             "additionalProperties": false,
             "properties": {
-              "role": {"type": "string", "enum": ["contract"]},
+              "role": {"type": "string", "enum": ["contract", "integration"]},
               "symbol": {"type": "string"},
               "evidence": {"type": "array", "items": {"type": "object"}}
             }
           },
-          "action": {"type": "string", "enum": ["validate", "modify"]},
+          "action": {"type": "string", "enum": ["validate", "modify", "review"]},
           "reason": {"type": "string"},
           "preconditions": {"type": "array", "items": {"type": "string"}},
           "related_contracts": {"type": "array", "items": {"type": "string"}},

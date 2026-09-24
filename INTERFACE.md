@@ -71,9 +71,10 @@ a durable `plan_id`, `status`, the bounded
 `budget` with requested and estimated response tokens. It emits an event-compatibility
 `decision_point` only when a primary producer has indexed consumers: the requester must
 choose preserved compatibility or a versioned rollout before consumer changes can be
-planned. `change_units` remain empty rather than guessing code targets from broad
-service matches. `ready` means a relevant indexed surface exists without a blocking
-decision; `needs_decision` means the compatibility choice is required; and
+planned. When no decision blocks the plan, `change_units` may include a review unit
+for a source-proven internal HTTP call only when its method, route and indexed remote
+endpoint all resolve. `ready` means a relevant indexed surface exists without a
+blocking decision; `needs_decision` means the compatibility choice is required; and
 `insufficient_evidence` means no indexed service matched the task. The audit record
 links to a surface synthesis when one exists and does not duplicate task text. The
 token budget is capped at 2,200 estimated response tokens.
@@ -87,8 +88,9 @@ model call. Retrying the same finalized selections is safe; changing a finalized
 choice is rejected, requiring a new plan and an explicit impact reassessment.
 
 `describe_change_unit` returns one persisted change unit, its validation checklist and
-the smallest producer/consumer `describe_messages` queries needed to verify that
-contract. It does not scan source, rerun retrieval or call a model.
+the smallest producer/consumer `describe_messages` queries needed to verify an event
+contract, or the client `describe_service` and remote `list_entrypoints` queries for a
+resolved HTTP boundary. It does not scan source, rerun retrieval or call a model.
 
 ## Compact change context
 

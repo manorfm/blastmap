@@ -138,6 +138,8 @@ an LLM, then returns source-bounded contract units for the selected event strate
 finalized decision is immutable within that plan.
 `describe_change_unit` exposes one accepted unit with its validation and the smallest
 producer/consumer contract queries needed before editing.
+When a primary service has a source-proven internal HTTP call whose remote method and
+route are indexed, `plan_change` also creates a contract-review unit for that boundary.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

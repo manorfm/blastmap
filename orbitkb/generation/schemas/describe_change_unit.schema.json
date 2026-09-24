@@ -19,7 +19,7 @@
             "required": ["tool", "arguments"],
             "additionalProperties": false,
             "properties": {
-              "tool": {"type": "string", "const": "describe_messages"},
+              "tool": {"type": "string", "enum": ["describe_messages", "describe_service", "list_entrypoints"]},
               "arguments": {
                 "type": "object",
                 "required": ["service"],
