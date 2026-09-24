@@ -33,6 +33,7 @@ from orbitkb.generation.llm_harness import load_schema
 from orbitkb.iac.models import (
     KubernetesConfigurationBinding,
     KubernetesConfigurationKeyMismatch,
+    KubernetesConfigurationSourceImportUnknown,
     KubernetesConfigurationSourceUnknown,
 )
 from orbitkb.mcp import queries
@@ -500,6 +501,61 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_configuration
         conn,
         result["plan_id"],
         "runtime-configuration-source-unknown:checkout-service:config_map:external-config:orders-topic:ORDERS_TOPIC",
+    )
+    assert detail["minimal_reading"] == [{
+        "service": "checkout-service",
+        "purpose": "confirm the owner of the unresolved Kubernetes configuration source",
+        "recommended_query": {"tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"}},
+    }]
+    validate(detail, load_schema("describe_change_unit"))
+
+
+def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_source(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "runtime-configuration-source-import-unknown-unit.db")
+    checkout = services_repo.get_service_by_name(conn, "checkout-service")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    conn.execute("UPDATE services SET repository_id = ? WHERE id = ?", (repository_id, checkout["id"]))
+    conn.commit()
+    kubernetes_configuration_repo.replace_kubernetes_configuration_source_import_unknowns(conn, repository_id, [
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix="ORDERS_",
+            reference_file_path="deploy/checkout.yaml", reference_start_line=12, reference_end_line=15,
+            matched_service_name="checkout-service",
+        ),
+    ])
+
+    result = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Change checkout configuration", repository="shop")
+
+    assert result["change_units"] == [{
+        "id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        "service": "checkout-service",
+        "target": {
+            "role": "configuration",
+            "symbol": "kubernetes:config_map:external-config",
+            "evidence": [{"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 15}],
+        },
+        "action": "review",
+        "reason": (
+            "checkout-service imports keys from ConfigMap external-config through envFrom, but no matching local "
+            "declaration was indexed."
+        ),
+        "preconditions": [],
+        "related_contracts": ["configuration:config_map:external-config"],
+        "dependencies": [],
+        "validation": [
+            "confirm the owning repository, chart, controller, or deployment process for ConfigMap external-config",
+            "verify required configuration keys are supplied by the owning delivery boundary before rollout",
+        ],
+        "confidence": 0.4,
+        "evidence": [{"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 15}],
+    }]
+    detail = queries.describe_change_unit(
+        conn,
+        result["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
     )
     assert detail["minimal_reading"] == [{
         "service": "checkout-service",

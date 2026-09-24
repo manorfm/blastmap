@@ -172,6 +172,9 @@ When a primary service references a Kubernetes source that was not declared loca
 `plan_change` adds a low-confidence ownership review. It asks which repository,
 chart, controller or delivery process owns that source; it never assumes the source
 must be created in the indexed repository.
+The same ownership review is created once per unresolved `envFrom` source for a
+primary service, grouping its references even when prefixes differ. It does not
+infer which keys the imported source supplies.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

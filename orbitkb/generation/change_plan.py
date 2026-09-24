@@ -492,6 +492,60 @@ def derive_runtime_configuration_source_unknown_review_units(
     return units
 
 
+def derive_runtime_configuration_source_import_unknown_review_units(
+    unknowns_by_service: dict[str, list[dict]], primary_services: set[str],
+) -> list[dict]:
+    """Turn unresolved ``envFrom`` sources into ownership reviews.
+
+    The same source can be imported with distinct prefixes, but source ownership is
+    one decision. Grouping by source preserves every reference as evidence while
+    avoiding duplicate units and never inventing imported key names.
+    """
+    units: list[dict] = []
+    for service in sorted(primary_services):
+        grouped: dict[tuple[str, str], list[dict]] = {}
+        for unknown in unknowns_by_service.get(service, []):
+            if not isinstance(unknown, dict):
+                continue
+            source_kind = unknown.get("source_kind")
+            source_name = unknown.get("source_name")
+            reference = {
+                "file": unknown.get("reference_file_path"), "start_line": unknown.get("reference_start_line"),
+                "end_line": unknown.get("reference_end_line"),
+            }
+            if (
+                all(isinstance(value, str) and value for value in (source_kind, source_name))
+                and _unique_evidence([reference])
+            ):
+                grouped.setdefault((source_kind, source_name), []).append(reference)
+        for (source_kind, source_name), references in sorted(grouped.items()):
+            evidence = _sorted_evidence(references)
+            source_label = "ConfigMap" if source_kind == "config_map" else "Secret"
+            units.append({
+                "id": f"runtime-configuration-source-import-unknown:{service}:{source_kind}:{source_name}",
+                "service": service,
+                "target": {
+                    "role": "configuration", "symbol": f"kubernetes:{source_kind}:{source_name}",
+                    "evidence": evidence,
+                },
+                "action": "review",
+                "reason": (
+                    f"{service} imports keys from {source_label} {source_name} through envFrom, but no matching "
+                    "local declaration was indexed."
+                ),
+                "preconditions": [],
+                "related_contracts": [f"configuration:{source_kind}:{source_name}"],
+                "dependencies": [],
+                "validation": [
+                    f"confirm the owning repository, chart, controller, or deployment process for {source_label} {source_name}",
+                    "verify required configuration keys are supplied by the owning delivery boundary before rollout",
+                ],
+                "confidence": 0.4,
+                "evidence": evidence,
+            })
+    return units
+
+
 def _unique_evidence(items: list[dict]) -> list[dict]:
     seen: set[tuple[str, int, int]] = set()
     evidence: list[dict] = []
