@@ -89,3 +89,8 @@ async def test_plan_change_is_reachable_over_stdio(tmp_path: Path):
             }))
             assert refined["status"] == "insufficient_evidence"
             assert refined["selected_decisions"] == []
+
+            missing_unit = content_json(await session.call_tool("describe_change_unit", {
+                "plan_id": result["plan_id"], "change_unit_id": "missing",
+            }))
+            assert missing_unit == {"error": "unknown change_unit_id: missing"}

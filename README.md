@@ -104,7 +104,7 @@ Start broad, then narrow the request.
 
 | Need | Start with | Follow with |
 | --- | --- | --- |
-| Start a change plan | `plan_change` | `refine_change_plan`, `get_change_context` |
+| Start a change plan | `plan_change` | `refine_change_plan`, `describe_change_unit` |
 | Plan an epic | `get_change_context` | `describe_service`, `describe_entrypoint` |
 | Find likely impact | `find_change_surface` | `get_relationships`, `describe_api` |
 | Understand a request path or its static error mapping | `list_entrypoints` | `describe_entrypoint` |
@@ -136,6 +136,8 @@ run when available and does not duplicate the task text. `refine_change_plan` re
 one declared option for every pending decision without repeating retrieval or calling
 an LLM, then returns source-bounded contract units for the selected event strategy; a
 finalized decision is immutable within that plan.
+`describe_change_unit` exposes one accepted unit with its validation and the smallest
+producer/consumer contract queries needed before editing.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

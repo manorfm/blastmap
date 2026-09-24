@@ -167,6 +167,41 @@ def test_refine_change_plan_marks_the_contract_unit_for_modification_when_versio
     assert unit["dependencies"] == ["notification-service"]
 
 
+def test_describe_change_unit_returns_only_the_persisted_unit_and_minimal_queries(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "unit-detail.db")
+    plan = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "payments-service", "reason": "owns payment authorization", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Add a payment method")
+    refined = queries.refine_change_plan(conn, plan["plan_id"], [{
+        "id": "event-compatibility:payments-service:payment_authorized",
+        "option": "preserve backward compatibility",
+    }])
+
+    result = queries.describe_change_unit(
+        conn, plan["plan_id"], "event-contract:payments-service:payment_authorized",
+    )
+
+    assert result == {
+        "plan_id": plan["plan_id"],
+        "change_unit": refined["change_units"][0],
+        "minimal_reading": [
+            {
+                "service": "payments-service",
+                "purpose": "confirm the producer contract",
+                "recommended_query": {"tool": "describe_messages", "arguments": {"service": "payments-service"}},
+            },
+            {
+                "service": "notification-service",
+                "purpose": "confirm consumer compatibility",
+                "recommended_query": {"tool": "describe_messages", "arguments": {"service": "notification-service"}},
+            },
+        ],
+        "validation": ["verify payment_authorized remains compatible with notification-service"],
+    }
+    validate(result, load_schema("describe_change_unit"))
+
+
 def test_plan_change_persists_an_insufficient_evidence_plan_without_a_surface_run(tmp_path):
     conn = open_db(tmp_path / "empty.db")
 

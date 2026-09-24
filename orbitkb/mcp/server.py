@@ -379,6 +379,17 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.refine_change_plan(conn, plan_id, decisions)
 
     @mcp.tool()
+    def describe_change_unit(plan_id: str, change_unit_id: str) -> dict:
+        """Return one accepted change unit and only its required follow-up context.
+
+        The result is sourced from the persisted plan. It recommends compact message
+        contract queries for the producer and indexed consumers; it never scans files
+        or reruns retrieval.
+        """
+        with closing(_conn()) as conn:
+            return queries.describe_change_unit(conn, plan_id, change_unit_id)
+
+    @mcp.tool()
     def record_change_context_feedback(
         run_id: int,
         outcome: str,

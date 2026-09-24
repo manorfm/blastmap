@@ -846,6 +846,46 @@ def _refined_plan_response(plan_id: str, status: str, selections: list[dict], ch
     }
 
 
+def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id: str) -> dict:
+    """Return one persisted unit and its smallest source-free reading path."""
+    match = re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)
+    if match is None:
+        return {"error": "invalid plan_id"}
+    stored_plan = change_plans_repo.get_plan(conn, int(match.group(1)))
+    if stored_plan is None:
+        return {"error": f"unknown plan_id: {plan_id}"}
+    change_unit = next(
+        (unit for unit in json.loads(stored_plan["change_units_json"]) if unit.get("id") == change_unit_id),
+        None,
+    )
+    if change_unit is None:
+        return {"error": f"unknown change_unit_id: {change_unit_id}"}
+    return {
+        "plan_id": plan_id,
+        "change_unit": change_unit,
+        "minimal_reading": _minimal_unit_reading(change_unit),
+        "validation": change_unit["validation"],
+    }
+
+
+def _minimal_unit_reading(change_unit: dict) -> list[dict]:
+    producer = change_unit["service"]
+    reading = [{
+        "service": producer,
+        "purpose": "confirm the producer contract",
+        "recommended_query": {"tool": "describe_messages", "arguments": {"service": producer}},
+    }]
+    for consumer in change_unit["dependencies"]:
+        if consumer == producer:
+            continue
+        reading.append({
+            "service": consumer,
+            "purpose": "confirm consumer compatibility",
+            "recommended_query": {"tool": "describe_messages", "arguments": {"service": consumer}},
+        })
+    return reading
+
+
 def get_change_context(
     conn: sqlite3.Connection,
     backend: LLMBackend,

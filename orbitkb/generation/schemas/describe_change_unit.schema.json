@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "required": ["plan_id", "change_unit", "minimal_reading", "validation"],
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {"type": "string", "pattern": "^cp_[1-9][0-9]*$"},
+    "change_unit": {"type": "object"},
+    "minimal_reading": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["service", "purpose", "recommended_query"],
+        "additionalProperties": false,
+        "properties": {
+          "service": {"type": "string"},
+          "purpose": {"type": "string"},
+          "recommended_query": {
+            "type": "object",
+            "required": ["tool", "arguments"],
+            "additionalProperties": false,
+            "properties": {
+              "tool": {"type": "string", "const": "describe_messages"},
+              "arguments": {
+                "type": "object",
+                "required": ["service"],
+                "additionalProperties": false,
+                "properties": {"service": {"type": "string"}}
+              }
+            }
+          }
+        }
+      }
+    },
+    "validation": {"type": "array", "items": {"type": "string"}}
+  }
+}

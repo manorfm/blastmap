@@ -43,16 +43,18 @@ treated as deletion.
 2. When `plan_change` returns `needs_decision`, call
    `refine_change_plan(plan_id, decisions)` with exactly one declared option for every
    pending decision. This updates the existing plan without rerunning retrieval.
-3. Call `list_services(repository?)`; use its repository field to qualify
+3. Call `describe_change_unit(plan_id, change_unit_id)` for one accepted work item and
+   its smallest suggested follow-up context.
+4. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
-4. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
+5. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, message, CLI or job
    entrypoint.
-5. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
+6. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
    reachable deterministic flow evidence.
-6. Use `describe_api`, `describe_persistence`, `describe_messages`,
+7. Use `describe_api`, `describe_persistence`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.
-7. Call `list_security_findings(service)` before changing credentials,
+8. Call `list_security_findings(service)` before changing credentials,
    configuration or an external integration; it returns locations and remediation,
    never source excerpts or secret values.
 
@@ -83,6 +85,10 @@ compatibility produces a validation unit; a versioned rollout produces a modific
 unit, both listing indexed consumers as dependencies. It performs no retrieval or
 model call. Retrying the same finalized selections is safe; changing a finalized
 choice is rejected, requiring a new plan and an explicit impact reassessment.
+
+`describe_change_unit` returns one persisted change unit, its validation checklist and
+the smallest producer/consumer `describe_messages` queries needed to verify that
+contract. It does not scan source, rerun retrieval or call a model.
 
 ## Compact change context
 
