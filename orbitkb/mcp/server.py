@@ -195,6 +195,17 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.describe_configuration(conn, service, limit, offset, repository)
 
     @mcp.tool()
+    def describe_feature_flags(
+        service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
+    ) -> dict:
+        """List literal feature-flag reads through a locally proven SDK. It returns
+        only key, provider and source evidence: values, targeting rules, rollout state,
+        dynamic keys and runtime evaluation are excluded. Capped at `limit` bindings
+        (default 50) starting at `offset`; pass repository when service names duplicate."""
+        with closing(_conn()) as conn:
+            return queries.describe_feature_flags(conn, service, limit, offset, repository)
+
+    @mcp.tool()
     def describe_messages(
         service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
     ) -> dict:

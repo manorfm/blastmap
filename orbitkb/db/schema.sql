@@ -133,6 +133,22 @@ CREATE TABLE IF NOT EXISTS static_configuration_bindings (
 CREATE INDEX IF NOT EXISTS idx_static_configuration_bindings_service
     ON static_configuration_bindings(service_id);
 
+-- Literal feature-flag reads through a locally proven SDK. Flag values and
+-- rollout state are runtime concerns and deliberately never enter the KB.
+CREATE TABLE IF NOT EXISTS static_feature_flags (
+    id          INTEGER PRIMARY KEY,
+    service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    source      TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    provider    TEXT NOT NULL,
+    file_path   TEXT NOT NULL,
+    start_line  INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_static_feature_flags_service
+    ON static_feature_flags(service_id);
+
 -- `provider` is the concrete message broker/vendor (kafka, rabbitmq, sqs, sns,
 -- service_bus, activemq, nats), inferred by the LLM from real code the same way
 -- service_calls.target_kind is — 'unknown' means the code only showed a

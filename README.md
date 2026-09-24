@@ -110,6 +110,7 @@ Start broad, then narrow the request.
 | Understand a request path or its static error mapping | `list_entrypoints` | `describe_entrypoint` |
 | Inspect data or events | `describe_persistence`, `describe_messages` | `get_relationships` |
 | Inspect runtime configuration use | `describe_configuration` | `describe_entrypoint`, `list_security_findings` |
+| Inspect feature-flag reads | `describe_feature_flags` | `describe_entrypoint`, `list_security_findings` |
 | Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |
 | Compare runtime and static paths | `describe_runtime_divergence` | `describe_entrypoint` |
@@ -212,6 +213,11 @@ resolution are never indexed or returned. A literal Spring
 `@ConfigurationProperties` prefix also yields canonical keys for direct Java fields
 and Kotlin primary-constructor parameters; dynamic prefixes and other binding styles
 remain unknown.
+
+`describe_feature_flags` lists literal feature-flag reads through a locally proven
+SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and
+symbol/file evidence only: flag values, targeting, rollout state, dynamic keys and
+runtime evaluation are never indexed or returned.
 
 Explicit Spring mappings for known timeout exception types retain their literal HTTP
 status, including 500, 503 and 504, so agents can distinguish an internal-error

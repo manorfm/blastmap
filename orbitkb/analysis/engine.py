@@ -45,6 +45,7 @@ from orbitkb.analysis.models import (
     EntryPoint,
     ErrorContract,
     Evidence,
+    FeatureFlag,
     FlowBoundary,
     FlowEdge,
     Injection,
@@ -960,6 +961,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         tree = self.parse(source)
         result = AnalysisResult()
         imports = _node_named_imports(source_text)
+        launchdarkly_clients = _launchdarkly_client_variables(source_text, imports)
         graphql_error_constructors = _graphql_error_constructors(imports)
         mongoose_models = _mongoose_model_variables(source_text)
         prisma_clients = _prisma_client_variables(source_text)
@@ -971,12 +973,12 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             functions_by_name[function.name] = function
             self._record_function(
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
-                client_declarations, command_imports,
+                client_declarations, command_imports, launchdarkly_clients,
             )
         for function, method, route in _nest_http_entrypoint_functions(tree, source, imports):
             self._record_function(
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
-                client_declarations, command_imports,
+                client_declarations, command_imports, launchdarkly_clients,
             )
             result.entrypoints.append(
                 EntryPoint("http", method, route, function.symbol, _evidence(path, root, function.declaration))
@@ -1033,7 +1035,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                     )
                     self._record_function(
                         result, handler, path, root, source, imports, mongoose_models, prisma_clients,
-                        client_declarations, command_imports,
+                        client_declarations, command_imports, launchdarkly_clients,
                     )
             if path_value is None or handler is None:
                 continue
@@ -1066,6 +1068,9 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
                 result.error_contracts.extend(
                     _graphql_error_contracts(function, path, root, source, graphql_error_constructors)
+                )
+                result.feature_flags.extend(
+                    _node_launchdarkly_feature_flags(function, path, root, source, launchdarkly_clients)
                 )
         for node in _walk(tree):
             if node.type != "call_expression":
@@ -1119,6 +1124,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         prisma_clients: frozenset[str],
         client_declarations: dict,
         command_imports: dict[str, tuple[str, str]],
+        launchdarkly_clients: frozenset[str],
     ) -> None:
         """Store one Node handler and every bounded fact derived from it."""
         result.symbols.append(_symbol(function, path, root, imports=imports))
@@ -1129,6 +1135,9 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         result.cloud_facts.extend(function_cloud_facts)
         result.boundaries.extend(self._boundaries_for(function, path, root, source))
         result.error_contracts.extend(_node_http_error_contracts(function, path, root, source))
+        result.feature_flags.extend(
+            _node_launchdarkly_feature_flags(function, path, root, source, launchdarkly_clients)
+        )
 
     @staticmethod
     def _edges_for_node(
@@ -1239,6 +1248,56 @@ def _node_response_receiver(function: _Function, source: bytes) -> str | None:
         return None
     receiver = _text(identifier, source)
     return receiver if receiver in _NODE_RESPONSE_PARAMETER_NAMES else None
+
+
+_LAUNCHDARKLY_INITIALIZERS = frozenset({
+    "launchdarkly-node-server-sdk.initialize",
+    "node-server-sdk.initialize",
+})
+_LAUNCHDARKLY_FLAG_METHODS = "variation|boolVariation|stringVariation|numberVariation|jsonVariation"
+_FEATURE_FLAG_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
+
+
+def _launchdarkly_client_variables(source: str, imports: tuple[tuple[str, str], ...]) -> frozenset[str]:
+    """Return variables initialized by an explicitly imported LaunchDarkly SDK."""
+    initializers = [local for local, imported in imports if imported in _LAUNCHDARKLY_INITIALIZERS]
+    if not initializers:
+        return frozenset()
+    initializer_pattern = "|".join(re.escape(name) for name in initializers)
+    return frozenset(re.findall(
+        rf"\b(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?(?:{initializer_pattern})\s*\(", source,
+    ))
+
+
+def _node_launchdarkly_feature_flags(
+    function: _Function,
+    path: Path,
+    root: Path,
+    source: bytes,
+    clients: frozenset[str],
+) -> list[FeatureFlag]:
+    """Extract literal reads on local LaunchDarkly clients without evaluating values."""
+    if not clients:
+        return []
+    declaration = _text(function.declaration, source)
+    receivers = "|".join(re.escape(client) for client in sorted(clients))
+    pattern = re.compile(
+        rf"\b(?:{receivers})\s*\.\s*(?:{_LAUNCHDARKLY_FLAG_METHODS})\s*\(\s*['\"]([^'\"]+)['\"]",
+    )
+    flags: list[FeatureFlag] = []
+    for match in pattern.finditer(declaration):
+        key = match.group(1)
+        if _FEATURE_FLAG_KEY.fullmatch(key) is None:
+            continue
+        flags.append(FeatureFlag(
+            source=function.symbol,
+            key=key,
+            provider="launchdarkly",
+            evidence=_declaration_match_evidence(
+                path, root, function.declaration, declaration, match.start(), match.end(),
+            ),
+        ))
+    return flags
 
 
 _GRAPHQL_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")

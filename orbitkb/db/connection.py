@@ -4,7 +4,7 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "22"
+SCHEMA_VERSION = "23"
 DEFAULT_DB_PATH = Path.home() / ".orbitkb" / "orbitkb.db"
 
 

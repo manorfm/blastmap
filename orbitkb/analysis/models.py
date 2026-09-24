@@ -149,6 +149,16 @@ class ConfigurationBinding:
 
 
 @dataclass(frozen=True)
+class FeatureFlag:
+    """A literal flag key read through a locally proven feature-flag SDK."""
+
+    source: str
+    key: str
+    provider: str
+    evidence: Evidence
+
+
+@dataclass(frozen=True)
 class CloudFact:
     """A cloud SDK operation proven by locally-declared type or import — see
     orbitkb/analysis/cloud_taxonomy.py for the vendor-sourced vocabulary this
@@ -180,6 +190,7 @@ class AnalysisResult:
     persistence_facts: list[PersistenceFact] = field(default_factory=list)
     migration_facts: list[MigrationFact] = field(default_factory=list)
     configuration_bindings: list[ConfigurationBinding] = field(default_factory=list)
+    feature_flags: list[FeatureFlag] = field(default_factory=list)
     cloud_facts: list[CloudFact] = field(default_factory=list)
 
     def extend(self, other: AnalysisResult) -> None:
@@ -196,4 +207,5 @@ class AnalysisResult:
         self.persistence_facts.extend(other.persistence_facts)
         self.migration_facts.extend(other.migration_facts)
         self.configuration_bindings.extend(other.configuration_bindings)
+        self.feature_flags.extend(other.feature_flags)
         self.cloud_facts.extend(other.cloud_facts)

@@ -4,6 +4,7 @@ from orbitkb.analysis.models import (
     ConfigurationBinding,
     EntryPoint,
     Evidence,
+    FeatureFlag,
     FlowEdge,
     MessageContract,
     MigrationFact,
@@ -154,3 +155,21 @@ def test_static_configuration_bindings_are_replaced_with_the_flow_snapshot(tmp_p
 
     flows.replace_analysis(conn, service_id, AnalysisResult())
     assert flows.list_static_configuration_bindings(conn, service_id) == []
+
+
+def test_static_feature_flags_are_replaced_with_the_flow_snapshot(tmp_path):
+    conn = open_db(tmp_path / "feature-flags.db")
+    service_id = services.ensure_service(conn, "checkout", "/repos/checkout", "node-ts")
+    evidence = Evidence("checkout.ts", 8, 8)
+
+    flows.replace_analysis(conn, service_id, AnalysisResult(feature_flags=[
+        FeatureFlag("checkout.checkout", "checkout.new-payment-flow", "launchdarkly", evidence),
+    ]))
+
+    assert [dict(row) for row in flows.list_static_feature_flags(conn, service_id)] == [{
+        "source": "checkout.checkout", "key": "checkout.new-payment-flow", "provider": "launchdarkly",
+        "file_path": "checkout.ts", "start_line": 8, "end_line": 8,
+    }]
+
+    flows.replace_analysis(conn, service_id, AnalysisResult())
+    assert flows.list_static_feature_flags(conn, service_id) == []

@@ -1901,6 +1901,33 @@ def test_static_analysis_extracts_literal_node_environment_bindings_without_valu
     ]
 
 
+def test_node_analyzer_extracts_literal_launchdarkly_feature_flag_reads(tmp_path: Path):
+    (tmp_path / "checkout.ts").write_text(
+        '''import { initialize as initializeFlags } from "launchdarkly-node-server-sdk";
+const flags = initializeFlags(process.env.LAUNCHDARKLY_SDK_KEY);
+
+export function checkout(context: Context) {
+  const enabled = flags.variation("checkout.new-payment-flow", context, false);
+  const style = flags.stringVariation("checkout.button-style", context, "classic");
+  return { enabled, style };
+}
+
+export function ignored(client: FlagClient, context: Context) {
+  return client.variation("not-a-proven-flag-client", context, false);
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(flag.source, flag.key, flag.provider, flag.evidence.file_path, flag.evidence.start_line)
+            for flag in result.feature_flags] == [
+        ("checkout.checkout", "checkout.new-payment-flow", "launchdarkly", "checkout.ts", 5),
+        ("checkout.checkout", "checkout.button-style", "launchdarkly", "checkout.ts", 6),
+    ]
+
+
 def test_static_analysis_extracts_literal_jvm_and_go_environment_bindings(tmp_path: Path):
     (tmp_path / "Config.java").write_text(
         '''class Config {
