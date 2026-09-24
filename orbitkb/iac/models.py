@@ -62,3 +62,20 @@ class KubernetesConfigurationSource:
     file_path: str
     start_line: int
     end_line: int
+
+
+@dataclass(frozen=True)
+class KubernetesConfigurationKeyMismatch:
+    """A workload key absent from its one locally declared configuration source."""
+
+    environment_key: str
+    source_kind: str
+    source_name: str
+    source_key: str
+    reference_file_path: str
+    reference_start_line: int
+    reference_end_line: int
+    declaration_file_path: str
+    declaration_start_line: int
+    declaration_end_line: int
+    matched_service_name: str | None = None

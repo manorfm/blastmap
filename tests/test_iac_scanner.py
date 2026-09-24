@@ -82,6 +82,27 @@ def test_kubernetes_environment_references_are_attributed_to_the_containing_serv
     ]
 
 
+def test_kubernetes_scanner_reports_a_missing_key_only_for_one_local_source_declaration(tmp_path: Path):
+    service = tmp_path / "orders-service"
+    service.mkdir()
+    (service / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders\nspec:\n"
+        "  template:\n    spec:\n      containers:\n        - name: api\n          env:\n"
+        "            - name: ORDERS_TOPIC\n              valueFrom:\n                configMapKeyRef:\n"
+        "                  name: orders-config\n                  key: orders-topic\n"
+    )
+    (service / "config.yaml").write_text(
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: orders-config\ndata:\n  other-key: value\n"
+    )
+
+    facts = scan_repository_facts(tmp_path, [_candidate("orders-service", service)])
+
+    assert [(issue.environment_key, issue.source_kind, issue.source_name, issue.source_key,
+             issue.matched_service_name) for issue in facts.configuration_key_mismatches] == [
+        ("ORDERS_TOPIC", "config_map", "orders-config", "orders-topic", "orders-service"),
+    ]
+
+
 def test_helm_template_is_skipped_not_mis_parsed(tmp_path: Path):
     chart_root = tmp_path / "chart"
     templates_dir = chart_root / "templates"
