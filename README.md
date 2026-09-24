@@ -140,6 +140,9 @@ finalized decision is immutable within that plan.
 producer/consumer contract queries needed before editing.
 When a primary service has a source-proven internal HTTP call whose remote method and
 route are indexed, `plan_change` also creates a contract-review unit for that boundary.
+It also adds an error-mapping review only for a high-confidence, source-proven local
+degradation of a known client/domain error into HTTP 5xx. This remains a review because
+middleware, gateways and external contracts can affect the runtime response.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

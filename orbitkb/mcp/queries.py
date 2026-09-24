@@ -35,6 +35,7 @@ from orbitkb.generation.change_context import MAX_CONTEXT_SERVICES, build_change
 from orbitkb.generation.change_plan import (
     derive_change_units,
     derive_decision_points,
+    derive_error_mapping_review_units,
     validate_decision_selections,
 )
 from orbitkb.generation.freshness import compute_freshness
@@ -793,9 +794,16 @@ def plan_change(
     repository_id = None
     if repository is not None:
         repository_id = repositories_repo.get_repository_by_name(conn, repository)["id"]
-    change_units = [] if decision_points else _derive_http_contract_review_units(
-        conn, [finding["service"] for finding in primary], repository_id,
-    )
+    primary_services = {finding["service"] for finding in primary}
+    error_mapping_services = {
+        service
+        for service in primary_services
+        if len(services_repo.list_service_candidates_by_name(conn, service)) == 1
+    }
+    change_units = [] if decision_points else [
+        *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
+        *derive_error_mapping_review_units(find_architecture_smells(conn)["findings"], error_mapping_services),
+    ]
     plan_run_id = change_plans_repo.record_plan(
         conn, change_surface_result.get("run_id"), status, token_budget, decision_points, change_units,
     )
@@ -977,6 +985,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
                 "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": target_service}},
             },
         ]
+    if change_unit["target"]["role"] == "error_mapping":
+        return [{
+            "service": producer,
+            "purpose": "identify the entrypoint that owns the public error contract",
+            "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": producer}},
+        }]
     reading = [{
         "service": producer,
         "purpose": "confirm the producer contract",

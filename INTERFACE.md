@@ -75,11 +75,13 @@ a durable `plan_id`, `status`, the bounded
 choose preserved compatibility or a versioned rollout before consumer changes can be
 planned. When no decision blocks the plan, `change_units` may include a review unit
 for a source-proven internal HTTP call only when its method, route and indexed remote
-endpoint all resolve. `ready` means a relevant indexed surface exists without a
-blocking decision; `needs_decision` means the compatibility choice is required; and
-`insufficient_evidence` means no indexed service matched the task. The audit record
-links to a surface synthesis when one exists and does not duplicate task text. The
-token budget is capped at 2,200 estimated response tokens.
+endpoint all resolve. It may also include an `error_mapping` review unit only for a
+high-confidence static finding that a known local client/domain error maps to HTTP 5xx;
+this is advisory, since middleware and gateways are not proved. `ready` means a
+relevant indexed surface exists without a blocking decision; `needs_decision` means the
+compatibility choice is required; and `insufficient_evidence` means no indexed service
+matched the task. The audit record links to a surface synthesis when one exists and does
+not duplicate task text. The token budget is capped at 2,200 estimated response tokens.
 
 `refine_change_plan` accepts only the pending plan's declared IDs and options. It
 requires one selection per decision, persists the selections, then returns `ready`

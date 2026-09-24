@@ -6,13 +6,17 @@ from jsonschema import validate
 from orbitkb.analysis.models import (
     AnalysisResult,
     EntryPoint,
+    ErrorContract,
     Evidence,
     StaticServiceCall,
 )
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import change_plans
 from orbitkb.db.repositories import flows as flows_repo
+from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation.architecture import recompute_architecture_view
+from orbitkb.generation.change_plan import derive_error_mapping_review_units
 from orbitkb.generation.llm_harness import load_schema
 from orbitkb.mcp import queries
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
@@ -97,6 +101,96 @@ def test_plan_change_derives_an_http_contract_review_unit_for_a_resolved_static_
         "confidence": 1.0,
         "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
     }]
+
+
+def test_plan_change_derives_an_error_mapping_review_unit_for_a_proven_4xx_to_5xx_degradation(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "error-unit.db")
+    payments = services_repo.get_service_by_name(conn, "payments-service")
+    messages_repo.replace_messages(conn, payments["id"], [], [])
+    origin_evidence = Evidence("PaymentService.java", 24, 24)
+    mapping_evidence = Evidence("ApiExceptionHandler.java", 42, 42)
+    flows_repo.replace_analysis(conn, payments["id"], AnalysisResult(error_contracts=[
+        ErrorContract(
+            source="PaymentService.authorize", role="raises", error_kind="conflict",
+            internal_type="PaymentConflict", protocol="internal", transport_code=None,
+            public_code=None, exposes_internal_detail=False, retryability="not_retryable",
+            evidence=origin_evidence,
+        ),
+        ErrorContract(
+            source="ApiExceptionHandler.handlePaymentConflict", role="maps", error_kind="unexpected",
+            internal_type="PaymentConflict", protocol="http", transport_code="500",
+            public_code=None, exposes_internal_detail=False, retryability="unknown",
+            evidence=mapping_evidence,
+        ),
+    ]))
+    recompute_architecture_view(conn)
+
+    result = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "payments-service", "reason": "owns authorization", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Preserve payment conflict semantics")
+
+    assert result["status"] == "ready"
+    assert result["change_units"] == [{
+        "id": "error-mapping:payments-service:PaymentConflict:ApiExceptionHandler.handlePaymentConflict:500",
+        "service": "payments-service",
+        "target": {
+            "role": "error_mapping",
+            "symbol": "ApiExceptionHandler.handlePaymentConflict",
+            "evidence": [
+                {"file": "PaymentService.java", "start_line": 24, "end_line": 24},
+                {"file": "ApiExceptionHandler.java", "start_line": 42, "end_line": 42},
+            ],
+        },
+        "action": "review",
+        "reason": (
+            "PaymentService.authorize raises conflict error 'PaymentConflict', but "
+            "ApiExceptionHandler.handlePaymentConflict maps the same type to HTTP 500."
+        ),
+        "preconditions": [],
+        "related_contracts": ["error:PaymentConflict", "HTTP 500"],
+        "dependencies": [],
+        "validation": [
+            "verify PaymentConflict preserves a documented client-error response or document the HTTP 500 translation",
+        ],
+        "confidence": 0.85,
+        "evidence": [
+            {"file": "PaymentService.java", "start_line": 24, "end_line": 24},
+            {"file": "ApiExceptionHandler.java", "start_line": 42, "end_line": 42},
+        ],
+    }]
+    detail = queries.describe_change_unit(
+        conn,
+        result["plan_id"],
+        "error-mapping:payments-service:PaymentConflict:ApiExceptionHandler.handlePaymentConflict:500",
+    )
+    assert detail["minimal_reading"] == [{
+        "service": "payments-service",
+        "purpose": "identify the entrypoint that owns the public error contract",
+        "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": "payments-service"}},
+    }]
+    validate(detail, load_schema("describe_change_unit"))
+
+
+def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():
+    assert derive_error_mapping_review_units([
+        {
+            "kind": "possible_unmapped_downstream_error",
+            "services": ["checkout-service", "payments-service"],
+            "confidence": 0.75,
+            "detail": {"evidence": [{"file": "client.py", "start_line": 1, "end_line": 1}]},
+        },
+        {
+            "kind": "possible_error_semantics_lost",
+            "services": ["payments-service"],
+            "confidence": 0.75,
+            "detail": {
+                "error_type": "PaymentConflict",
+                "mapping": {"symbol": "ApiExceptionHandler.handle", "code": "500"},
+                "evidence": [{"file": "handler.py", "start_line": 1, "end_line": 1}],
+            },
+        },
+    ], {"payments-service"}) == []
 
 
 def test_describe_change_unit_uses_http_specific_minimal_queries(tmp_path):
