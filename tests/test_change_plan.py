@@ -28,6 +28,7 @@ from orbitkb.generation.change_plan import (
     derive_error_mapping_review_units,
     derive_persistence_migration_review_units,
     derive_runtime_configuration_review_units,
+    derive_runtime_configuration_source_import_unknown_review_units,
 )
 from orbitkb.generation.llm_harness import load_schema
 from orbitkb.iac.models import (
@@ -574,6 +575,21 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
         "recommended_query": {"tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"}},
     }]
     validate(detail, load_schema("describe_change_unit"))
+
+
+def test_env_from_source_import_review_requires_availability_confirmation_when_unknown():
+    units = derive_runtime_configuration_source_import_unknown_review_units({
+        "checkout-service": [{
+            "source_kind": "config_map", "source_name": "external-config", "prefix": None,
+            "optional": None, "reference_file_path": "deploy/checkout.yaml", "reference_start_line": 12,
+            "reference_end_line": 15,
+        }],
+    }, {"checkout-service"})
+
+    assert units[0]["validation"] == [
+        "confirm the owning repository, chart, controller, or deployment process for ConfigMap external-config",
+        "confirm source availability before relying on imported configuration during rollout",
+    ]
 
 
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():

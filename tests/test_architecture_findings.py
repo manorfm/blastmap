@@ -201,6 +201,32 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
     assert response["findings"][-1]["kind"] == "possible_kubernetes_configuration_source_import_not_declared_locally"
 
 
+def test_kubernetes_env_from_source_with_mixed_availability_stays_conservative(tmp_path: Path):
+    conn = open_db(tmp_path / "configuration-source-import-mixed-availability.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "orders", "/tmp/shop/orders", "node-ts", repository_id=repository_id)
+    kubernetes_configuration_repo.replace_kubernetes_configuration_source_import_unknowns(conn, repository_id, [
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="secret", source_name="external-secrets", prefix=None,
+            reference_file_path="deploy/orders.yaml", reference_start_line=12, reference_end_line=15,
+            optional=True, matched_service_name="orders",
+        ),
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="secret", source_name="external-secrets", prefix="PAYMENTS_",
+            reference_file_path="deploy/orders.yaml", reference_start_line=20, reference_end_line=23,
+            optional=False, matched_service_name="orders",
+        ),
+    ])
+
+    finding = find_kubernetes_configuration_source_import_unknowns(conn)[0]
+
+    assert finding["detail"]["availability"] == "mixed"
+    assert finding["detail"]["includes_unprefixed_import"] is True
+    assert finding["detail"]["remediation"][-1] == (
+        "Confirm source availability before relying on imported configuration during rollout."
+    )
+
+
 def test_find_cycles_ignores_a_simple_chain(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     a = services_repo.ensure_service(conn, "a-service", "/tmp/a", "python")
