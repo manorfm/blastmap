@@ -57,6 +57,7 @@ from orbitkb.generation.verification import (
 # far more endpoints/entities/messages than a benchmark fixture, so every such list is
 # capped by default instead of returned whole — see README's context-efficiency notes.
 DEFAULT_LIST_LIMIT = 50
+MAX_RUNTIME_SOURCES_PER_CONFIGURATION_BINDING = 3
 MAX_LIST_LIMIT = 500
 DEFAULT_FLOW_EDGE_LIMIT = 50
 MAX_FLOW_EDGE_LIMIT = 200
@@ -663,18 +664,34 @@ def describe_configuration(
     bindings, page = _paginate(
         flows_repo.list_static_configuration_bindings(conn, row["id"]), limit, offset,
     )
+    environment_keys = {item["key"] for item in bindings if item["kind"] == "environment"}
+    runtime_sources_by_key: dict[str, list[sqlite3.Row]] = {}
+    for runtime_binding in kubernetes_configuration_repo.list_kubernetes_configuration_bindings_for_environment_keys(
+        conn, row["id"], environment_keys,
+    ):
+        runtime_sources_by_key.setdefault(runtime_binding["environment_key"], []).append(runtime_binding)
+    response_bindings = []
+    for item in bindings:
+        response_binding = {
+            "source": item["source"], "key": item["key"], "kind": item["kind"],
+            "sensitive": bool(item["sensitive"]), "evidence": {
+                "file": item["file_path"], "start_line": item["start_line"],
+                "end_line": item["end_line"],
+            },
+        }
+        runtime_sources = runtime_sources_by_key.get(item["key"], [])
+        if item["kind"] == "environment" and runtime_sources:
+            response_binding["runtime_sources"] = {
+                "count": len(runtime_sources),
+                "references": [_runtime_configuration_reference(source) for source in runtime_sources[
+                    :MAX_RUNTIME_SOURCES_PER_CONFIGURATION_BINDING
+                ]],
+                "truncated": len(runtime_sources) > MAX_RUNTIME_SOURCES_PER_CONFIGURATION_BINDING,
+            }
+        response_bindings.append(response_binding)
     return {
         "service": row["name"], "repository": row["repository_name"],
-        "bindings": [
-            {
-                "source": item["source"], "key": item["key"], "kind": item["kind"],
-                "sensitive": bool(item["sensitive"]), "evidence": {
-                    "file": item["file_path"], "start_line": item["start_line"],
-                    "end_line": item["end_line"],
-                },
-            }
-            for item in bindings
-        ],
+        "bindings": response_bindings,
         **page,
     }
 
@@ -699,20 +716,25 @@ def describe_runtime_configuration(
         "bindings": [
             {
                 "environment_key": item["environment_key"],
-                "source": {
-                    "kind": item["source_kind"], "name": item["source_name"], "key": item["source_key"],
-                },
-                "workload": {
-                    "kind": item["workload_kind"], "name": item["workload_name"],
-                    "container": item["container_name"],
-                },
-                "evidence": {
-                    "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],
-                },
+                **_runtime_configuration_reference(item),
             }
             for item in bindings
         ],
         **page,
+    }
+
+
+def _runtime_configuration_reference(item: sqlite3.Row) -> dict:
+    return {
+        "source": {
+            "kind": item["source_kind"], "name": item["source_name"], "key": item["source_key"],
+        },
+        "workload": {
+            "kind": item["workload_kind"], "name": item["workload_name"], "container": item["container_name"],
+        },
+        "evidence": {
+            "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],
+        },
     }
 
 

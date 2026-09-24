@@ -92,6 +92,9 @@ dynamic keys, `.env` files and runtime/config-server resolution remain unknown.
 A literal Spring `@ConfigurationProperties` prefix also yields canonical property
 keys for direct Java fields and Kotlin primary-constructor parameters; dynamic prefixes
 and other binding styles remain unknown.
+When a code-read environment key exactly matches an indexed Kubernetes `env`
+reference in the same service, the result includes up to three compact runtime
+references. Absence of that match is unknown, never a missing-configuration finding.
 
 `describe_runtime_configuration` returns literal `env` references from plain
 Kubernetes workload manifests, including the variable name, ConfigMap or Secret

@@ -48,3 +48,20 @@ def list_kubernetes_configuration_bindings_for_service(
            ORDER BY environment_key, source_name, source_key, file_path, start_line""",
         (service_id,),
     ).fetchall()
+
+
+def list_kubernetes_configuration_bindings_for_environment_keys(
+    conn: sqlite3.Connection, service_id: int, environment_keys: set[str],
+) -> list[sqlite3.Row]:
+    """Return only runtime references matching a page of code-read environment keys."""
+    if not environment_keys:
+        return []
+    placeholders = ", ".join("?" for _ in environment_keys)
+    return conn.execute(
+        f"""SELECT environment_key, source_kind, source_name, source_key, workload_kind, workload_name,
+                    container_name, file_path, start_line, end_line
+             FROM kubernetes_configuration_bindings
+             WHERE service_id = ? AND environment_key IN ({placeholders})
+             ORDER BY environment_key, source_name, source_key, file_path, start_line""",  # nosec B608 - placeholders are generated from a set length.
+        (service_id, *sorted(environment_keys)),
+    ).fetchall()

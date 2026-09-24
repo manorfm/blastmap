@@ -188,7 +188,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
     ) -> dict:
         """List literal environment and JVM property keys read by local symbols.
         Exact Spring ``@Value`` and ``@ConfigurationProperties`` bindings on supported
-        members are included; values, dynamic keys, SpEL and runtime resolution are excluded. Capped at `limit`
+        members are included. Exact Kubernetes ``env`` references for a returned
+        environment key are included compactly; values, dynamic keys, SpEL and runtime resolution are excluded. Capped at `limit`
         bindings (default 50) starting at `offset`; `total`/`truncated` tell you
         whether to page further. Pass repository when the service name is duplicated."""
         with closing(_conn()) as conn:

@@ -65,3 +65,66 @@ def test_describe_runtime_configuration_returns_kubernetes_references_without_va
         "total": 1,
         "truncated": False,
     }
+
+
+def test_describe_configuration_links_matching_code_and_kubernetes_environment_bindings(tmp_path):
+    conn = open_db(tmp_path / "configuration-links.db")
+    repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")
+    service_id = services.ensure_service(
+        conn, "orders", "/repos/shop/orders", "node-ts", repository_id=repository_id,
+    )
+    flows.replace_analysis(conn, service_id, AnalysisResult(configuration_bindings=[
+        ConfigurationBinding("publisher.publish", "ORDERS_TOPIC", "environment", False, Evidence("publisher.ts", 3, 3)),
+    ]))
+    kubernetes_configuration.replace_kubernetes_configuration_bindings(conn, repository_id, [
+        KubernetesConfigurationBinding(
+            environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="orders-config",
+            source_key="orders-topic", workload_kind="Deployment", workload_name="orders", container_name="api",
+            file_path="deploy/orders.yaml", start_line=12, end_line=17, matched_service_name="orders",
+        ),
+    ])
+
+    result = queries.describe_configuration(conn, "orders")
+
+    assert result["bindings"] == [{
+        "source": "publisher.publish",
+        "key": "ORDERS_TOPIC",
+        "kind": "environment",
+        "sensitive": False,
+        "evidence": {"file": "publisher.ts", "start_line": 3, "end_line": 3},
+        "runtime_sources": {
+            "count": 1,
+            "references": [{
+                "source": {"kind": "config_map", "name": "orders-config", "key": "orders-topic"},
+                "workload": {"kind": "Deployment", "name": "orders", "container": "api"},
+                "evidence": {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 17},
+            }],
+            "truncated": False,
+        },
+    }]
+
+
+def test_describe_configuration_caps_runtime_sources_per_environment_key(tmp_path):
+    conn = open_db(tmp_path / "configuration-link-cap.db")
+    repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")
+    service_id = services.ensure_service(
+        conn, "orders", "/repos/shop/orders", "node-ts", repository_id=repository_id,
+    )
+    flows.replace_analysis(conn, service_id, AnalysisResult(configuration_bindings=[
+        ConfigurationBinding("client.create", "PAYMENTS_URL", "environment", False, Evidence("client.ts", 3, 3)),
+    ]))
+    kubernetes_configuration.replace_kubernetes_configuration_bindings(conn, repository_id, [
+        KubernetesConfigurationBinding(
+            environment_key="PAYMENTS_URL", source_kind="config_map", source_name=f"orders-config-{index}",
+            source_key="payments-url", workload_kind="Deployment", workload_name=f"orders-{index}",
+            container_name="api", file_path=f"deploy/orders-{index}.yaml", start_line=12, end_line=17,
+            matched_service_name="orders",
+        )
+        for index in range(4)
+    ])
+
+    sources = queries.describe_configuration(conn, "orders")["bindings"][0]["runtime_sources"]
+
+    assert sources["count"] == 4
+    assert len(sources["references"]) == 3
+    assert sources["truncated"] is True

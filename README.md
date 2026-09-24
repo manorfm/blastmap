@@ -218,6 +218,9 @@ resolution are never indexed or returned. A literal Spring
 `@ConfigurationProperties` prefix also yields canonical keys for direct Java fields
 and Kotlin primary-constructor parameters; dynamic prefixes and other binding styles
 remain unknown.
+When an indexed code-read environment key exactly matches an attributed Kubernetes
+`env` reference, the binding includes up to three compact runtime references. Their
+absence is unknown, not evidence that deployment configuration is missing.
 
 `describe_runtime_configuration` lists literal `env` references in indexed plain
 Kubernetes workload manifests. It identifies the environment variable, ConfigMap or
