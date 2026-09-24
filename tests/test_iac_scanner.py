@@ -139,6 +139,23 @@ def test_kubernetes_scanner_marks_an_env_from_source_absent_from_local_yaml_as_u
     ]
 
 
+def test_kubernetes_scanner_tracks_optional_env_from_sources_in_init_containers(tmp_path: Path):
+    service = tmp_path / "orders-service"
+    service.mkdir()
+    (service / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders\nspec:\n"
+        "  template:\n    spec:\n      initContainers:\n        - name: migrate\n          envFrom:\n"
+        "            - secretRef:\n                name: external-migration-secrets\n                optional: true\n"
+    )
+
+    facts = scan_repository_facts(tmp_path, [_candidate("orders-service", service)])
+
+    assert [(issue.source_kind, issue.source_name, issue.prefix, issue.optional, issue.matched_service_name)
+            for issue in facts.configuration_source_import_unknowns] == [
+        ("secret", "external-migration-secrets", None, True, "orders-service"),
+    ]
+
+
 def test_kubernetes_source_file_parses_a_secret_declaration_as_secret_kind(tmp_path: Path):
     secret_file = tmp_path / "secret.yaml"
     secret_file.write_text(
