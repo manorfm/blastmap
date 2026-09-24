@@ -278,6 +278,91 @@ def derive_feature_flag_review_units(
     return units
 
 
+def derive_runtime_configuration_review_units(
+    configuration_bindings_by_service: dict[str, list[dict]],
+    runtime_bindings_by_service: dict[str, list[dict]],
+    primary_services: set[str],
+) -> list[dict]:
+    """Return reviews only for exact code-to-Kubernetes environment-key matches.
+
+    A matching variable name proves the indexed code and workload use the same
+    configuration boundary. It cannot prove deployed values or whether a task
+    changes that boundary, so this remains a review rather than a config edit.
+    """
+    units: list[dict] = []
+    for service in sorted(primary_services):
+        code_evidence_by_key: dict[str, list[dict]] = {}
+        for binding in configuration_bindings_by_service.get(service, []):
+            if not isinstance(binding, dict) or binding.get("kind") != "environment":
+                continue
+            key = binding.get("key")
+            evidence = {
+                "file": binding.get("file_path"),
+                "start_line": binding.get("start_line"),
+                "end_line": binding.get("end_line"),
+            }
+            if isinstance(key, str) and key and _unique_evidence([evidence]):
+                code_evidence_by_key.setdefault(key, []).append(evidence)
+
+        runtime_by_key: dict[str, list[dict]] = {}
+        for binding in runtime_bindings_by_service.get(service, []):
+            if not isinstance(binding, dict):
+                continue
+            key = binding.get("environment_key")
+            source_kind = binding.get("source_kind")
+            source_name = binding.get("source_name")
+            source_key = binding.get("source_key")
+            evidence = {
+                "file": binding.get("file_path"),
+                "start_line": binding.get("start_line"),
+                "end_line": binding.get("end_line"),
+            }
+            if (
+                isinstance(key, str) and key
+                and all(isinstance(value, str) and value for value in (source_kind, source_name, source_key))
+                and _unique_evidence([evidence])
+            ):
+                runtime_by_key.setdefault(key, []).append(binding)
+
+        for key in sorted(set(code_evidence_by_key) & set(runtime_by_key)):
+            code_evidence = _sorted_evidence(code_evidence_by_key[key])
+            runtime_bindings = runtime_by_key[key]
+            runtime_evidence = _sorted_evidence([{
+                "file": binding["file_path"], "start_line": binding["start_line"], "end_line": binding["end_line"],
+            } for binding in runtime_bindings])
+            evidence = _sorted_evidence([*code_evidence, *runtime_evidence])
+            if not code_evidence or not runtime_evidence:
+                continue
+            local_count = len(code_evidence)
+            workload_count = len(runtime_evidence)
+            local_word = "location" if local_count == 1 else "locations"
+            workload_word = "workload" if workload_count == 1 else "workloads"
+            source_contracts = sorted({
+                f"configuration:{binding['source_kind']}:{binding['source_name']}:{binding['source_key']}"
+                for binding in runtime_bindings
+            })
+            units.append({
+                "id": f"runtime-configuration:{service}:{key}",
+                "service": service,
+                "target": {"role": "configuration", "symbol": f"environment:{key}", "evidence": evidence},
+                "action": "review",
+                "reason": (
+                    f"{key} is read at {local_count} local {local_word} and bound to {workload_count} indexed "
+                    f"Kubernetes {workload_word}; review both layers if its behavior changes."
+                ),
+                "preconditions": [],
+                "related_contracts": [f"configuration:environment:{key}", *source_contracts],
+                "dependencies": [],
+                "validation": [
+                    f"verify {key} remains compatible with its indexed ConfigMap or Secret source",
+                    "verify indexed Kubernetes workload references remain valid during rollout",
+                ],
+                "confidence": 1.0,
+                "evidence": evidence,
+            })
+    return units
+
+
 def _unique_evidence(items: list[dict]) -> list[dict]:
     seen: set[tuple[str, int, int]] = set()
     evidence: list[dict] = []
@@ -294,3 +379,9 @@ def _unique_evidence(items: list[dict]) -> list[dict]:
             seen.add(key)
             evidence.append({"file": file_path, "start_line": start_line, "end_line": end_line})
     return evidence
+
+
+def _sorted_evidence(items: list[dict]) -> list[dict]:
+    return sorted(
+        _unique_evidence(items), key=lambda item: (item["file"], item["start_line"], item["end_line"]),
+    )

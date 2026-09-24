@@ -5,6 +5,7 @@ from jsonschema import validate
 
 from orbitkb.analysis.models import (
     AnalysisResult,
+    ConfigurationBinding,
     EntryPoint,
     ErrorContract,
     Evidence,
@@ -15,15 +16,21 @@ from orbitkb.analysis.models import (
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import change_plans
 from orbitkb.db.repositories import flows as flows_repo
+from orbitkb.db.repositories import (
+    kubernetes_configuration as kubernetes_configuration_repo,
+)
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
+from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.change_plan import (
     derive_error_mapping_review_units,
     derive_persistence_migration_review_units,
+    derive_runtime_configuration_review_units,
 )
 from orbitkb.generation.llm_harness import load_schema
+from orbitkb.iac.models import KubernetesConfigurationBinding
 from orbitkb.mcp import queries
 from tests.test_change_surface import FakeBackend, _build_pix_fixture
 
@@ -303,6 +310,78 @@ def test_plan_change_derives_one_feature_flag_review_unit_for_a_primary_service(
     validate(refined, load_schema("refine_change_plan"))
 
 
+def test_plan_change_derives_a_configuration_review_unit_for_an_exact_runtime_binding(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "runtime-configuration-unit.db")
+    checkout = services_repo.get_service_by_name(conn, "checkout-service")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    conn.execute("UPDATE services SET repository_id = ? WHERE id = ?", (repository_id, checkout["id"]))
+    conn.commit()
+    flows_repo.replace_analysis(conn, checkout["id"], AnalysisResult(configuration_bindings=[
+        ConfigurationBinding(
+            "CheckoutService.submit", "ORDERS_TOPIC", "environment", False,
+            Evidence("checkout.py", 18, 18),
+        ),
+    ]))
+    kubernetes_configuration_repo.replace_kubernetes_configuration_bindings(conn, repository_id, [
+        KubernetesConfigurationBinding(
+            environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="orders-config",
+            source_key="orders-topic", workload_kind="Deployment", workload_name="checkout",
+            container_name="api", file_path="deploy/checkout.yaml", start_line=12, end_line=17,
+            matched_service_name="checkout-service",
+        ),
+    ])
+
+    result = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Change checkout messaging configuration", repository="shop")
+
+    assert result["status"] == "ready"
+    assert result["change_units"] == [{
+        "id": "runtime-configuration:checkout-service:ORDERS_TOPIC",
+        "service": "checkout-service",
+        "target": {
+            "role": "configuration",
+            "symbol": "environment:ORDERS_TOPIC",
+            "evidence": [
+                {"file": "checkout.py", "start_line": 18, "end_line": 18},
+                {"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 17},
+            ],
+        },
+        "action": "review",
+        "reason": (
+            "ORDERS_TOPIC is read at 1 local location and bound to 1 indexed Kubernetes workload; "
+            "review both layers if its behavior changes."
+        ),
+        "preconditions": [],
+        "related_contracts": [
+            "configuration:environment:ORDERS_TOPIC",
+            "configuration:config_map:orders-config:orders-topic",
+        ],
+        "dependencies": [],
+        "validation": [
+            "verify ORDERS_TOPIC remains compatible with its indexed ConfigMap or Secret source",
+            "verify indexed Kubernetes workload references remain valid during rollout",
+        ],
+        "confidence": 1.0,
+        "evidence": [
+            {"file": "checkout.py", "start_line": 18, "end_line": 18},
+            {"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 17},
+        ],
+    }]
+    detail = queries.describe_change_unit(
+        conn, result["plan_id"], "runtime-configuration:checkout-service:ORDERS_TOPIC",
+    )
+    assert detail["minimal_reading"] == [{
+        "service": "checkout-service",
+        "purpose": "confirm the indexed code and Kubernetes configuration binding",
+        "recommended_query": {"tool": "describe_configuration", "arguments": {"service": "checkout-service"}},
+    }]
+    validate(detail, load_schema("describe_change_unit"))
+    refined = queries.refine_change_plan(conn, result["plan_id"], [])
+    validate(refined, load_schema("refine_change_plan"))
+
+
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():
     assert derive_error_mapping_review_units([
         {
@@ -322,6 +401,23 @@ def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings(
             },
         },
     ], {"payments-service"}) == []
+
+
+def test_runtime_configuration_units_require_an_exact_environment_key_match():
+    assert derive_runtime_configuration_review_units(
+        {"checkout-service": [{
+            "key": "ORDERS_TOPIC", "kind": "environment", "file_path": "checkout.py",
+            "start_line": 3, "end_line": 3,
+        }, {
+            "key": "orders.topic", "kind": "property", "file_path": "checkout.py",
+            "start_line": 4, "end_line": 4,
+        }]},
+        {"checkout-service": [{
+            "environment_key": "PAYMENTS_TOPIC", "source_kind": "config_map", "source_name": "checkout-config",
+            "source_key": "payments-topic", "file_path": "deploy/checkout.yaml", "start_line": 8, "end_line": 12,
+        }]},
+        {"checkout-service"},
+    ) == []
 
 
 def test_migration_units_require_an_exact_affected_table_match_with_source_evidence():

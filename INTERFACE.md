@@ -141,8 +141,9 @@ choice is rejected, requiring a new plan and an explicit impact reassessment.
 the smallest producer/consumer `describe_messages` queries needed to verify an event
 contract, or the client `describe_service` and remote `list_entrypoints` queries for a
 resolved HTTP boundary, `describe_persistence` for a schema/migration review, or
-`describe_feature_flags` for a source-proven feature-flag review. It does not scan
-source, rerun retrieval or call a model.
+`describe_feature_flags` for a source-proven feature-flag review, or
+`describe_configuration` for a proven code-to-Kubernetes configuration binding. It
+does not scan source, rerun retrieval or call a model.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

@@ -160,6 +160,10 @@ When a primary service has a source-proven feature-flag read, `plan_change` adds
 review unit per provider/key, grouping the read locations. It asks for confirmation of
 targeting, default behavior and rollout only when the guarded behavior changes; it
 never infers that the flag itself must be modified.
+When a primary service has an exact source-proven environment-key match between code
+and an attributed Kubernetes workload, `plan_change` adds one configuration review
+unit per key. It verifies compatibility and rollout references without assuming a
+ConfigMap, Secret or deployed value must change.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

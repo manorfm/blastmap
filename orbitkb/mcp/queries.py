@@ -41,6 +41,7 @@ from orbitkb.generation.change_plan import (
     derive_error_mapping_review_units,
     derive_feature_flag_review_units,
     derive_persistence_migration_review_units,
+    derive_runtime_configuration_review_units,
     validate_decision_selections,
 )
 from orbitkb.generation.freshness import compute_freshness
@@ -1095,6 +1096,21 @@ def plan_change(
             for service in primary_services
             if (row := services_repo.get_service_by_name(conn, service, repository_id=repository_id)) is not None
         }
+        configuration_bindings_by_service = {
+            service: [dict(binding) for binding in flows_repo.list_static_configuration_bindings(conn, row["id"])]
+            for service in primary_services
+            if (row := services_repo.get_service_by_name(conn, service, repository_id=repository_id)) is not None
+        }
+        runtime_configuration_bindings_by_service = {
+            service: [
+                dict(binding)
+                for binding in kubernetes_configuration_repo.list_kubernetes_configuration_bindings_for_service(
+                    conn, row["id"],
+                )
+            ]
+            for service in primary_services
+            if (row := services_repo.get_service_by_name(conn, service, repository_id=repository_id)) is not None
+        }
         change_units = [
             *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
             *derive_error_mapping_review_units(find_architecture_smells(conn)["findings"], error_mapping_services),
@@ -1102,6 +1118,9 @@ def plan_change(
                 change_surface_result["persistence_affected"], migration_facts_by_service, primary_services,
             ),
             *derive_feature_flag_review_units(feature_flags_by_service, primary_services),
+            *derive_runtime_configuration_review_units(
+                configuration_bindings_by_service, runtime_configuration_bindings_by_service, primary_services,
+            ),
         ]
     plan_run_id = change_plans_repo.record_plan(
         conn, change_surface_result.get("run_id"), status, token_budget, decision_points, change_units,
@@ -1301,6 +1320,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
             "service": producer,
             "purpose": "confirm the indexed feature flag and its guarded behavior",
             "recommended_query": {"tool": "describe_feature_flags", "arguments": {"service": producer}},
+        }]
+    if change_unit["target"]["role"] == "configuration":
+        return [{
+            "service": producer,
+            "purpose": "confirm the indexed code and Kubernetes configuration binding",
+            "recommended_query": {"tool": "describe_configuration", "arguments": {"service": producer}},
         }]
     reading = [{
         "service": producer,
