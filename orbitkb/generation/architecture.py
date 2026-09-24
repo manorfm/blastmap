@@ -739,17 +739,11 @@ def find_retry_write_publish_flows_with_consumers(conn: sqlite3.Connection) -> l
     return findings
 
 
-def find_retry_write_publish_flows_with_persistent_consumers(conn: sqlite3.Connection) -> list[dict]:
-    """Prioritize duplicate-delivery review when a known consumer also writes state.
-
-    A consumer must have a matching literal channel, a message entrypoint for that
-    channel and source-proven writes from that entrypoint. This avoids inferring
-    persistence impact from a consumer declaration alone.
-    """
-    names = _service_names(conn)
-    retries_by_source = _retry_policies_by_source(conn)
+def _persistent_message_consumers_by_channel(
+    conn: sqlite3.Connection,
+) -> dict[str, list[tuple[sqlite3.Row, list[sqlite3.Row]]]]:
+    """Return literal-channel consumers whose entrypoint has local writes."""
     writes_by_source = _flow_edges_by_source(conn, "writes")
-    publishes_by_source = _flow_edges_by_source(conn, "publishes")
     persistent_consumers_by_channel: dict[str, list[tuple[sqlite3.Row, list[sqlite3.Row]]]] = defaultdict(list)
     consumer_rows = conn.execute(
         """SELECT contract.service_id, contract.channel, contract.file_path,
@@ -768,6 +762,21 @@ def find_retry_write_publish_flows_with_persistent_consumers(conn: sqlite3.Conne
         writes = writes_by_source.get((consumer["service_id"], consumer["symbol"]))
         if writes:
             persistent_consumers_by_channel[consumer["channel"]].append((consumer, writes))
+    return persistent_consumers_by_channel
+
+
+def find_retry_write_publish_flows_with_persistent_consumers(conn: sqlite3.Connection) -> list[dict]:
+    """Prioritize duplicate-delivery review when a known consumer also writes state.
+
+    A consumer must have a matching literal channel, a message entrypoint for that
+    channel and source-proven writes from that entrypoint. This avoids inferring
+    persistence impact from a consumer declaration alone.
+    """
+    names = _service_names(conn)
+    retries_by_source = _retry_policies_by_source(conn)
+    writes_by_source = _flow_edges_by_source(conn, "writes")
+    publishes_by_source = _flow_edges_by_source(conn, "publishes")
+    persistent_consumers_by_channel = _persistent_message_consumers_by_channel(conn)
 
     findings: list[dict] = []
     for source_key, policies in retries_by_source.items():
@@ -825,6 +834,96 @@ def find_retry_write_publish_flows_with_persistent_consumers(conn: sqlite3.Conne
                     "remediation": [
                         "Review producer retries and the listed persistent consumers as one duplicate-state boundary.",
                         "Confirm an outbox/idempotency strategy and consumer de-duplication before relying on retries for this channel.",
+                    ],
+                },
+            })
+    return findings
+
+
+def find_retry_write_publish_flows_with_unrecovered_persistent_consumers(
+    conn: sqlite3.Connection,
+) -> list[dict]:
+    """Prioritize retry flows that reach a persistent RabbitMQ consumer without recovery proof.
+
+    This joins two deliberately narrow facts: a producer that retries after a
+    write/publication flow, and a cross-service persistent RabbitMQ consumer with
+    no indexed retry boundary, retry delay or dead-letter route. It does not make a
+    claim about recovery configured outside the indexed source.
+    """
+    names = _service_names(conn)
+    retries_by_source = _retry_policies_by_source(conn)
+    writes_by_source = _flow_edges_by_source(conn, "writes")
+    publishes_by_source = _flow_edges_by_source(conn, "publishes")
+    persistent_consumers_by_channel = _persistent_message_consumers_by_channel(conn)
+    unrecovered_consumers = {
+        (consumer["service_id"], consumer["symbol"]): consumer
+        for consumer in _rabbitmq_consumers_without_recovery(conn)
+    }
+
+    findings: list[dict] = []
+    for source_key, policies in retries_by_source.items():
+        producer_writes = writes_by_source.get(source_key)
+        publishes = publishes_by_source.get(source_key)
+        if not producer_writes or not publishes:
+            continue
+        service_id, symbol = source_key
+        visible_producer_writes = producer_writes[:3]
+        for publish in publishes:
+            consumers = [
+                (consumer, writes, unrecovered_consumers[(consumer["service_id"], consumer["symbol"])])
+                for consumer, writes in persistent_consumers_by_channel.get(publish["to_symbol"], [])
+                if consumer["service_id"] != service_id
+                and (consumer["service_id"], consumer["symbol"]) in unrecovered_consumers
+            ]
+            if not consumers:
+                continue
+            visible_consumers = consumers[:3]
+            consumer_details = []
+            consumer_evidence = []
+            for consumer, writes, recovery in visible_consumers:
+                visible_writes = writes[:3]
+                consumer_details.append({
+                    "service": names[consumer["service_id"]], "symbol": consumer["symbol"],
+                    "queue": recovery["queue"],
+                    "writes": [{"target": write["to_symbol"]} for write in visible_writes],
+                    "write_count": len(writes),
+                })
+                consumer_evidence.extend([
+                    _edge_evidence(consumer),
+                    _edge_evidence(recovery),
+                    *[_edge_evidence(write) for write in visible_writes],
+                ])
+            findings.append({
+                "kind": "possible_retry_write_publish_reaches_unrecovered_persistent_consumer",
+                "severity": "warning",
+                "services": [names[service_id], *[item["service"] for item in consumer_details]],
+                "reason": (
+                    f"{symbol} writes state and retries publication on channel {publish['to_symbol']}, "
+                    "which reaches a persistent RabbitMQ consumer without source-proven recovery."
+                ),
+                "detail": {
+                    "flow": {"symbol": symbol}, "channel": publish["to_symbol"],
+                    "retry_policies": [
+                        {"mechanism": policy["mechanism"], "value": policy["value"], "unit": policy["unit"]}
+                        for policy in policies
+                    ],
+                    "writes": [{"target": write["to_symbol"]} for write in visible_producer_writes],
+                    "write_count": len(producer_writes),
+                    "consumers": consumer_details,
+                    "consumer_count": len(consumers),
+                    "confidence": 0.65,
+                    "evidence": [
+                        *[_edge_evidence(policy) for policy in policies],
+                        *[_edge_evidence(write) for write in visible_producer_writes],
+                        _edge_evidence(publish), *consumer_evidence,
+                    ],
+                    "unknowns": [
+                        "Literal channel equality does not prove broker routing, delivery, ordering or runtime processing of this producer's event.",
+                        "Broker recovery, an outbox, producer idempotency or consumer de-duplication may exist outside the indexed facts.",
+                    ],
+                    "remediation": [
+                        "Review producer retries and the listed consumers as one duplicate-state and recovery boundary.",
+                        "Confirm a RabbitMQ retry/dead-letter policy plus idempotent consumer handling for this event channel.",
                     ],
                 },
             })
@@ -1583,15 +1682,8 @@ def _is_client_error_contract(contract: sqlite3.Row) -> bool:
         return False
 
 
-def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> list[dict]:
-    """Flag RabbitMQ consumers without a source-proven recovery mechanism.
-
-    A missing local declaration is not proof that the broker lacks a policy. The
-    detector therefore only considers consumers whose static contract established
-    RabbitMQ, and reports the missing *source proof* with a deliberately low
-    confidence rather than asserting a production configuration defect.
-    """
-    names = _service_names(conn)
+def _rabbitmq_consumers_without_recovery(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Return RabbitMQ consumers lacking source-proven local recovery facts."""
     rows = conn.execute(
         """
         SELECT e.service_id, e.name AS queue, e.symbol, e.file_path, e.start_line, e.end_line,
@@ -1606,7 +1698,7 @@ def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> 
         ORDER BY e.service_id, e.name, e.symbol
         """
     ).fetchall()
-    findings: list[dict] = []
+    unrecovered: list[sqlite3.Row] = []
     for row in rows:
         contract = json.loads(row["contract_json"])
         if contract.get("transport") != "rabbitmq" or contract.get("direction") != "consumes":
@@ -1616,6 +1708,25 @@ def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> 
         retry_boundary = bool(row["has_retry_boundary"])
         if dead_letter is not None or retry_delay is not None or retry_boundary:
             continue
+        unrecovered.append(row)
+    return unrecovered
+
+
+def find_message_consumers_without_recovery_policy(conn: sqlite3.Connection) -> list[dict]:
+    """Flag RabbitMQ consumers without a source-proven recovery mechanism.
+
+    A missing local declaration is not proof that the broker lacks a policy. The
+    detector therefore only considers consumers whose static contract established
+    RabbitMQ, and reports the missing *source proof* with a deliberately low
+    confidence rather than asserting a production configuration defect.
+    """
+    names = _service_names(conn)
+    findings: list[dict] = []
+    for row in _rabbitmq_consumers_without_recovery(conn):
+        contract = json.loads(row["contract_json"])
+        dead_letter = contract.get("dead_letter_routing_key")
+        retry_delay = contract.get("retry_delay_ms")
+        retry_boundary = bool(row["has_retry_boundary"])
         findings.append(
             {
                 "kind": "possible_message_consumer_without_recovery_policy", "severity": "warning",
@@ -1969,6 +2080,7 @@ _DETECTORS = (
     find_retries_on_write_publish_flows,
     find_retry_write_publish_flows_with_consumers,
     find_retry_write_publish_flows_with_persistent_consumers,
+    find_retry_write_publish_flows_with_unrecovered_persistent_consumers,
     find_non_atomic_service_publish_flows,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,

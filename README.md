@@ -225,6 +225,12 @@ entrypoint and source-proven local write. This identifies a possible cross-servi
 duplicate-state boundary, while still leaving delivery, ordering, outbox and consumer
 deduplication as explicit unknowns.
 
+For that same boundary, OrbitKB can narrow the review to a RabbitMQ consumer with no
+source-proven retry boundary, retry delay or dead-letter route. This is deliberately
+an absence-of-proof signal: broker policy, idempotency and de-duplication can exist
+outside indexed source, and consumers on other brokers are not treated as lacking
+recovery.
+
 The same transaction/outbox review now covers delegated service methods that write and
 publish without a source-proven transaction boundary. Entrypoints remain covered by the
 existing direct-flow signal, so OrbitKB does not duplicate that finding. As elsewhere,

@@ -39,6 +39,7 @@ from orbitkb.generation.architecture import (
     find_retries_on_write_publish_flows,
     find_retry_write_publish_flows_with_consumers,
     find_retry_write_publish_flows_with_persistent_consumers,
+    find_retry_write_publish_flows_with_unrecovered_persistent_consumers,
     find_shared_database,
     find_static_http_calls_without_resilience_policy,
     find_timeout_fallbacks_masking_failures,
@@ -759,6 +760,67 @@ def test_persistent_consumer_risk_disappears_when_consumer_write_is_removed(tmp_
     )
 
     assert find_retry_write_publish_flows_with_persistent_consumers(conn) == []
+
+
+def test_unrecovered_persistent_consumer_risk_disappears_when_dlq_is_proven(tmp_path: Path):
+    conn = open_db(tmp_path / "unrecovered-persistent-consumer.db")
+    orders = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
+    billing = services_repo.ensure_service(conn, "billing", "/tmp/billing", "jvm-spring")
+    retry = ResiliencePolicy(
+        source="OrderService.create", kind="retry", mechanism="reactor",
+        value=2, unit="retries", evidence=STATIC_EVIDENCE,
+    )
+    producer_write = FlowEdge("OrderService.create", "OrderRepository.save", "writes", STATIC_EVIDENCE)
+    publish = FlowEdge("OrderService.create", "order.created", "publishes", STATIC_EVIDENCE)
+    consumer_entrypoint = EntryPoint(
+        "message", "CONSUME", "order.created", "BillingConsumer.consume", STATIC_EVIDENCE,
+    )
+    consumer_contract = MessageContract(
+        direction="consumes", channel="order.created", routing_key=None,
+        payload_type="OrderCreated", evidence=STATIC_EVIDENCE,
+    )
+    consumer_write = FlowEdge(
+        "BillingConsumer.consume", "BillingRepository.save", "writes", STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, orders, AnalysisResult(resilience_policies=[retry], edges=[producer_write, publish]),
+    )
+    flows_repo.replace_analysis(
+        conn,
+        billing,
+        AnalysisResult(
+            entrypoints=[consumer_entrypoint], message_contracts=[consumer_contract], edges=[consumer_write],
+            contracts={consumer_entrypoint.symbol: {
+                "transport": "rabbitmq", "direction": "consumes", "queue": "order.created",
+            }},
+        ),
+    )
+
+    findings = find_retry_write_publish_flows_with_unrecovered_persistent_consumers(conn)
+
+    assert _kinds(findings) == {"possible_retry_write_publish_reaches_unrecovered_persistent_consumer"}
+    assert findings[0]["detail"]["consumers"] == [{
+        "service": "billing", "symbol": "BillingConsumer.consume", "queue": "order.created",
+        "writes": [{"target": "BillingRepository.save"}], "write_count": 1,
+    }]
+    run_id = recompute_architecture_view(conn)
+    assert "possible_retry_write_publish_reaches_unrecovered_persistent_consumer" in {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    }
+
+    flows_repo.replace_analysis(
+        conn,
+        billing,
+        AnalysisResult(
+            entrypoints=[consumer_entrypoint], message_contracts=[consumer_contract], edges=[consumer_write],
+            contracts={consumer_entrypoint.symbol: {
+                "transport": "rabbitmq", "direction": "consumes", "queue": "order.created",
+                "dead_letter_routing_key": "orders.dlq",
+            }},
+        ),
+    )
+
+    assert find_retry_write_publish_flows_with_unrecovered_persistent_consumers(conn) == []
 
 
 def test_unmapped_downstream_error_scopes_static_call_to_the_target_endpoint_flow(tmp_path: Path):

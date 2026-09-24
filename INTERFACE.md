@@ -297,6 +297,13 @@ write summaries. The result still does not prove delivery, ordering, processing,
 coverage or de-duplication; it prioritizes a possible cross-service duplicate-state
 boundary for review.
 
+`possible_retry_write_publish_reaches_unrecovered_persistent_consumer` narrows that
+boundary to a matching RabbitMQ consumer that has no source-proven retry boundary,
+retry delay or dead-letter route. It returns up to three consumer write summaries and
+queues. The signal does not claim that broker recovery, idempotency or de-duplication
+is absent: those controls can be configured outside indexed source, and other brokers
+are intentionally excluded from this absence-of-proof check.
+
 `possible_non_atomic_service_publish` extends the transaction/outbox review to a
 non-entrypoint service symbol with source-proven local write and event publication but
 no source-proven transaction boundary. Entrypoint-owned operations remain covered by
