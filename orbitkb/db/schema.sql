@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS static_configuration_bindings (
     service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
     source      TEXT NOT NULL,
     key         TEXT NOT NULL,
-    kind        TEXT NOT NULL CHECK (kind IN ('environment')),
+    kind        TEXT NOT NULL CHECK (kind IN ('environment', 'property')),
     sensitive   INTEGER NOT NULL CHECK (sensitive IN (0, 1)),
     file_path   TEXT NOT NULL,
     start_line  INTEGER NOT NULL,

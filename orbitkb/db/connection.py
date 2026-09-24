@@ -4,7 +4,7 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "21"
+SCHEMA_VERSION = "22"
 DEFAULT_DB_PATH = Path.home() / ".orbitkb" / "orbitkb.db"
 
 
@@ -26,6 +26,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "change_plan_runs", "decision_points_json", "TEXT NOT NULL DEFAULT '[]'")
     _add_column_if_missing(conn, "change_plan_runs", "selected_decisions_json", "TEXT NOT NULL DEFAULT '[]'")
     _add_column_if_missing(conn, "change_plan_runs", "change_units_json", "TEXT NOT NULL DEFAULT '[]'")
+    _migrate_configuration_binding_kind_if_needed(conn)
     _migrate_entrypoint_kind_if_needed(conn)
     _migrate_architecture_findings_if_needed(conn)
     row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
@@ -42,6 +43,38 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, de
     columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}  # nosec B608 - table is a module-owned constant.
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")  # nosec B608 - identifiers are module-owned constants.
+
+
+def _migrate_configuration_binding_kind_if_needed(conn: sqlite3.Connection) -> None:
+    """Expand configuration-binding kinds while retaining source-proven facts."""
+    table_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'static_configuration_bindings'"
+    ).fetchone()["sql"]
+    if "'property'" in table_sql:
+        return
+    conn.executescript(
+        """
+        CREATE TABLE static_configuration_bindings_replacement (
+            id          INTEGER PRIMARY KEY,
+            service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+            source      TEXT NOT NULL,
+            key         TEXT NOT NULL,
+            kind        TEXT NOT NULL CHECK (kind IN ('environment', 'property')),
+            sensitive   INTEGER NOT NULL CHECK (sensitive IN (0, 1)),
+            file_path   TEXT NOT NULL,
+            start_line  INTEGER NOT NULL,
+            end_line    INTEGER NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        INSERT INTO static_configuration_bindings_replacement
+            SELECT id, service_id, source, key, kind, sensitive, file_path, start_line, end_line, updated_at
+            FROM static_configuration_bindings;
+        DROP TABLE static_configuration_bindings;
+        ALTER TABLE static_configuration_bindings_replacement RENAME TO static_configuration_bindings;
+        CREATE INDEX idx_static_configuration_bindings_service
+            ON static_configuration_bindings(service_id);
+        """
+    )
 
 
 def _migrate_entrypoint_kind_if_needed(conn: sqlite3.Connection) -> None:

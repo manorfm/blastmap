@@ -71,8 +71,9 @@ stored or exposed, and diagnostic failure files contain only a redacted prompt p
 an error type.
 
 `describe_configuration` returns literal environment-variable key reads associated
-with locally analyzed Node/TypeScript, Java/Kotlin or Go symbols. A sensitive-looking
-key is labeled, but its value is never indexed or returned. Dynamic keys, `.env` files
+with locally analyzed Node/TypeScript, Java/Kotlin or Go symbols, and literal
+Java/Kotlin `System.getProperty` reads. A sensitive-looking key is labeled, but its
+value is never indexed or returned. Spring placeholders, dynamic keys, `.env` files
 and runtime/config-server resolution remain unknown.
 
 ## Change plan

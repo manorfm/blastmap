@@ -1793,6 +1793,7 @@ def test_static_analysis_extracts_literal_jvm_and_go_environment_bindings(tmp_pa
     (tmp_path / "Config.java").write_text(
         '''class Config {
   String paymentUrl() { return System.getenv("PAYMENTS_URL"); }
+  String timeout() { return System.getProperty("payments.timeout-ms"); }
 }
 ''',
         encoding="utf-8",
@@ -1815,12 +1816,13 @@ func Credentials() (string, bool) { return os.LookupEnv("PARTNER_API_TOKEN") }
     jvm = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
     go = StaticAnalysisEngine().analyze(tmp_path, "go")
 
-    assert {(binding.source, binding.key, binding.sensitive) for binding in jvm.configuration_bindings} == {
-        ("Config.paymentUrl", "PAYMENTS_URL", False),
-        ("KotlinConfig.topic", "ORDERS_TOPIC", False),
+    assert {(binding.source, binding.key, binding.kind, binding.sensitive) for binding in jvm.configuration_bindings} == {
+        ("Config.paymentUrl", "PAYMENTS_URL", "environment", False),
+        ("Config.timeout", "payments.timeout-ms", "property", False),
+        ("KotlinConfig.topic", "ORDERS_TOPIC", "environment", False),
     }
-    assert [(binding.source, binding.key, binding.sensitive) for binding in go.configuration_bindings] == [
-        ("config.Credentials", "PARTNER_API_TOKEN", True),
+    assert [(binding.source, binding.key, binding.kind, binding.sensitive) for binding in go.configuration_bindings] == [
+        ("config.Credentials", "PARTNER_API_TOKEN", "environment", True),
     ]
 
 

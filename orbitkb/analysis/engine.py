@@ -2127,7 +2127,7 @@ class StaticAnalysisEngine:
         _enrich_rabbitmq_contracts(result.contracts, files)
         _enrich_openapi_contracts(result, root)
         _enrich_protobuf_contracts(result, root)
-        result.configuration_bindings.extend(_environment_configuration_bindings(result.symbols, root))
+        result.configuration_bindings.extend(_literal_configuration_bindings(result.symbols, root))
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
         result.migration_facts.extend(_migration_facts(_migration_files(root), root))
@@ -2689,7 +2689,8 @@ def _matching_brace(source: str, opening_brace: int) -> int | None:
     return None
 
 
-_CONFIGURATION_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
+_ENVIRONMENT_CONFIGURATION_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
+_PROPERTY_CONFIGURATION_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}")
 _SENSITIVE_CONFIGURATION_KEY = re.compile(
     r"(?:password|secret|token|api[_-]?key|credential|private[_-]?key)", re.IGNORECASE,
 )
@@ -2702,8 +2703,8 @@ class _CodeToken:
     start: int
 
 
-def _environment_configuration_bindings(symbols: list[Symbol], root: Path) -> list[ConfigurationBinding]:
-    """Extract literal environment-key reads inside AST-proven local symbols only."""
+def _literal_configuration_bindings(symbols: list[Symbol], root: Path) -> list[ConfigurationBinding]:
+    """Extract literal environment and JVM-property reads inside local symbols only."""
     source_cache: dict[str, str] = {}
     go_os_imports_by_file: dict[str, bool] = {}
     bindings: list[ConfigurationBinding] = []
@@ -2716,7 +2717,7 @@ def _environment_configuration_bindings(symbols: list[Symbol], root: Path) -> li
         if file_path not in go_os_imports_by_file:
             go_os_imports_by_file[file_path] = _has_standard_os_import(file_path, source)
         declaration, offset = _source_lines(source, symbol.evidence.start_line, symbol.evidence.end_line)
-        for key, position in _environment_key_reads(
+        for key, kind, position in _configuration_key_reads(
             _c_like_tokens(declaration), allow_go_os=go_os_imports_by_file[file_path],
         ):
             if (symbol.name, key) in seen:
@@ -2725,7 +2726,7 @@ def _environment_configuration_bindings(symbols: list[Symbol], root: Path) -> li
             bindings.append(ConfigurationBinding(
                 source=symbol.name,
                 key=key,
-                kind="environment",
+                kind=kind,
                 sensitive=_SENSITIVE_CONFIGURATION_KEY.search(key) is not None,
                 evidence=_line_evidence(root / file_path, root, source, offset + position),
             ))
@@ -2761,20 +2762,28 @@ def _has_standard_os_import(file_path: str, source: str) -> bool:
     return False
 
 
-def _environment_key_reads(tokens: list[_CodeToken], allow_go_os: bool) -> list[tuple[str, int]]:
-    reads: list[tuple[str, int]] = []
+def _configuration_key_reads(tokens: list[_CodeToken], allow_go_os: bool) -> list[tuple[str, str, int]]:
+    reads: list[tuple[str, str, int]] = []
     for index, token in enumerate(tokens):
         previous_is_member = index > 0 and tokens[index - 1].text == "."
         if token.text == "process" and not previous_is_member:
             key_token = _node_environment_key(tokens, index)
+            kind = "environment"
         elif token.text == "System" and not previous_is_member:
-            key_token = _call_environment_key(tokens, index, "getenv")
+            key_token = _call_configuration_key(tokens, index, "getenv")
+            kind = "environment"
+            if key_token is None:
+                key_token = _call_configuration_key(tokens, index, "getProperty")
+                kind = "property"
         elif token.text == "os" and allow_go_os and not previous_is_member:
-            key_token = _call_environment_key(tokens, index, "Getenv", "LookupEnv")
+            key_token = _call_configuration_key(tokens, index, "Getenv", "LookupEnv")
+            kind = "environment"
         else:
             key_token = None
-        if key_token is not None and _CONFIGURATION_KEY.fullmatch(key_token.text):
-            reads.append((key_token.text, token.start))
+            kind = None
+        pattern = _ENVIRONMENT_CONFIGURATION_KEY if kind == "environment" else _PROPERTY_CONFIGURATION_KEY
+        if key_token is not None and kind is not None and pattern.fullmatch(key_token.text):
+            reads.append((key_token.text, kind, token.start))
     return reads
 
 
@@ -2789,7 +2798,7 @@ def _node_environment_key(tokens: list[_CodeToken], index: int) -> _CodeToken | 
     return None
 
 
-def _call_environment_key(tokens: list[_CodeToken], index: int, *names: str) -> _CodeToken | None:
+def _call_configuration_key(tokens: list[_CodeToken], index: int, *names: str) -> _CodeToken | None:
     if not _token_texts(tokens, index, (tokens[index].text, ".")):
         return None
     operation = _token_at(tokens, index + 2)

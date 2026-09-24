@@ -203,9 +203,10 @@ client or runtime registration from a `.proto` file. Duplicate service/RPC decla
 are omitted rather than arbitrarily selecting one.
 
 `describe_configuration` lists literal environment-variable keys read by local
-Node/TypeScript, Java/Kotlin and Go symbols. It returns only key name, sensitivity
-indicator and file/line evidence: values, `.env` files, dynamic key names and runtime
-resolution are never indexed or returned.
+Node/TypeScript, Java/Kotlin and Go symbols, plus Java/Kotlin `System.getProperty`
+keys. It returns only key name, kind, sensitivity indicator and file/line evidence:
+values, `.env` files, Spring placeholders, dynamic key names and runtime resolution
+are never indexed or returned.
 
 Explicit Spring mappings for known timeout exception types retain their literal HTTP
 status, including 500, 503 and 504, so agents can distinguish an internal-error

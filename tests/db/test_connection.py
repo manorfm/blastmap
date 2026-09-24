@@ -6,7 +6,7 @@ from orbitkb.db.connection import open_db
 def test_schema_initializes(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     row = conn.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
-    assert row["value"] == "21"
+    assert row["value"] == "22"
 
 
 def test_schema_adds_message_version_to_an_existing_static_contract_table(tmp_path: Path):
@@ -21,7 +21,7 @@ def test_schema_adds_message_version_to_an_existing_static_contract_table(tmp_pa
 
     columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(static_message_contracts)")}
     assert "message_version" in columns
-    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "21"
+    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "22"
 
 
 def test_schema_adds_selected_decisions_to_an_existing_change_plan(tmp_path: Path):
@@ -36,7 +36,7 @@ def test_schema_adds_selected_decisions_to_an_existing_change_plan(tmp_path: Pat
 
     columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(change_plan_runs)")}
     assert "selected_decisions_json" in columns
-    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "21"
+    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "22"
 
 
 def test_schema_adds_change_units_to_an_existing_change_plan(tmp_path: Path):
@@ -51,7 +51,7 @@ def test_schema_adds_change_units_to_an_existing_change_plan(tmp_path: Path):
 
     columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(change_plan_runs)")}
     assert "change_units_json" in columns
-    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "21"
+    assert upgraded.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()["value"] == "22"
 
 
 def test_schema_upgrades_legacy_entrypoint_constraint_without_losing_contracts(tmp_path: Path):
@@ -89,6 +89,44 @@ def test_schema_upgrades_legacy_entrypoint_constraint_without_losing_contracts(t
     contract = upgraded.execute("SELECT contract_json FROM entrypoint_contracts WHERE entrypoint_id = 7").fetchone()
     assert entrypoint["kind"] == "http"
     assert contract["contract_json"] == '{"source":"legacy"}'
+    assert upgraded.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_schema_upgrades_configuration_binding_constraint_without_losing_facts(tmp_path: Path):
+    path = tmp_path / "legacy-configuration.db"
+    conn = open_db(path)
+    conn.execute("INSERT INTO services (name, root_path, updated_at) VALUES ('orders', '/repos/orders', 'now')")
+    conn.executescript(
+        """
+        DROP TABLE static_configuration_bindings;
+        CREATE TABLE static_configuration_bindings (
+            id          INTEGER PRIMARY KEY,
+            service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+            source      TEXT NOT NULL,
+            key         TEXT NOT NULL,
+            kind        TEXT NOT NULL CHECK (kind IN ('environment')),
+            sensitive   INTEGER NOT NULL CHECK (sensitive IN (0, 1)),
+            file_path   TEXT NOT NULL,
+            start_line  INTEGER NOT NULL,
+            end_line    INTEGER NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        INSERT INTO static_configuration_bindings
+            VALUES (4, 1, 'Publisher.publish', 'ORDERS_TOPIC', 'environment', 0, 'publisher.ts', 2, 2, 'now');
+        """
+    )
+    conn.execute("UPDATE schema_meta SET value = '21' WHERE key = 'schema_version'")
+    conn.commit()
+    conn.close()
+
+    upgraded = open_db(path)
+
+    assert upgraded.execute("SELECT key FROM static_configuration_bindings").fetchone()["key"] == "ORDERS_TOPIC"
+    upgraded.execute(
+        """INSERT INTO static_configuration_bindings
+           (service_id, source, key, kind, sensitive, file_path, start_line, end_line, updated_at)
+           VALUES (1, 'Client.timeout', 'payments.timeout-ms', 'property', 0, 'Client.java', 3, 3, 'now')"""
+    )
     assert upgraded.execute("PRAGMA foreign_key_check").fetchall() == []
 
 

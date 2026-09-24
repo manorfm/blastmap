@@ -173,9 +173,10 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
     def describe_configuration(
         service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
     ) -> dict:
-        """List literal environment-variable keys read by local source symbols,
-        with evidence and a sensitive-key indicator. Values, `.env` files, runtime
-        resolution and dynamic key names are never returned. Capped at `limit`
+        """List literal environment-variable and JVM property keys read by local
+        source symbols, with evidence and a sensitive-key indicator. Values, `.env`
+        files, Spring placeholders, runtime resolution and dynamic key names are never
+        returned. Capped at `limit`
         bindings (default 50) starting at `offset`; `total`/`truncated` tell you
         whether to page further. Pass repository when the service name is duplicated."""
         with closing(_conn()) as conn:

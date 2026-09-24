@@ -134,6 +134,7 @@ def test_static_configuration_bindings_are_replaced_with_the_flow_snapshot(tmp_p
     flows.replace_analysis(conn, service_id, AnalysisResult(configuration_bindings=[
         ConfigurationBinding("publisher.publish", "ORDERS_TOPIC", "environment", False, evidence),
         ConfigurationBinding("publisher.publish", "STRIPE_SECRET_KEY", "environment", True, Evidence("publisher.ts", 4, 4)),
+        ConfigurationBinding("Client.timeout", "payments.timeout-ms", "property", False, Evidence("Client.java", 5, 5)),
     ]))
 
     assert [dict(row) for row in flows.list_static_configuration_bindings(conn, service_id)] == [
@@ -144,6 +145,10 @@ def test_static_configuration_bindings_are_replaced_with_the_flow_snapshot(tmp_p
         {
             "source": "publisher.publish", "key": "STRIPE_SECRET_KEY", "kind": "environment", "sensitive": 1,
             "file_path": "publisher.ts", "start_line": 4, "end_line": 4,
+        },
+        {
+            "source": "Client.timeout", "key": "payments.timeout-ms", "kind": "property", "sensitive": 0,
+            "file_path": "Client.java", "start_line": 5, "end_line": 5,
         },
     ]
 
