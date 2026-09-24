@@ -425,6 +425,7 @@ def test_rabbit_consumer_idempotency_is_scoped_to_its_handler(tmp_path: Path):
     (tmp_path / "consumer.ts").write_text(
         '''channel.consume("orders.created", async (message: OrderCreated) => {
   // idempotency key prevents duplicate handling
+  const timeout = 500;
   await orderService.handle(message);
 });
 channel.consume("billing.created", async (message: BillingCreated) => {
@@ -438,6 +439,8 @@ channel.consume("billing.created", async (message: BillingCreated) => {
 
     assert result.contracts["message.consume:orders.created"]["idempotency"] == "detected"
     assert "idempotency" not in result.contracts["message.consume:billing.created"]
+    assert result.contracts["message.consume:orders.created"]["timeout"] == "detected"
+    assert "timeout" not in result.contracts["message.consume:billing.created"]
 
 
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):

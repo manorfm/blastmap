@@ -1121,6 +1121,8 @@ def _message_contract(channel: str, declaration: str, language: str, *, transpor
     }
     if transport == "rabbitmq" and re.search(r"\bidempot(?:ent|ency)\b", declaration, re.I):
         contract["idempotency"] = "detected"
+    if transport == "rabbitmq" and re.search(r"\btimeout\b", declaration, re.I):
+        contract["timeout"] = "detected"
     return contract
 
 
@@ -2074,7 +2076,6 @@ def _dto_shapes(files: list[Path]) -> dict[str, list[dict]]:
 def _enrich_rabbitmq_contracts(contracts: dict[str, dict], files: list[Path]) -> None:
     queues = _rabbitmq_queue_options(files)
     bindings = _rabbitmq_bindings(files)
-    source_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in files)
     for contract in contracts.values():
         if contract.get("transport") != "rabbitmq" or contract.get("direction") != "consumes":
             continue
@@ -2082,8 +2083,6 @@ def _enrich_rabbitmq_contracts(contracts: dict[str, dict], files: list[Path]) ->
             contract.update(options)
         if queue_bindings := bindings.get(contract["queue"]):
             contract["bindings"] = queue_bindings
-        if re.search(r"\btimeout\b", source_text, re.I):
-            contract["timeout"] = "detected"
 
 
 def _rabbitmq_queue_options(files: list[Path]) -> dict[str, dict]:

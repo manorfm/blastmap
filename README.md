@@ -231,7 +231,8 @@ an absence-of-proof signal: broker policy, idempotency and de-duplication can ex
 outside indexed source, and consumers on other brokers are not treated as lacking
 recovery. A local idempotency marker in that consumer's handler is shown to the agent
 as declared context, but it does not hide the signal or claim that duplicate handling
-has been verified.
+has been verified. The same handler-scoped posture applies to timeout context, so one
+consumer's marker does not describe another consumer in the same service.
 
 The same transaction/outbox review now covers delegated service methods that write and
 publish without a source-proven transaction boundary. Entrypoints remain covered by the

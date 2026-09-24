@@ -369,9 +369,10 @@ one literal version header named `schema_version`, `schemaVersion`,
 Matching consumer contracts may include literal `dead_letter_routing_key` and
 `retry_delay_ms` extracted from local queue declarations; missing or dynamic values
 are not represented.
-`idempotency: "detected"` is emitted only when that consumer's own handler declaration
-contains an idempotency marker. It is a scoped source hint, not proof that duplicate
-delivery is safely prevented.
+`idempotency: "detected"` and `timeout: "detected"` are emitted only when that
+consumer's own handler declaration contains the respective marker. They are scoped
+source hints, not proof that duplicate delivery is safely prevented or that timeout
+handling is correct.
 For Go, these values require a literal `amqp.Table` supplied to `QueueDeclare` on a
 receiver locally declared as `*amqp.Channel`.
 Consumer `contract.bindings` is an optional ordered list of `{exchange,
