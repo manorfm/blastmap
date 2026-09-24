@@ -147,7 +147,8 @@ remains capped at five cards.
 For Node/TypeScript REST, a literal Express `app` or `router` route is indexed as
 an HTTP entrypoint only when that receiver is locally created from an Express import,
 the path is literal and the final handler is a named function or arrow handler declared
-in the same file. Dynamic registration, framework wrappers and unresolved/inline
+in the same file, or an inline arrow/function expression. Inline route handlers use a
+stable route-derived symbol. Dynamic registration, framework wrappers and unresolved
 handlers remain unknown rather than becoming route facts.
 
 ## Entrypoint response

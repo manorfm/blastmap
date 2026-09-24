@@ -860,13 +860,10 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         functions_by_name: dict[str, _Function] = {}
         for function in _node_named_functions(tree, source, path.stem):
             functions_by_name[function.name] = function
-            result.symbols.append(_symbol(function, path, root, imports=imports))
-            function_edges, function_cloud_facts = self._edges_for_node(
-                function, path, root, source, mongoose_models, prisma_clients, client_declarations, command_imports,
+            self._record_function(
+                result, function, path, root, source, imports, mongoose_models, prisma_clients,
+                client_declarations, command_imports,
             )
-            result.edges.extend(function_edges)
-            result.cloud_facts.extend(function_cloud_facts)
-            result.boundaries.extend(self._boundaries_for(function, path, root, source))
         express_receivers = _express_route_receivers(source_text)
         for node in _walk(tree):
             if node.type != "call_expression":
@@ -883,7 +880,18 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 continue
             args = arguments.named_children
             path_value = _string(args[0], source) if args else None
-            handler = functions_by_name.get(_text(args[-1], source)) if len(args) > 1 else None
+            handler_node = args[-1] if len(args) > 1 else None
+            handler = functions_by_name.get(_text(handler_node, source)) if handler_node is not None else None
+            if handler is None and handler_node is not None and handler_node.type in {"arrow_function", "function_expression"}:
+                body = handler_node.child_by_field_name("body")
+                if body is not None and path_value is not None:
+                    handler = _Function(
+                        f"http.{method}:{path_value}", f"{path.stem}.http.{method}:{path_value}", body, handler_node,
+                    )
+                    self._record_function(
+                        result, handler, path, root, source, imports, mongoose_models, prisma_clients,
+                        client_declarations, command_imports,
+                    )
             if path_value is None or handler is None:
                 continue
             result.entrypoints.append(
@@ -951,6 +959,28 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             result.boundaries.extend(self._boundaries_for(function, path, root, source))
             result.contracts[symbol] = {"transport": "kafka", "direction": "consumes", "queue": topic, "payload": None}
         return result
+
+    def _record_function(
+        self,
+        result: AnalysisResult,
+        function: _Function,
+        path: Path,
+        root: Path,
+        source: bytes,
+        imports: tuple[tuple[str, str], ...],
+        mongoose_models: frozenset[str],
+        prisma_clients: frozenset[str],
+        client_declarations: dict,
+        command_imports: dict[str, tuple[str, str]],
+    ) -> None:
+        """Store one Node handler and every bounded fact derived from it."""
+        result.symbols.append(_symbol(function, path, root, imports=imports))
+        function_edges, function_cloud_facts = self._edges_for_node(
+            function, path, root, source, mongoose_models, prisma_clients, client_declarations, command_imports,
+        )
+        result.edges.extend(function_edges)
+        result.cloud_facts.extend(function_cloud_facts)
+        result.boundaries.extend(self._boundaries_for(function, path, root, source))
 
     @staticmethod
     def _edges_for_node(
