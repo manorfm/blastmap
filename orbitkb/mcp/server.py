@@ -127,6 +127,19 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.describe_entrypoint(conn, service, kind, method, name, max_edges, repository)
 
     @mcp.tool()
+    def describe_error_flow(
+        service: str, kind: str, method: str, name: str, repository: str | None = None,
+    ) -> dict:
+        """Trace one source-proven HTTP error across an indexed client boundary.
+        It returns a flow only when the caller's reachable static client call, the
+        target endpoint's reachable error contract, and the caller's matching local
+        mapping are all explicit. Missing links remain unknown; values, messages,
+        payloads and stack traces are never returned. Use describe_entrypoint first
+        to select the narrow flow and pass repository for duplicate service names."""
+        with closing(_conn()) as conn:
+            return queries.describe_error_flow(conn, service, kind, method, name, repository)
+
+    @mcp.tool()
     def ingest_runtime_evidence(
         service: str, source: str, observations: list[dict], repository: str | None = None,
     ) -> dict:

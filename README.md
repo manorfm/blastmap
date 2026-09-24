@@ -243,6 +243,13 @@ review signal, not proof that the caller returns HTTP 500. When a literal static
 also resolves to an indexed downstream endpoint, only error contracts reachable from
 that endpoint's static flow are considered.
 
+`describe_error_flow` is the narrow follow-up for an HTTP entrypoint. It returns a
+cross-service flow only when a reachable literal client call, a reachable downstream
+HTTP error contract and a reachable caller mapping share an exact declared error type
+or public code. This makes a proven `409 → 409` distinct from `409 → 500`; an absent
+or ambiguous link is returned as an unknown, never assumed to be a `500`. Error
+messages, payloads, causes and stack traces are not indexed or returned.
+
 `find_architecture_smells` also flags a source-proven internal HTTP call with no
 literal timeout or retry policy on the same source symbol. This is a prompt to review
 the client boundary, not evidence that production has no protection: defaults and

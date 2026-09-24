@@ -414,6 +414,147 @@ def describe_entrypoint(
     }
 
 
+def describe_error_flow(
+    conn: sqlite3.Connection, service: str, kind: str, method: str, name: str,
+    repository: str | None = None,
+) -> dict:
+    """Describe only exact HTTP error mappings reached from one entrypoint.
+
+    A flow needs a source-proven HTTP call, an indexed target endpoint with an
+    explicit HTTP error contract, and a reachable caller mapping with the same
+    declared error identity. Missing evidence stays in ``unknowns`` rather than
+    becoming an assumed 500 or an assumed propagation.
+    """
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
+    entrypoint = flows_repo.get_entrypoint(conn, row["id"], kind, method, name)
+    if entrypoint is None:
+        return {"error": f"unknown entrypoint: {kind} {method} {name} on {service}"}
+    caller_edges = flows_repo.list_reachable_edges(conn, row["id"], entrypoint["symbol"], MAX_FLOW_EDGE_LIMIT)
+    caller_symbols = {entrypoint["symbol"]} | {
+        symbol for edge in caller_edges for symbol in (edge["from_symbol"], edge["to_symbol"])
+    }
+    caller_contracts = flows_repo.list_static_error_contracts_for_sources(conn, row["id"], caller_symbols)
+    calls = flows_repo.list_static_service_calls_for_sources(conn, row["id"], caller_symbols)
+    mappings = [
+        contract
+        for contract in caller_contracts
+        if contract["role"] in {"maps", "handles"}
+        and contract["protocol"] == "http"
+        and contract["transport_code"] is not None
+    ]
+    flows: list[dict] = []
+    unknowns: list[str] = []
+    target_cache: dict[tuple[object, ...], dict] = {}
+    for call in calls:
+        if call["protocol"] != "http":
+            unknowns.append(f"{call['target_service']} {call['protocol']} error flow is not supported yet.")
+            continue
+        resolution = _resolve_static_service_call_target(conn, row, call, target_cache)
+        if resolution["status"] != "endpoint_indexed":
+            unknowns.append(
+                f"{call['target_service']} {call['protocol']} target is not resolved to an indexed endpoint."
+            )
+            continue
+        target, _candidates = services_repo.resolve_service_reference(
+            conn, call["target_service"], row["repository_id"],
+        )
+        if target is None:
+            continue
+        target_entrypoint = flows_repo.get_entrypoint(
+            conn, target["id"], "http", call["target_method"], call["target_path"],
+        )
+        if target_entrypoint is None:
+            continue
+        target_edges = flows_repo.list_reachable_edges(
+            conn, target["id"], target_entrypoint["symbol"], MAX_FLOW_EDGE_LIMIT,
+        )
+        target_symbols = {target_entrypoint["symbol"]} | {
+            symbol for edge in target_edges for symbol in (edge["from_symbol"], edge["to_symbol"])
+        }
+        origins = [
+            contract
+            for contract in flows_repo.list_static_error_contracts_for_sources(conn, target["id"], target_symbols)
+            if contract["protocol"] == "http" and contract["transport_code"] is not None
+        ]
+        if not origins:
+            unknowns.append(
+                f"{target['name']} {call['target_method']} {call['target_path']} has no reachable indexed HTTP error contract."
+            )
+            continue
+        for origin in origins:
+            matching_mappings = [mapping for mapping in mappings if _same_error_identity(origin, mapping)]
+            if not matching_mappings:
+                unknowns.append(
+                    f"{call['source']} has no reachable mapping for {target['name']} {origin['transport_code']} {origin['internal_type'] or origin['public_code'] or origin['error_kind']}."
+                )
+                continue
+            for mapping in matching_mappings:
+                flows.append(_error_flow(row, call, target, origin, mapping))
+    return {
+        "service": row["name"],
+        "repository": row["repository_name"],
+        "entrypoint": {
+            "kind": entrypoint["kind"], "method": entrypoint["method"],
+            "name": entrypoint["name"], "symbol": entrypoint["symbol"],
+        },
+        "error_flows": flows,
+        "unknowns": sorted(set(unknowns)),
+    }
+
+
+def _same_error_identity(origin: sqlite3.Row, mapping: sqlite3.Row) -> bool:
+    """Join errors only through a declared type or public code, never broad kind."""
+    if origin["internal_type"] and mapping["internal_type"]:
+        return origin["internal_type"] == mapping["internal_type"]
+    return bool(origin["public_code"] and origin["public_code"] == mapping["public_code"])
+
+
+def _error_flow(
+    caller: sqlite3.Row, call: sqlite3.Row, target: sqlite3.Row,
+    origin: sqlite3.Row, mapping: sqlite3.Row,
+) -> dict:
+    origin_evidence = _error_evidence(origin)
+    mapping_evidence = _error_evidence(mapping)
+    call_evidence = _call_evidence(call)
+    status = mapping["transport_code"]
+    return {
+        "origin": {
+            "service": target["name"], "symbol": origin["source"],
+            "transport": {
+                "protocol": origin["protocol"], "status": origin["transport_code"],
+                "public_code": origin["public_code"],
+            },
+            "evidence": origin_evidence,
+        },
+        "handling": [{
+            "service": caller["name"], "symbol": mapping["source"], "action": f"maps_to_http_{status}",
+            "evidence": mapping_evidence,
+        }],
+        "outcome": {
+            "protocol": mapping["protocol"], "status": status, "public_code": mapping["public_code"],
+        },
+        "confidence": 1.0,
+        "evidence": _unique_evidence(call_evidence, origin_evidence, mapping_evidence),
+    }
+
+
+def _error_evidence(contract: sqlite3.Row) -> dict:
+    return {
+        "file": contract["file_path"], "start_line": contract["start_line"], "end_line": contract["end_line"],
+    }
+
+
+def _call_evidence(call: sqlite3.Row) -> dict:
+    return {"file": call["file_path"], "start_line": call["start_line"], "end_line": call["end_line"]}
+
+
+def _unique_evidence(*items: dict) -> list[dict]:
+    """Keep provenance complete without repeating one source location in MCP output."""
+    return list({(item["file"], item["start_line"], item["end_line"]): item for item in items}.values())
+
+
 def ingest_runtime_evidence(
     conn: sqlite3.Connection, service: str, source: str, observations: list[dict], repository: str | None = None,
 ) -> dict:

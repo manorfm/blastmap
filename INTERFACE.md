@@ -58,10 +58,14 @@ treated as deletion.
    operation's ID, response statuses, request-body requirement, security state and
    file/line evidence. Referenced request bodies are `null` until a future parser can
    resolve them safely; ambiguous operations from multiple specifications are omitted.
-8. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_messages`,
+8. Call `describe_error_flow(service, kind, method, name)` only when a selected HTTP
+   flow crosses an indexed internal HTTP client boundary and its error semantics matter.
+   It needs a literal call, a reachable downstream HTTP contract and a matching reachable
+   caller mapping; otherwise it returns explicit unknowns rather than inventing a failure.
+9. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.
-9. Call `list_security_findings(service)` before changing credentials,
+10. Call `list_security_findings(service)` before changing credentials,
    configuration or an external integration; it returns locations and remediation,
    never source excerpts or secret values.
 

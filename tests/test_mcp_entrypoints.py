@@ -118,6 +118,118 @@ def test_describe_entrypoint_includes_only_reachable_static_error_contracts(tmp_
     }]
 
 
+def test_describe_error_flow_returns_a_proven_downstream_409_mapping(tmp_path):
+    conn = open_db(tmp_path / "error-flow.db")
+    checkout = services.ensure_service(conn, "checkout", "/repos/checkout", "jvm-spring")
+    inventory = services.ensure_service(conn, "inventory", "/repos/inventory", "jvm-spring")
+    checkout_evidence = Evidence("CheckoutService.java", 20, 24)
+    inventory_evidence = Evidence("InventoryController.java", 14, 18)
+    flows.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "CheckoutController.create", checkout_evidence)],
+            edges=[FlowEdge("CheckoutController.create", "CheckoutService.checkout", "invokes", checkout_evidence)],
+            static_service_calls=[StaticServiceCall(
+                source="CheckoutService.checkout", target_service="inventory", protocol="http",
+                target_method="POST", target_path="/reservations", evidence=checkout_evidence,
+            )],
+            error_contracts=[ErrorContract(
+                source="CheckoutService.checkout", role="maps", error_kind="conflict",
+                internal_type="InsufficientStock", protocol="http", transport_code="409",
+                public_code="OUT_OF_STOCK", exposes_internal_detail=False,
+                retryability="not_retryable", evidence=checkout_evidence,
+            )],
+        ),
+    )
+    flows.replace_analysis(
+        conn,
+        inventory,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/reservations", "InventoryController.reserve", inventory_evidence)],
+            error_contracts=[ErrorContract(
+                source="InventoryController.reserve", role="maps", error_kind="conflict",
+                internal_type="InsufficientStock", protocol="http", transport_code="409",
+                public_code="OUT_OF_STOCK", exposes_internal_detail=False,
+                retryability="not_retryable", evidence=inventory_evidence,
+            )],
+        ),
+    )
+
+    result = queries.describe_error_flow(conn, "checkout", "http", "post", "/orders")
+
+    assert result == {
+        "service": "checkout",
+        "repository": None,
+        "entrypoint": {"kind": "http", "method": "POST", "name": "/orders", "symbol": "CheckoutController.create"},
+        "error_flows": [{
+            "origin": {
+                "service": "inventory", "symbol": "InventoryController.reserve",
+                "transport": {"protocol": "http", "status": "409", "public_code": "OUT_OF_STOCK"},
+                "evidence": {"file": "InventoryController.java", "start_line": 14, "end_line": 18},
+            },
+            "handling": [{
+                "service": "checkout", "symbol": "CheckoutService.checkout", "action": "maps_to_http_409",
+                "evidence": {"file": "CheckoutService.java", "start_line": 20, "end_line": 24},
+            }],
+            "outcome": {"protocol": "http", "status": "409", "public_code": "OUT_OF_STOCK"},
+            "confidence": 1.0,
+            "evidence": [
+                {"file": "CheckoutService.java", "start_line": 20, "end_line": 24},
+                {"file": "InventoryController.java", "start_line": 14, "end_line": 18},
+            ],
+        }],
+        "unknowns": [],
+    }
+
+
+def test_describe_error_flow_keeps_a_proven_409_to_500_translation_visible(tmp_path):
+    conn = open_db(tmp_path / "degraded-error-flow.db")
+    checkout = services.ensure_service(conn, "checkout", "/repos/checkout", "jvm-spring")
+    inventory = services.ensure_service(conn, "inventory", "/repos/inventory", "jvm-spring")
+    evidence = Evidence("CheckoutService.java", 20, 24)
+    flows.replace_analysis(
+        conn,
+        checkout,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/orders", "CheckoutController.create", evidence)],
+            edges=[FlowEdge("CheckoutController.create", "CheckoutService.checkout", "invokes", evidence)],
+            static_service_calls=[StaticServiceCall(
+                source="CheckoutService.checkout", target_service="inventory", protocol="http",
+                target_method="POST", target_path="/reservations", evidence=evidence,
+            )],
+            error_contracts=[ErrorContract(
+                source="CheckoutService.checkout", role="maps", error_kind="conflict",
+                internal_type="InsufficientStock", protocol="http", transport_code="500",
+                public_code="INTERNAL_ERROR", exposes_internal_detail=False,
+                retryability="unknown", evidence=evidence,
+            )],
+        ),
+    )
+    flows.replace_analysis(
+        conn,
+        inventory,
+        AnalysisResult(
+            entrypoints=[EntryPoint("http", "POST", "/reservations", "InventoryController.reserve", evidence)],
+            error_contracts=[ErrorContract(
+                source="InventoryController.reserve", role="maps", error_kind="conflict",
+                internal_type="InsufficientStock", protocol="http", transport_code="409",
+                public_code="OUT_OF_STOCK", exposes_internal_detail=False,
+                retryability="not_retryable", evidence=evidence,
+            )],
+        ),
+    )
+
+    result = queries.describe_error_flow(conn, "checkout", "http", "post", "/orders")
+
+    assert result["error_flows"][0]["origin"]["transport"]["status"] == "409"
+    assert result["error_flows"][0]["handling"][0]["action"] == "maps_to_http_500"
+    assert result["error_flows"][0]["outcome"] == {
+        "protocol": "http", "status": "500", "public_code": "INTERNAL_ERROR",
+    }
+    assert result["unknowns"] == []
+
+
 def test_describe_entrypoint_includes_only_reachable_static_service_calls(tmp_path):
     conn = open_db(tmp_path / "service-calls.db")
     service_id = services.ensure_service(conn, "checkout", "/repos/checkout", "jvm-spring")
