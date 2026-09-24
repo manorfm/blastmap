@@ -290,6 +290,13 @@ It returns at most three consumers and `consumer_count` to stay compact. The mat
 not infer broker exchanges, bindings, routing, delivery, ordering or runtime message
 processing; it simply prioritizes a source-proven cross-service review boundary.
 
+`possible_retry_write_publish_reaches_persistent_consumer` further requires that the
+matched consumer has a `message`/`CONSUME` entrypoint for the literal channel and
+source-proven local writes from that consumer symbol. It includes up to three consumer
+write summaries. The result still does not prove delivery, ordering, processing, outbox
+coverage or de-duplication; it prioritizes a possible cross-service duplicate-state
+boundary for review.
+
 `possible_non_atomic_service_publish` extends the transaction/outbox review to a
 non-entrypoint service symbol with source-proven local write and event publication but
 no source-proven transaction boundary. Entrypoint-owned operations remain covered by

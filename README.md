@@ -220,6 +220,11 @@ the exact same literal channel, OrbitKB prioritizes it as a cross-service duplic
 delivery review. It does not infer exchanges, bindings, routing, delivery or runtime
 processing from the channel match alone.
 
+OrbitKB raises the priority further when that known consumer has a matching message
+entrypoint and source-proven local write. This identifies a possible cross-service
+duplicate-state boundary, while still leaving delivery, ordering, outbox and consumer
+deduplication as explicit unknowns.
+
 The same transaction/outbox review now covers delegated service methods that write and
 publish without a source-proven transaction boundary. Entrypoints remain covered by the
 existing direct-flow signal, so OrbitKB does not duplicate that finding. As elsewhere,

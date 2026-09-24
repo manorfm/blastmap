@@ -739,6 +739,98 @@ def find_retry_write_publish_flows_with_consumers(conn: sqlite3.Connection) -> l
     return findings
 
 
+def find_retry_write_publish_flows_with_persistent_consumers(conn: sqlite3.Connection) -> list[dict]:
+    """Prioritize duplicate-delivery review when a known consumer also writes state.
+
+    A consumer must have a matching literal channel, a message entrypoint for that
+    channel and source-proven writes from that entrypoint. This avoids inferring
+    persistence impact from a consumer declaration alone.
+    """
+    names = _service_names(conn)
+    retries_by_source = _retry_policies_by_source(conn)
+    writes_by_source = _flow_edges_by_source(conn, "writes")
+    publishes_by_source = _flow_edges_by_source(conn, "publishes")
+    persistent_consumers_by_channel: dict[str, list[tuple[sqlite3.Row, list[sqlite3.Row]]]] = defaultdict(list)
+    consumer_rows = conn.execute(
+        """SELECT contract.service_id, contract.channel, contract.file_path,
+                  contract.start_line, contract.end_line, entrypoint.symbol
+           FROM static_message_contracts contract
+           JOIN entrypoints entrypoint
+             ON entrypoint.service_id = contract.service_id
+            AND entrypoint.kind = 'message'
+            AND entrypoint.method = 'CONSUME'
+            AND entrypoint.name = contract.channel
+           WHERE contract.direction = 'consumes'
+           ORDER BY contract.channel, contract.service_id, entrypoint.symbol,
+                    contract.file_path, contract.start_line""",
+    ).fetchall()
+    for consumer in consumer_rows:
+        writes = writes_by_source.get((consumer["service_id"], consumer["symbol"]))
+        if writes:
+            persistent_consumers_by_channel[consumer["channel"]].append((consumer, writes))
+
+    findings: list[dict] = []
+    for source_key, policies in retries_by_source.items():
+        producer_writes = writes_by_source.get(source_key)
+        publishes = publishes_by_source.get(source_key)
+        if not producer_writes or not publishes:
+            continue
+        service_id, symbol = source_key
+        visible_producer_writes = producer_writes[:3]
+        for publish in publishes:
+            consumers = [
+                item for item in persistent_consumers_by_channel.get(publish["to_symbol"], [])
+                if item[0]["service_id"] != service_id
+            ]
+            if not consumers:
+                continue
+            visible_consumers = consumers[:3]
+            consumer_details = []
+            consumer_evidence = []
+            for consumer, writes in visible_consumers:
+                visible_writes = writes[:3]
+                consumer_details.append({
+                    "service": names[consumer["service_id"]], "symbol": consumer["symbol"],
+                    "writes": [{"target": write["to_symbol"]} for write in visible_writes],
+                    "write_count": len(writes),
+                })
+                consumer_evidence.extend([_edge_evidence(consumer), *[_edge_evidence(write) for write in visible_writes]])
+            findings.append({
+                "kind": "possible_retry_write_publish_reaches_persistent_consumer", "severity": "warning",
+                "services": [names[service_id], *[item["service"] for item in consumer_details]],
+                "reason": (
+                    f"{symbol} writes state and retries publication on channel {publish['to_symbol']}, "
+                    "which reaches a source-proven state-writing consumer in another service."
+                ),
+                "detail": {
+                    "flow": {"symbol": symbol}, "channel": publish["to_symbol"],
+                    "retry_policies": [
+                        {"mechanism": policy["mechanism"], "value": policy["value"], "unit": policy["unit"]}
+                        for policy in policies
+                    ],
+                    "writes": [{"target": write["to_symbol"]} for write in visible_producer_writes],
+                    "write_count": len(producer_writes),
+                    "consumers": consumer_details,
+                    "consumer_count": len(consumers),
+                    "confidence": 0.8,
+                    "evidence": [
+                        *[_edge_evidence(policy) for policy in policies],
+                        *[_edge_evidence(write) for write in visible_producer_writes],
+                        _edge_evidence(publish), *consumer_evidence,
+                    ],
+                    "unknowns": [
+                        "Literal channel and consumer writes do not prove broker routing, message delivery, ordering or runtime processing of this producer's event.",
+                        "Outbox, producer idempotency or consumer de-duplication may already prevent duplicate persistent effects outside the indexed facts.",
+                    ],
+                    "remediation": [
+                        "Review producer retries and the listed persistent consumers as one duplicate-state boundary.",
+                        "Confirm an outbox/idempotency strategy and consumer de-duplication before relying on retries for this channel.",
+                    ],
+                },
+            })
+    return findings
+
+
 def find_non_atomic_service_publish_flows(conn: sqlite3.Connection) -> list[dict]:
     """Extend the write/publication review to non-entrypoint service symbols.
 
@@ -1876,6 +1968,7 @@ _DETECTORS = (
     find_resilience_policies_on_write_flows,
     find_retries_on_write_publish_flows,
     find_retry_write_publish_flows_with_consumers,
+    find_retry_write_publish_flows_with_persistent_consumers,
     find_non_atomic_service_publish_flows,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
