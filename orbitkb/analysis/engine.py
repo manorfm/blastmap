@@ -876,9 +876,10 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             result.entrypoints.append(
                 EntryPoint("http", method, route, function.symbol, _evidence(path, root, function.declaration))
             )
+        express_route_prefixes = _express_route_prefixes(source_text)
         fastify_receivers = _fastify_route_receivers(source_text)
         route_prefixes = {
-            **_express_route_prefixes(source_text),
+            **express_route_prefixes,
             **{receiver: "" for receiver in fastify_receivers},
         }
         for node in _walk(tree):
@@ -888,24 +889,32 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             arguments = node.child_by_field_name("arguments")
             if callee is None or arguments is None:
                 continue
-            callee_text = _text(callee, source)
-            if "." not in callee_text:
-                continue
-            receiver, method = callee_text.rsplit(".", 1)
-            if receiver not in route_prefixes:
-                continue
-            args = arguments.named_children
-            if method in self.HTTP_ROUTE_METHODS:
-                http_methods = (method.upper(),)
-                path_value = _string(args[0], source) if args else None
-                handler_node = args[-1] if len(args) > 1 else None
-            elif method == "route" and receiver in fastify_receivers:
-                route_definition = _fastify_literal_route_definition(args, source)
-                if route_definition is None:
+            chained_route = _express_literal_chained_route(callee, source, express_route_prefixes)
+            if chained_route is not None:
+                receiver, method, path_value = chained_route
+                if method not in self.HTTP_ROUTE_METHODS:
                     continue
-                http_methods, path_value, handler_node = route_definition
+                http_methods = (method.upper(),)
+                handler_node = arguments.named_children[-1] if arguments.named_children else None
             else:
-                continue
+                callee_text = _text(callee, source)
+                if "." not in callee_text:
+                    continue
+                receiver, method = callee_text.rsplit(".", 1)
+                if receiver not in route_prefixes:
+                    continue
+                args = arguments.named_children
+                if method in self.HTTP_ROUTE_METHODS:
+                    http_methods = (method.upper(),)
+                    path_value = _string(args[0], source) if args else None
+                    handler_node = args[-1] if len(args) > 1 else None
+                elif method == "route" and receiver in fastify_receivers:
+                    route_definition = _fastify_literal_route_definition(args, source)
+                    if route_definition is None:
+                        continue
+                    http_methods, path_value, handler_node = route_definition
+                else:
+                    continue
             if path_value is not None:
                 path_value = _join_route(route_prefixes[receiver], path_value)
             handler = functions_by_name.get(_text(handler_node, source)) if handler_node is not None else None
@@ -1855,6 +1864,33 @@ def _express_route_prefixes(source: str) -> dict[str, str]:
         **{application: "" for application in applications},
         **{router: prefixes[0] for router, prefixes in mounts.items() if len(prefixes) == 1},
     }
+
+
+def _express_literal_chained_route(
+    callee: Node, source: bytes, route_prefixes: dict[str, str],
+) -> tuple[str, str, str] | None:
+    """Extract a proven ``app.route(path).method(handler)`` Express chain."""
+    if callee.type != "member_expression":
+        return None
+    route_call = callee.child_by_field_name("object")
+    method_node = callee.child_by_field_name("property")
+    if route_call is None or route_call.type != "call_expression" or method_node is None:
+        return None
+    route_callee = route_call.child_by_field_name("function")
+    route_arguments = route_call.child_by_field_name("arguments")
+    if route_callee is None or route_arguments is None:
+        return None
+    route_callee_text = _text(route_callee, source)
+    if "." not in route_callee_text:
+        return None
+    receiver, factory_method = route_callee_text.rsplit(".", 1)
+    if factory_method != "route" or receiver not in route_prefixes:
+        return None
+    args = route_arguments.named_children
+    path = _string(args[0], source) if len(args) == 1 else None
+    if path is None:
+        return None
+    return receiver, _text(method_node, source), path
 
 
 def _fastify_route_receivers(source: str) -> frozenset[str]:

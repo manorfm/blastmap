@@ -543,6 +543,31 @@ app.post("/orders", async (req: Request, res: Response) => {
     )
 
 
+def test_node_analyzer_exposes_literal_express_chained_route_and_handler_flow(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import express from "express";
+const app = express();
+
+function createOrder(req: Request, res: Response) {
+  return orderService.create(req.body);
+}
+
+app.route("/orders").post(createOrder);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(entry.kind, entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
+        ("http", "POST", "/orders", "orders.createOrder"),
+    ]
+    assert any(
+        edge.source == "orders.createOrder" and edge.target == "orderService.create"
+        for edge in result.edges
+    )
+
+
 def test_node_analyzer_resolves_a_literal_express_router_mount_prefix(tmp_path: Path):
     (tmp_path / "orders.ts").write_text(
         '''import express from "express";

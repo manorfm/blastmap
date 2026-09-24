@@ -132,10 +132,11 @@ tool contract, pagination, response examples and ambiguity rules are in
 
 Node/TypeScript REST indexing currently recognizes literal Express app/router routes
 that point to a named function/arrow handler in the same file or to an inline handler.
-Inline routes receive a stable route-derived symbol. Router routes require exactly one
-direct literal mount, and inherit that prefix. Dynamic registration, wrappers,
-unmounted/multiply-mounted routers and unresolved handlers are intentionally left out
-rather than guessed into an endpoint.
+The same applies to literal `app.route(path).method(handler)` chains. Inline routes
+receive a stable route-derived symbol. Router routes require exactly one direct literal
+mount, and inherit that prefix. Dynamic registration, wrappers, unmounted/
+multiply-mounted routers and unresolved handlers are intentionally left out rather than
+guessed into an endpoint.
 The same literal method/path and handler rules cover Fastify instances created from a
 locally imported factory, including `app.route({ method, url, handler })` objects with
 all three fields literal or directly named in the same file. A literal `method` array
