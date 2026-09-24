@@ -516,6 +516,70 @@ app.post("/orders", async (req: Request, res: Response) => {
     )
 
 
+def test_node_analyzer_resolves_a_literal_express_router_mount_prefix(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import express from "express";
+const app = express();
+const router = express.Router();
+
+function createOrder(req: Request, res: Response) {
+  return orderService.create(req.body);
+}
+
+app.use("/api", router);
+router.post("/orders", createOrder);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
+        ("POST", "/api/orders", "orders.createOrder"),
+    ]
+
+
+def test_node_analyzer_skips_an_unmounted_express_router(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import express from "express";
+const router = express.Router();
+
+function createOrder(req: Request, res: Response) {
+  return orderService.create(req.body);
+}
+
+router.post("/orders", createOrder);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.entrypoints == []
+
+
+def test_node_analyzer_skips_a_multiply_mounted_express_router(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import express from "express";
+const app = express();
+const router = express.Router();
+
+function createOrder(req: Request, res: Response) {
+  return orderService.create(req.body);
+}
+
+app.use("/api", router);
+app.use("/internal", router);
+router.post("/orders", createOrder);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.entrypoints == []
+
+
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
     source = tmp_path / "consumer.go"
     source.write_text(

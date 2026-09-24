@@ -864,7 +864,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
                 client_declarations, command_imports,
             )
-        express_receivers = _express_route_receivers(source_text)
+        express_route_prefixes = _express_route_prefixes(source_text)
         for node in _walk(tree):
             if node.type != "call_expression":
                 continue
@@ -876,10 +876,12 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             if "." not in callee_text:
                 continue
             receiver, method = callee_text.rsplit(".", 1)
-            if receiver not in express_receivers or method not in self.HTTP_ROUTE_METHODS:
+            if receiver not in express_route_prefixes or method not in self.HTTP_ROUTE_METHODS:
                 continue
             args = arguments.named_children
             path_value = _string(args[0], source) if args else None
+            if path_value is not None:
+                path_value = _join_route(express_route_prefixes[receiver], path_value)
             handler_node = args[-1] if len(args) > 1 else None
             handler = functions_by_name.get(_text(handler_node, source)) if handler_node is not None else None
             if handler is None and handler_node is not None and handler_node.type in {"arrow_function", "function_expression"}:
@@ -1793,12 +1795,13 @@ def _node_named_imports(source: str) -> tuple[tuple[str, str], ...]:
     )
 
 
-def _express_route_receivers(source: str) -> frozenset[str]:
-    """Return locally proven Express applications or routers.
+def _express_route_prefixes(source: str) -> dict[str, str]:
+    """Return locally proven Express receivers and their unambiguous path prefix.
 
     Route calls on arbitrary objects are too common to treat as HTTP facts. This
-    deliberately accepts only a variable initialized by a locally imported Express
-    factory; framework wrappers and dynamic construction remain unresolved.
+    deliberately accepts direct application receivers and routers mounted exactly
+    once by a literal ``app.use(prefix, router)`` call. Framework wrappers, dynamic
+    construction and ambiguous router mounts remain unresolved.
     """
     imported = re.search(
         r"(?:import\s+(?:\*\s+as\s+)?express\s+from\s*|(?:const|let)\s+express\s*=\s*require\s*\()"
@@ -1806,10 +1809,22 @@ def _express_route_receivers(source: str) -> frozenset[str]:
         source,
     )
     if imported is None:
-        return frozenset()
-    return frozenset(re.findall(
-        r"\b(?:const|let|var)\s+(\w+)\s*=\s*express(?:\.Router)?\s*\(", source,
-    ))
+        return {}
+    factories = re.findall(
+        r"\b(?:const|let|var)\s+(\w+)\s*=\s*express(?:(\.Router))?\s*\(", source,
+    )
+    applications = {name for name, router_factory in factories if not router_factory}
+    routers = {name for name, router_factory in factories if router_factory}
+    mounts: dict[str, list[str]] = {}
+    for application, _quote, prefix, router in re.findall(
+        r"\b(\w+)\.use\s*\(\s*([\"'])([^\"']+)\2\s*,\s*(\w+)\s*\)", source,
+    ):
+        if application in applications and router in routers:
+            mounts.setdefault(router, []).append(prefix)
+    return {
+        **{application: "" for application in applications},
+        **{router: prefixes[0] for router, prefixes in mounts.items() if len(prefixes) == 1},
+    }
 
 
 def _node_named_functions(tree: Node, source: bytes, module_name: str) -> list[_Function]:

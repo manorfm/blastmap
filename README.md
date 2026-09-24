@@ -132,8 +132,10 @@ tool contract, pagination, response examples and ambiguity rules are in
 
 Node/TypeScript REST indexing currently recognizes literal Express app/router routes
 that point to a named function/arrow handler in the same file or to an inline handler.
-Inline routes receive a stable route-derived symbol. Dynamic registration, wrappers and
-unresolved handlers are intentionally left out rather than guessed into an endpoint.
+Inline routes receive a stable route-derived symbol. Router routes require exactly one
+direct literal mount, and inherit that prefix. Dynamic registration, wrappers,
+unmounted/multiply-mounted routers and unresolved handlers are intentionally left out
+rather than guessed into an endpoint.
 
 For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven error
 contracts (raised or explicitly mapped exception types and explicit local timeout
