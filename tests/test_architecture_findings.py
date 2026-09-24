@@ -161,6 +161,11 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
             reference_file_path="deploy/orders.yaml", reference_start_line=20, reference_end_line=23,
             matched_service_name="orders",
         ),
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix=None,
+            reference_file_path="deploy/orders.yaml", reference_start_line=28, reference_end_line=30,
+            matched_service_name="orders",
+        ),
     ])
 
     assert find_kubernetes_configuration_source_import_unknowns(conn) == [{
@@ -173,10 +178,11 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
         ),
         "detail": {
             "source_kind": "config_map", "source_name": "external-config",
-            "prefixes": ["ORDERS_", "PAYMENTS_"], "confidence": 0.4,
+            "prefixes": ["ORDERS_", "PAYMENTS_"], "includes_unprefixed_import": True, "confidence": 0.4,
             "evidence": [
                 {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15},
                 {"file": "deploy/orders.yaml", "start_line": 20, "end_line": 23},
+                {"file": "deploy/orders.yaml", "start_line": 28, "end_line": 30},
             ],
             "unknowns": [
                 "The source may be managed by another repository, Helm chart, controller, or deployment process.",
