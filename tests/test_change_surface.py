@@ -51,6 +51,36 @@ def test_no_matching_service_short_circuits_without_calling_backend(tmp_path: Pa
     assert "suggestion" in result["unknowns"][0]
 
 
+def test_identical_change_surface_reuses_cached_synthesis_and_invalidates_on_context_change(tmp_path: Path, monkeypatch):
+    conn = _build_pix_fixture(tmp_path / "synthesis-cache.db")
+    monkeypatch.setattr(change_surface.embeddings, "try_create_default_backend", lambda: None)
+    response = {
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }
+
+    first_backend = FakeBackend(response)
+    first = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", first_backend)
+    cached_backend = FakeBackend({"primary": [], "secondary": [], "no_change": []})
+    cached = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", cached_backend)
+
+    assert first_backend.calls == 1
+    assert first["synthesis_cache"] == {"hit": False}
+    assert cached_backend.calls == 0
+    assert cached["synthesis_cache"] == {"hit": True}
+    assert cached["primary"] == first["primary"]
+    assert cached["run_id"] != first["run_id"]
+    assert cached["run_cost_usd"] == 0
+
+    checkout = services_repo.get_service_by_name(conn, "checkout-service")
+    services_repo.update_service_overview(conn, checkout["id"], "updated checkout scope", "updated")
+    refreshed_backend = FakeBackend(response)
+    refreshed = change_surface.analyze_change_surface(conn, "Add support for Pix in checkout", refreshed_backend)
+
+    assert refreshed_backend.calls == 1
+    assert refreshed["synthesis_cache"] == {"hit": False}
+
+
 class FakeEmbeddingBackend:
     model_name = "fake-embedding-model"
 

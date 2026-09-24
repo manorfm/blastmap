@@ -78,6 +78,12 @@ of an LLM-selected primary service. The call fact is deterministic; the `0.6`
 confidence applies only to whether the task needs to cross that boundary. A matching
 flow edge has `origin: static`. No additional LLM call is made.
 
+For an identical rendered change-surface prompt, schema and backend, OrbitKB reuses
+the previously validated LLM synthesis and returns `synthesis_cache: {"hit": true}`
+with zero cost for that call. Any candidate-context change produces a different digest
+and requires a new synthesis. Flow, contracts, persistence, freshness, unknowns and
+recommended next queries are still derived from the current KB on every response.
+
 ## Context-budget calibration
 
 Every `get_change_context` response has `telemetry: {recorded, run_id?}`. Its

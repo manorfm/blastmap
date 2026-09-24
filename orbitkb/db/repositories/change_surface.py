@@ -18,6 +18,27 @@ _ROLE_BY_RESULT_KEY = {
 }
 
 
+def get_synthesis_cache(conn: sqlite3.Connection, cache_key: str, backend: str) -> dict | None:
+    row = conn.execute(
+        "SELECT result_json FROM change_surface_synthesis_cache WHERE cache_key = ? AND backend = ?",
+        (cache_key, backend),
+    ).fetchone()
+    return json.loads(row["result_json"]) if row is not None else None
+
+
+def put_synthesis_cache(conn: sqlite3.Connection, cache_key: str, backend: str, result: dict) -> None:
+    conn.execute(
+        """INSERT INTO change_surface_synthesis_cache (cache_key, backend, result_json, created_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(cache_key) DO UPDATE SET
+               backend = excluded.backend,
+               result_json = excluded.result_json,
+               created_at = excluded.created_at""",
+        (cache_key, backend, json.dumps(result, sort_keys=True), now()),
+    )
+    conn.commit()
+
+
 def record_change_surface_run(
     conn: sqlite3.Connection,
     task_text: str,

@@ -118,6 +118,9 @@ unknowns and recommended next queries. A selected service card can additionally
 include up to three source-proven, unambiguous static HTTP dependencies with their literal
 target routes and resolved service identity; when indexed, the remote endpoint link
 and code location are included. It does not reread the source tree while answering.
+Repeated `find_change_surface` requests with the same backend and unchanged candidate
+context reuse their prior structured synthesis at zero model-call cost; current graph,
+freshness and contract facts are still recomputed for each response.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

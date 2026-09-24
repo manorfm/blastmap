@@ -358,6 +358,15 @@ CREATE TABLE IF NOT EXISTS change_surface_runs (
     cost_usd      REAL
 );
 
+-- Cached LLM synthesis only. The remaining change-surface facts are derived again
+-- for every request, so a cache hit never returns stale graph/persistence data.
+CREATE TABLE IF NOT EXISTS change_surface_synthesis_cache (
+    cache_key   TEXT PRIMARY KEY,
+    backend     TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS change_surface_findings (
     id            INTEGER PRIMARY KEY,
     run_id        INTEGER NOT NULL REFERENCES change_surface_runs(id) ON DELETE CASCADE,

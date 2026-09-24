@@ -10,6 +10,7 @@ it returns outside that list is dropped rather than trusted (see _filter_known).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass, field
@@ -25,7 +26,7 @@ from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.db.repositories import verification as verification_repo
 from orbitkb.generation import embeddings
-from orbitkb.generation.backend_base import LLMBackend
+from orbitkb.generation.backend_base import LLMBackend, LLMUsage
 from orbitkb.generation.embeddings import EmbeddingBackend, cosine_similarity
 from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.llm_harness import generate_with_retry, load_prompt, load_schema
@@ -172,6 +173,15 @@ def _build_context(
 
 def _render_prompt(task: str, candidates_block: str) -> str:
     return load_prompt("change_surface").substitute(task=task, candidates=candidates_block)
+
+
+def _synthesis_cache_key(backend_name: str, prompt: str, schema: dict, repository_id: int | None) -> str:
+    """Fingerprint every input that could alter the bounded LLM synthesis."""
+    digest = hashlib.sha256()
+    for value in (backend_name, prompt, json.dumps(schema, sort_keys=True, separators=(",", ":")), str(repository_id)):
+        digest.update(value.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 MIN_FEEDBACK_SAMPLES = 3
@@ -529,11 +539,17 @@ def analyze_change_surface(
     prompt = _render_prompt(task, candidates_block)
     schema = load_schema("change_surface")
     failures_dir = Path.home() / ".orbitkb" / "failures"
-
-    generation = generate_with_retry(backend, prompt, schema, Path.home() / ".orbitkb", failures_dir, "change-surface")
-    if generation is None:
-        return ChangeSurfaceBuilder().with_note("change surface synthesis failed; see ~/.orbitkb/failures").build()
-    result = generation.structured
+    cache_key = _synthesis_cache_key(backend.name, prompt, schema, repository_id)
+    result = change_surface_repo.get_synthesis_cache(conn, cache_key, backend.name)
+    cache_hit = result is not None
+    usage = LLMUsage(input_tokens=0, output_tokens=0, cost_usd=0) if cache_hit else None
+    if result is None:
+        generation = generate_with_retry(backend, prompt, schema, Path.home() / ".orbitkb", failures_dir, "change-surface")
+        if generation is None:
+            return ChangeSurfaceBuilder().with_note("change surface synthesis failed; see ~/.orbitkb/failures").build()
+        result = generation.structured
+        usage = generation.usage
+        change_surface_repo.put_synthesis_cache(conn, cache_key, backend.name, result)
 
     known = set(candidates)
     primary = _filter_known(conn, result.get("primary", []), known, evidence_by_service)
@@ -583,13 +599,14 @@ def analyze_change_surface(
         .with_similar_past_tasks(similar_past_tasks)
         .build()
     )
+    response["synthesis_cache"] = {"hit": cache_hit}
     response["run_id"] = change_surface_repo.record_change_surface_run(
         conn, task, backend.name, response,
-        input_tokens=generation.usage.input_tokens,
-        output_tokens=generation.usage.output_tokens,
-        cost_usd=generation.usage.cost_usd,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cost_usd=usage.cost_usd,
     )
-    response["run_cost_usd"] = generation.usage.cost_usd
+    response["run_cost_usd"] = usage.cost_usd
     if task_vector is not None:
         embeddings_repo.upsert_change_surface_run_embedding(
             conn, response["run_id"], embedding_backend.model_name, task_vector
