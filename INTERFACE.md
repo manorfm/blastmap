@@ -58,7 +58,7 @@ treated as deletion.
    operation's ID, response statuses, request-body requirement, security state and
    file/line evidence. Referenced request bodies are `null` until a future parser can
    resolve them safely; ambiguous operations from multiple specifications are omitted.
-8. Use `describe_api`, `describe_persistence`, `describe_messages`,
+8. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.
 9. Call `list_security_findings(service)` before changing credentials,
@@ -69,6 +69,11 @@ Generation and MCP storage are secret-safe boundaries: source/configuration evid
 is redacted before generation, generated structured text is redacted before it is
 stored or exposed, and diagnostic failure files contain only a redacted prompt plus
 an error type.
+
+`describe_configuration` returns literal environment-variable key reads associated
+with locally analyzed Node/TypeScript, Java/Kotlin or Go symbols. A sensitive-looking
+key is labeled, but its value is never indexed or returned. Dynamic keys, `.env` files
+and runtime/config-server resolution remain unknown.
 
 ## Change plan
 

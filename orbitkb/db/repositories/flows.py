@@ -19,6 +19,7 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
     conn.execute("DELETE FROM static_message_contracts WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_persistence_facts WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_migration_facts WHERE service_id = ?", (service_id,))
+    conn.execute("DELETE FROM static_configuration_bindings WHERE service_id = ?", (service_id,))
     conn.execute("DELETE FROM static_cloud_facts WHERE service_id = ?", (service_id,))
     indexed_at = now()
     entrypoint_ids: dict[str, int] = {}
@@ -121,6 +122,16 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
             (
                 service_id, fact.operation, fact.table_name, fact.column_name, int(fact.destructive),
                 fact.evidence.file_path, fact.evidence.start_line, fact.evidence.end_line, indexed_at,
+            ),
+        )
+    for binding in analysis.configuration_bindings:
+        conn.execute(
+            """INSERT INTO static_configuration_bindings
+               (service_id, source, key, kind, sensitive, file_path, start_line, end_line, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                service_id, binding.source, binding.key, binding.kind, int(binding.sensitive),
+                binding.evidence.file_path, binding.evidence.start_line, binding.evidence.end_line, indexed_at,
             ),
         )
     for fact in analysis.cloud_facts:
@@ -290,6 +301,14 @@ def list_static_migration_facts(conn: sqlite3.Connection, service_id: int) -> li
     return conn.execute(
         """SELECT operation, table_name, column_name, destructive, file_path, start_line, end_line
            FROM static_migration_facts WHERE service_id = ? ORDER BY file_path, start_line, operation""",
+        (service_id,),
+    ).fetchall()
+
+
+def list_static_configuration_bindings(conn: sqlite3.Connection, service_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT source, key, kind, sensitive, file_path, start_line, end_line
+           FROM static_configuration_bindings WHERE service_id = ? ORDER BY key, source""",
         (service_id,),
     ).fetchall()
 

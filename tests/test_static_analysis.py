@@ -1764,6 +1764,79 @@ service Inventory {
     assert result.contracts == {}
 
 
+def test_static_analysis_extracts_literal_node_environment_bindings_without_values(tmp_path: Path):
+    (tmp_path / "publisher.ts").write_text(
+        '''export function publish() {
+  const topic = process.env.ORDERS_TOPIC;
+  const apiKey = process.env["STRIPE_SECRET_KEY"];
+  const prose = "process.env.IGNORED";
+  // process.env.COMMENT_ONLY
+  return { topic, apiKey, prose };
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [
+        (binding.source, binding.key, binding.kind, binding.sensitive,
+         binding.evidence.file_path, binding.evidence.start_line)
+        for binding in result.configuration_bindings
+    ] == [
+        ("publisher.publish", "ORDERS_TOPIC", "environment", False, "publisher.ts", 2),
+        ("publisher.publish", "STRIPE_SECRET_KEY", "environment", True, "publisher.ts", 3),
+    ]
+
+
+def test_static_analysis_extracts_literal_jvm_and_go_environment_bindings(tmp_path: Path):
+    (tmp_path / "Config.java").write_text(
+        '''class Config {
+  String paymentUrl() { return System.getenv("PAYMENTS_URL"); }
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "Config.kt").write_text(
+        '''class KotlinConfig {
+  fun topic() = System.getenv("ORDERS_TOPIC")
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "config.go").write_text(
+        '''package config
+import "os"
+func Credentials() (string, bool) { return os.LookupEnv("PARTNER_API_TOKEN") }
+''',
+        encoding="utf-8",
+    )
+
+    jvm = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+    go = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert {(binding.source, binding.key, binding.sensitive) for binding in jvm.configuration_bindings} == {
+        ("Config.paymentUrl", "PAYMENTS_URL", False),
+        ("KotlinConfig.topic", "ORDERS_TOPIC", False),
+    }
+    assert [(binding.source, binding.key, binding.sensitive) for binding in go.configuration_bindings] == [
+        ("config.Credentials", "PARTNER_API_TOKEN", True),
+    ]
+
+
+def test_static_analysis_ignores_go_environment_like_calls_without_os_import(tmp_path: Path):
+    (tmp_path / "config.go").write_text(
+        '''package config
+func Lookup(os Config) string { return os.Getenv("NOT_AN_ENVIRONMENT_KEY") }
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert result.configuration_bindings == []
+
+
 def test_node_analyzer_extracts_literal_mongoose_collection_ownership(tmp_path: Path):
     (tmp_path / "order-model.ts").write_text(
         '''const Order = mongoose.model("Order", orderSchema, "orders");''', encoding="utf-8",

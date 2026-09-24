@@ -1,6 +1,7 @@
 from orbitkb.analysis.models import (
     AnalysisResult,
     CloudFact,
+    ConfigurationBinding,
     EntryPoint,
     Evidence,
     FlowEdge,
@@ -123,3 +124,28 @@ def test_static_migration_facts_are_replaced_with_the_flow_snapshot(tmp_path):
 
     flows.replace_analysis(conn, service_id, AnalysisResult())
     assert flows.list_static_migration_facts(conn, service_id) == []
+
+
+def test_static_configuration_bindings_are_replaced_with_the_flow_snapshot(tmp_path):
+    conn = open_db(tmp_path / "configuration.db")
+    service_id = services.ensure_service(conn, "orders", "/repos/orders", "node-ts")
+    evidence = Evidence("publisher.ts", 3, 3)
+
+    flows.replace_analysis(conn, service_id, AnalysisResult(configuration_bindings=[
+        ConfigurationBinding("publisher.publish", "ORDERS_TOPIC", "environment", False, evidence),
+        ConfigurationBinding("publisher.publish", "STRIPE_SECRET_KEY", "environment", True, Evidence("publisher.ts", 4, 4)),
+    ]))
+
+    assert [dict(row) for row in flows.list_static_configuration_bindings(conn, service_id)] == [
+        {
+            "source": "publisher.publish", "key": "ORDERS_TOPIC", "kind": "environment", "sensitive": 0,
+            "file_path": "publisher.ts", "start_line": 3, "end_line": 3,
+        },
+        {
+            "source": "publisher.publish", "key": "STRIPE_SECRET_KEY", "kind": "environment", "sensitive": 1,
+            "file_path": "publisher.ts", "start_line": 4, "end_line": 4,
+        },
+    ]
+
+    flows.replace_analysis(conn, service_id, AnalysisResult())
+    assert flows.list_static_configuration_bindings(conn, service_id) == []

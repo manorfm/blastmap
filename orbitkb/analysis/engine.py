@@ -41,6 +41,7 @@ from orbitkb.analysis.go_imports import parse_go_import_declarations
 from orbitkb.analysis.models import (
     AnalysisResult,
     CloudFact,
+    ConfigurationBinding,
     EntryPoint,
     ErrorContract,
     Evidence,
@@ -2126,6 +2127,7 @@ class StaticAnalysisEngine:
         _enrich_rabbitmq_contracts(result.contracts, files)
         _enrich_openapi_contracts(result, root)
         _enrich_protobuf_contracts(result, root)
+        result.configuration_bindings.extend(_environment_configuration_bindings(result.symbols, root))
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
         result.migration_facts.extend(_migration_facts(_migration_files(root), root))
@@ -2685,6 +2687,167 @@ def _matching_brace(source: str, opening_brace: int) -> int | None:
             if depth == 0:
                 return index
     return None
+
+
+_CONFIGURATION_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
+_SENSITIVE_CONFIGURATION_KEY = re.compile(
+    r"(?:password|secret|token|api[_-]?key|credential|private[_-]?key)", re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class _CodeToken:
+    kind: str
+    text: str
+    start: int
+
+
+def _environment_configuration_bindings(symbols: list[Symbol], root: Path) -> list[ConfigurationBinding]:
+    """Extract literal environment-key reads inside AST-proven local symbols only."""
+    source_cache: dict[str, str] = {}
+    go_os_imports_by_file: dict[str, bool] = {}
+    bindings: list[ConfigurationBinding] = []
+    seen: set[tuple[str, str]] = set()
+    for symbol in symbols:
+        file_path = symbol.evidence.file_path
+        source = source_cache.setdefault(
+            file_path, (root / file_path).read_text(encoding="utf-8", errors="ignore"),
+        )
+        if file_path not in go_os_imports_by_file:
+            go_os_imports_by_file[file_path] = _has_standard_os_import(file_path, source)
+        declaration, offset = _source_lines(source, symbol.evidence.start_line, symbol.evidence.end_line)
+        for key, position in _environment_key_reads(
+            _c_like_tokens(declaration), allow_go_os=go_os_imports_by_file[file_path],
+        ):
+            if (symbol.name, key) in seen:
+                continue
+            seen.add((symbol.name, key))
+            bindings.append(ConfigurationBinding(
+                source=symbol.name,
+                key=key,
+                kind="environment",
+                sensitive=_SENSITIVE_CONFIGURATION_KEY.search(key) is not None,
+                evidence=_line_evidence(root / file_path, root, source, offset + position),
+            ))
+    return bindings
+
+
+def _source_lines(source: str, start_line: int, end_line: int) -> tuple[str, int]:
+    lines = source.splitlines(keepends=True)
+    offset = sum(len(line) for line in lines[: start_line - 1])
+    return "".join(lines[start_line - 1 : end_line]), offset
+
+
+def _has_standard_os_import(file_path: str, source: str) -> bool:
+    if not file_path.endswith(".go"):
+        return False
+    tokens = _c_like_tokens(source)
+    for index, token in enumerate(tokens):
+        if token.text != "import":
+            continue
+        following = _token_at(tokens, index + 1)
+        if following is not None and following.kind == "string" and following.text == "os":
+            return True
+        if following is not None and following.kind == "identifier":
+            imported = _token_at(tokens, index + 2)
+            if imported is not None and imported.kind == "string" and imported.text == "os":
+                return True
+        if following is not None and following.text == "(":
+            cursor = index + 2
+            while (candidate := _token_at(tokens, cursor)) is not None and candidate.text != ")":
+                if candidate.kind == "string" and candidate.text == "os":
+                    return True
+                cursor += 1
+    return False
+
+
+def _environment_key_reads(tokens: list[_CodeToken], allow_go_os: bool) -> list[tuple[str, int]]:
+    reads: list[tuple[str, int]] = []
+    for index, token in enumerate(tokens):
+        previous_is_member = index > 0 and tokens[index - 1].text == "."
+        if token.text == "process" and not previous_is_member:
+            key_token = _node_environment_key(tokens, index)
+        elif token.text == "System" and not previous_is_member:
+            key_token = _call_environment_key(tokens, index, "getenv")
+        elif token.text == "os" and allow_go_os and not previous_is_member:
+            key_token = _call_environment_key(tokens, index, "Getenv", "LookupEnv")
+        else:
+            key_token = None
+        if key_token is not None and _CONFIGURATION_KEY.fullmatch(key_token.text):
+            reads.append((key_token.text, token.start))
+    return reads
+
+
+def _node_environment_key(tokens: list[_CodeToken], index: int) -> _CodeToken | None:
+    if _token_texts(tokens, index, ("process", ".", "env", ".")):
+        candidate = _token_at(tokens, index + 4)
+        return candidate if candidate and candidate.kind == "identifier" else None
+    if _token_texts(tokens, index, ("process", ".", "env", "[")):
+        candidate = _token_at(tokens, index + 4)
+        closing = _token_at(tokens, index + 5)
+        return candidate if candidate and candidate.kind == "string" and closing and closing.text == "]" else None
+    return None
+
+
+def _call_environment_key(tokens: list[_CodeToken], index: int, *names: str) -> _CodeToken | None:
+    if not _token_texts(tokens, index, (tokens[index].text, ".")):
+        return None
+    operation = _token_at(tokens, index + 2)
+    opening = _token_at(tokens, index + 3)
+    candidate = _token_at(tokens, index + 4)
+    if operation is None or opening is None or candidate is None:
+        return None
+    if operation.text not in names or opening.text != "(" or candidate.kind != "string":
+        return None
+    return candidate if _token_at(tokens, index + 5) and _token_at(tokens, index + 5).text == ")" else None
+
+
+def _token_texts(tokens: list[_CodeToken], start: int, expected: tuple[str, ...]) -> bool:
+    return tuple(token.text for token in tokens[start : start + len(expected)]) == expected
+
+
+def _token_at(tokens: list[_CodeToken], index: int) -> _CodeToken | None:
+    return tokens[index] if index < len(tokens) else None
+
+
+def _c_like_tokens(source: str) -> list[_CodeToken]:
+    """Tokenize identifiers and literal strings while discarding C-style comments."""
+    tokens: list[_CodeToken] = []
+    index = 0
+    while index < len(source):
+        if source[index].isspace():
+            index += 1
+        elif source.startswith("//", index):
+            newline = source.find("\n", index)
+            index = len(source) if newline < 0 else newline + 1
+        elif source.startswith("/*", index):
+            closing = source.find("*/", index + 2)
+            index = len(source) if closing < 0 else closing + 2
+        elif source[index] in {"'", '"', "`"}:
+            quote = source[index]
+            start = index
+            index += 1
+            value_start = index
+            escaped = False
+            while index < len(source) and source[index] != quote:
+                escaped = escaped or source[index] == "\\"
+                index += 2 if source[index] == "\\" else 1
+            if index >= len(source):
+                continue
+            value = source[value_start:index]
+            index += 1
+            if not escaped:
+                tokens.append(_CodeToken("string", value, start))
+        elif re.match(r"[A-Za-z_$]", source[index]):
+            start = index
+            index += 1
+            while index < len(source) and re.match(r"[A-Za-z0-9_$]", source[index]):
+                index += 1
+            tokens.append(_CodeToken("identifier", source[start:index], start))
+        else:
+            tokens.append(_CodeToken("symbol", source[index], index))
+            index += 1
+    return tokens
 
 
 def _dto_shapes(files: list[Path]) -> dict[str, list[dict]]:

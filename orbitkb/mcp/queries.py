@@ -504,6 +504,36 @@ def describe_persistence(
     }
 
 
+def describe_configuration(
+    conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
+    repository: str | None = None,
+) -> dict:
+    """Return source-proven configuration-key reads without values or resolution claims."""
+    error = _validate_pagination(limit, offset)
+    if error:
+        return {"error": error}
+    row, service_error = _resolve_service(conn, service, repository)
+    if service_error:
+        return service_error
+    bindings, page = _paginate(
+        flows_repo.list_static_configuration_bindings(conn, row["id"]), limit, offset,
+    )
+    return {
+        "service": row["name"], "repository": row["repository_name"],
+        "bindings": [
+            {
+                "source": item["source"], "key": item["key"], "kind": item["kind"],
+                "sensitive": bool(item["sensitive"]), "evidence": {
+                    "file": item["file_path"], "start_line": item["start_line"],
+                    "end_line": item["end_line"],
+                },
+            }
+            for item in bindings
+        ],
+        **page,
+    }
+
+
 def describe_messages(
     conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
     repository: str | None = None,

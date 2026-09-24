@@ -109,6 +109,7 @@ Start broad, then narrow the request.
 | Find likely impact | `find_change_surface` | `get_relationships`, `describe_api` |
 | Understand a request path or its static error mapping | `list_entrypoints` | `describe_entrypoint` |
 | Inspect data or events | `describe_persistence`, `describe_messages` | `get_relationships` |
+| Inspect runtime configuration use | `describe_configuration` | `describe_entrypoint`, `list_security_findings` |
 | Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |
 | Compare runtime and static paths | `describe_runtime_divergence` | `describe_entrypoint` |
@@ -200,6 +201,11 @@ package, request/response types, streaming flags, imports and source evidence. T
 describe the declared wire contract only: OrbitKB does not infer a server handler,
 client or runtime registration from a `.proto` file. Duplicate service/RPC declarations
 are omitted rather than arbitrarily selecting one.
+
+`describe_configuration` lists literal environment-variable keys read by local
+Node/TypeScript, Java/Kotlin and Go symbols. It returns only key name, sensitivity
+indicator and file/line evidence: values, `.env` files, dynamic key names and runtime
+resolution are never indexed or returned.
 
 Explicit Spring mappings for known timeout exception types retain their literal HTTP
 status, including 500, 503 and 504, so agents can distinguish an internal-error

@@ -138,6 +138,17 @@ class MigrationFact:
 
 
 @dataclass(frozen=True)
+class ConfigurationBinding:
+    """A literal configuration key read by one local symbol, never its value."""
+
+    source: str
+    key: str
+    kind: str
+    sensitive: bool
+    evidence: Evidence
+
+
+@dataclass(frozen=True)
 class CloudFact:
     """A cloud SDK operation proven by locally-declared type or import — see
     orbitkb/analysis/cloud_taxonomy.py for the vendor-sourced vocabulary this
@@ -168,6 +179,7 @@ class AnalysisResult:
     resilience_policies: list[ResiliencePolicy] = field(default_factory=list)
     persistence_facts: list[PersistenceFact] = field(default_factory=list)
     migration_facts: list[MigrationFact] = field(default_factory=list)
+    configuration_bindings: list[ConfigurationBinding] = field(default_factory=list)
     cloud_facts: list[CloudFact] = field(default_factory=list)
 
     def extend(self, other: AnalysisResult) -> None:
@@ -183,4 +195,5 @@ class AnalysisResult:
         self.resilience_policies.extend(other.resilience_policies)
         self.persistence_facts.extend(other.persistence_facts)
         self.migration_facts.extend(other.migration_facts)
+        self.configuration_bindings.extend(other.configuration_bindings)
         self.cloud_facts.extend(other.cloud_facts)

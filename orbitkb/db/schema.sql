@@ -116,6 +116,23 @@ CREATE TABLE IF NOT EXISTS static_migration_facts (
     updated_at  TEXT NOT NULL
 );
 
+-- Literal configuration keys read by a local source symbol. Values, `.env` files
+-- and runtime resolution are deliberately excluded from this static fact table.
+CREATE TABLE IF NOT EXISTS static_configuration_bindings (
+    id          INTEGER PRIMARY KEY,
+    service_id  INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    source      TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('environment')),
+    sensitive   INTEGER NOT NULL CHECK (sensitive IN (0, 1)),
+    file_path   TEXT NOT NULL,
+    start_line  INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_static_configuration_bindings_service
+    ON static_configuration_bindings(service_id);
+
 -- `provider` is the concrete message broker/vendor (kafka, rabbitmq, sqs, sns,
 -- service_bus, activemq, nats), inferred by the LLM from real code the same way
 -- service_calls.target_kind is — 'unknown' means the code only showed a
