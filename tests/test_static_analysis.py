@@ -468,6 +468,33 @@ app.post("/orders", createOrder);
     )
 
 
+def test_node_analyzer_exposes_literal_express_head_and_options_routes(tmp_path: Path):
+    (tmp_path / "health.ts").write_text(
+        '''import express from "express";
+const app = express();
+
+function checkHealth(req: Request, res: Response) {
+  return healthService.check();
+}
+
+app.head("/health", checkHealth);
+app.options("/health", checkHealth);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
+        ("HEAD", "/health", "health.checkHealth"),
+        ("OPTIONS", "/health", "health.checkHealth"),
+    ]
+    assert any(
+        edge.source == "health.checkHealth" and edge.target == "healthService.check"
+        for edge in result.edges
+    )
+
+
 def test_node_analyzer_exposes_literal_express_route_with_named_arrow_handler(tmp_path: Path):
     (tmp_path / "orders.ts").write_text(
         '''import express from "express";
@@ -657,7 +684,7 @@ function readOrder(request: FastifyRequest, reply: FastifyReply) {
   return orderService.find(request.params.id);
 }
 
-app.route({ method: ["GET", "POST"], url: "/orders/:id", handler: readOrder });
+app.route({ method: ["GET", "HEAD"], url: "/orders/:id", handler: readOrder });
 ''',
         encoding="utf-8",
     )
@@ -666,7 +693,7 @@ app.route({ method: ["GET", "POST"], url: "/orders/:id", handler: readOrder });
 
     assert [(entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
         ("GET", "/orders/:id", "orders.readOrder"),
-        ("POST", "/orders/:id", "orders.readOrder"),
+        ("HEAD", "/orders/:id", "orders.readOrder"),
     ]
     assert any(
         edge.source == "orders.readOrder" and edge.target == "orderService.find"

@@ -55,6 +55,8 @@ from orbitkb.analysis.node_imports import parse_node_named_imports
 from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
+_HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+
 
 def _walk(node: Node):
     yield node
@@ -840,7 +842,9 @@ class _JvmSpringAnalyzer:
 
 
 class _NodeGraphqlAnalyzer(_FileAnalyzer):
-    HTTP_ROUTE_METHODS: ClassVar[frozenset[str]] = frozenset({"get", "post", "put", "patch", "delete"})
+    HTTP_ROUTE_METHODS: ClassVar[frozenset[str]] = frozenset(
+        method.lower() for method in _HTTP_METHOD_LITERALS
+    )
 
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
         if path.suffix in {".graphql", ".gql"}:
@@ -2198,9 +2202,6 @@ _WEB_CLIENT_REACTOR_RETRY_PATTERN = re.compile(
     rf'(?:{_WEB_CLIENT_REACTOR_REQUEST})(?:(?!;).)*?\.retry\s*\(\s*(?P<value>\d+)\s*\)',
     re.DOTALL,
 )
-_HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-
-
 def _literal_internal_http_destination(url: str) -> tuple[str, str] | None:
     """Return a safe service host/path pair from a literal internal HTTP URL."""
     parsed = urlparse(url)
