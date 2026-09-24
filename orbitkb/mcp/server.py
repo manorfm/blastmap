@@ -350,6 +350,24 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             )
 
     @mcp.tool()
+    def plan_change(
+        task: str,
+        hint_services: list[str] | None = None,
+        repository: str | None = None,
+        token_budget: int = queries.DEFAULT_PLAN_TOKEN_BUDGET,
+    ) -> dict:
+        """Start an evidence-first, bounded change plan for a free-text task.
+
+        The initial response identifies the indexed surface and explicit unknowns;
+        it does not fabricate decision points or code-level change units. Subsequent
+        planning phases will add those only when target symbols and prerequisites can
+        be proved from the knowledge base. Pass repository when service names are
+        duplicated. token_budget is capped at 2200 estimated response tokens.
+        """
+        with closing(_conn()) as conn:
+            return queries.plan_change(conn, resolved_backend, task, hint_services, repository, token_budget)
+
+    @mcp.tool()
     def record_change_context_feedback(
         run_id: int,
         outcome: str,

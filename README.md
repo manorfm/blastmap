@@ -104,6 +104,7 @@ Start broad, then narrow the request.
 
 | Need | Start with | Follow with |
 | --- | --- | --- |
+| Start a change plan | `plan_change` | `get_change_context`, `describe_entrypoint` |
 | Plan an epic | `get_change_context` | `describe_service`, `describe_entrypoint` |
 | Find likely impact | `find_change_surface` | `get_relationships`, `describe_api` |
 | Understand a request path or its static error mapping | `list_entrypoints` | `describe_entrypoint` |
@@ -125,6 +126,11 @@ With the optional local semantic backend installed, semantic and keyword/graph
 candidates are blended before that synthesis, so a broad lexical match does not hide a
 relevant meaning-based candidate. This stays within the normal candidate budget and
 does not call an LLM for retrieval.
+
+`plan_change` is the stable entrypoint for the planning workflow. Its initial version
+returns the evidence-backed affected surface, explicit unknowns and a response budget;
+it intentionally emits no decision points or code-level change units until those can
+be derived from indexed symbols rather than guessed from service-level matches.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

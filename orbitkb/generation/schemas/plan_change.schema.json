@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "required": [
+    "plan_id",
+    "status",
+    "surface",
+    "decision_points",
+    "change_units",
+    "unknowns",
+    "budget"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {"type": ["string", "null"]},
+    "status": {
+      "type": "string",
+      "enum": ["ready", "needs_decision", "insufficient_evidence", "stale_knowledge"]
+    },
+    "surface": {
+      "type": "object",
+      "required": ["primary", "secondary", "contracts_at_risk"],
+      "additionalProperties": false,
+      "properties": {
+        "primary": {"type": "array", "items": {"type": "object"}},
+        "secondary": {"type": "array", "items": {"type": "object"}},
+        "contracts_at_risk": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "decision_points": {"type": "array", "items": {"type": "object"}},
+    "change_units": {"type": "array", "items": {"type": "object"}},
+    "unknowns": {"type": "array", "items": {"type": "object"}},
+    "budget": {
+      "type": "object",
+      "required": ["requested_tokens", "estimated_tokens", "truncated"],
+      "additionalProperties": false,
+      "properties": {
+        "requested_tokens": {"type": "integer", "minimum": 1},
+        "estimated_tokens": {"type": "integer", "minimum": 0},
+        "truncated": {"type": "boolean"}
+      }
+    }
+  }
+}

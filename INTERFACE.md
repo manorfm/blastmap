@@ -35,9 +35,10 @@ treated as deletion.
 
 ## Agent workflow
 
-1. Call `get_change_context(task, repository?, max_services?, epic_type?)` for a compact first
-   implementation briefing, or `find_change_surface(task, repository?)` when only
-   impact inference is needed. Both require the repository whenever the KB reports
+1. Call `plan_change(task, repository?, token_budget?)` for the stable planning
+   envelope, `get_change_context(task, repository?, max_services?, epic_type?)` for a
+   compact implementation briefing, or `find_change_surface(task, repository?)` when
+   only impact inference is needed. All require the repository whenever the KB reports
    duplicate service identities.
 2. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
@@ -56,6 +57,18 @@ Generation and MCP storage are secret-safe boundaries: source/configuration evid
 is redacted before generation, generated structured text is redacted before it is
 stored or exposed, and diagnostic failure files contain only a redacted prompt plus
 an error type.
+
+## Change plan
+
+`plan_change` is the evidence-first planning contract. Its initial response contains
+`plan_id` when a surface synthesis was persisted, `status`, the bounded
+`surface.primary`/`secondary`/`contracts_at_risk`, explicit `unknowns`, and a
+`budget` with requested and estimated response tokens. It currently returns empty
+`decision_points` and `change_units` rather than guessing code targets from broad
+service matches. `ready` means a relevant indexed surface exists; it does not claim
+that code-level targets have been proven. `insufficient_evidence` means no indexed
+service matched the task. The token budget is capped at 2,200 estimated response
+tokens.
 
 ## Compact change context
 

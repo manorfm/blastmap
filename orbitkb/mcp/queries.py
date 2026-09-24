@@ -32,6 +32,8 @@ from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.provenance import infer_provenance
 from orbitkb.generation.verification import (
     verify_change_surface as _verify_change_surface,
+)
+from orbitkb.generation.verification import (
     verify_context_budget as _verify_context_budget,
 )
 
@@ -43,6 +45,8 @@ DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 500
 DEFAULT_FLOW_EDGE_LIMIT = 50
 MAX_FLOW_EDGE_LIMIT = 200
+DEFAULT_PLAN_TOKEN_BUDGET = 2200
+MAX_PLAN_TOKEN_BUDGET = 2200
 _FLOW_KINDS = {"invokes", "injects", "validates", "reads", "writes", "publishes", "consumes"}
 _EPIC_TYPE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 logger = logging.getLogger(__name__)
@@ -745,6 +749,52 @@ def find_change_surface(
     )
     if repository is not None:
         response["scope"] = {"repository": repository}
+    return response
+
+
+def plan_change(
+    conn: sqlite3.Connection,
+    backend: LLMBackend,
+    task: str,
+    hint_services: list[str] | None = None,
+    repository: str | None = None,
+    token_budget: int = DEFAULT_PLAN_TOKEN_BUDGET,
+) -> dict:
+    """Return the stable first envelope for a bounded change plan.
+
+    This initial contract deliberately exposes only source-backed surface facts. It
+    creates no target-level units or decision points until those can be derived with
+    evidence rather than inferred from broad service matches.
+    """
+    if not 1 <= token_budget <= MAX_PLAN_TOKEN_BUDGET:
+        return {
+            "error": (
+                f"token_budget must be between 1 and {MAX_PLAN_TOKEN_BUDGET} "
+                f"(got {token_budget})"
+            ),
+        }
+    change_surface_result = find_change_surface(conn, backend, task, hint_services, repository)
+    if "error" in change_surface_result:
+        return change_surface_result
+    primary = change_surface_result["primary"]
+    response = {
+        "plan_id": (
+            f"cp_{change_surface_result['run_id']}"
+            if change_surface_result.get("run_id") is not None else None
+        ),
+        "status": "ready" if primary else "insufficient_evidence",
+        "surface": {
+            "primary": primary,
+            "secondary": change_surface_result["secondary"],
+            "contracts_at_risk": change_surface_result["contracts_at_risk"],
+        },
+        "decision_points": [],
+        "change_units": [],
+        "unknowns": change_surface_result["unknowns"],
+        "budget": {"requested_tokens": token_budget, "estimated_tokens": 0, "truncated": False},
+    }
+    response["budget"]["estimated_tokens"] = (len(json.dumps(response, sort_keys=True)) + 3) // 4
+    response["budget"]["truncated"] = response["budget"]["estimated_tokens"] > token_budget
     return response
 
 
