@@ -153,8 +153,9 @@ contract, or the client `describe_service` and remote `list_entrypoints` queries
 resolved HTTP boundary, `describe_persistence` for a schema/migration review, or
 `describe_feature_flags` for a source-proven feature-flag review, or
 `describe_configuration` for a proven code-to-Kubernetes configuration binding, or
-`describe_runtime_configuration` for a source-proven Kubernetes key mismatch. It
-does not scan source, rerun retrieval or call a model.
+`describe_runtime_configuration` for a source-proven Kubernetes key mismatch or
+unresolved source-ownership review. It does not scan source, rerun retrieval or
+call a model.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

@@ -168,6 +168,10 @@ When an indexed Kubernetes reference has a source-proven missing key in its sing
 local declaration, `plan_change` adds a separate configuration review. It requires
 confirmation before rollout and does not choose whether the source or workload must
 change.
+When a primary service references a Kubernetes source that was not declared locally,
+`plan_change` adds a low-confidence ownership review. It asks which repository,
+chart, controller or delivery process owns that source; it never assumes the source
+must be created in the indexed repository.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

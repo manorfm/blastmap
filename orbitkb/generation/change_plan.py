@@ -430,6 +430,68 @@ def derive_runtime_configuration_mismatch_review_units(
     return units
 
 
+def derive_runtime_configuration_source_unknown_review_units(
+    unknowns_by_service: dict[str, list[dict]], primary_services: set[str],
+) -> list[dict]:
+    """Turn possible external Kubernetes configuration dependencies into reviews.
+
+    A missing local declaration does not prove a deployment problem: the source may
+    belong to another repository or delivery boundary. The review keeps that human
+    ownership decision explicit without prescribing a manifest change.
+    """
+    units: list[dict] = []
+    for service in sorted(primary_services):
+        grouped: dict[tuple[str, str, str, str], list[dict]] = {}
+        for unknown in unknowns_by_service.get(service, []):
+            if not isinstance(unknown, dict):
+                continue
+            environment_key = unknown.get("environment_key")
+            source_kind = unknown.get("source_kind")
+            source_name = unknown.get("source_name")
+            source_key = unknown.get("source_key")
+            reference = {
+                "file": unknown.get("reference_file_path"), "start_line": unknown.get("reference_start_line"),
+                "end_line": unknown.get("reference_end_line"),
+            }
+            if (
+                all(isinstance(value, str) and value for value in (environment_key, source_kind, source_name, source_key))
+                and _unique_evidence([reference])
+            ):
+                grouped.setdefault((source_kind, source_name, source_key, environment_key), []).append(reference)
+        for (source_kind, source_name, source_key, environment_key), references in sorted(grouped.items()):
+            evidence = _sorted_evidence(references)
+            source_label = "ConfigMap" if source_kind == "config_map" else "Secret"
+            units.append({
+                "id": (
+                    f"runtime-configuration-source-unknown:{service}:{source_kind}:{source_name}:{source_key}:"
+                    f"{environment_key}"
+                ),
+                "service": service,
+                "target": {
+                    "role": "configuration", "symbol": f"kubernetes:{source_kind}:{source_name}:{source_key}",
+                    "evidence": evidence,
+                },
+                "action": "review",
+                "reason": (
+                    f"{environment_key} references {source_label} {source_name} key {source_key}, but no matching "
+                    "local declaration was indexed."
+                ),
+                "preconditions": [],
+                "related_contracts": [
+                    f"configuration:environment:{environment_key}",
+                    f"configuration:{source_kind}:{source_name}:{source_key}",
+                ],
+                "dependencies": [],
+                "validation": [
+                    f"confirm the owning repository, chart, controller, or deployment process for {source_label} {source_name}",
+                    f"verify {environment_key} remains available and compatible throughout rollout",
+                ],
+                "confidence": 0.4,
+                "evidence": evidence,
+            })
+    return units
+
+
 def _unique_evidence(items: list[dict]) -> list[dict]:
     seen: set[tuple[str, int, int]] = set()
     evidence: list[dict] = []

@@ -43,6 +43,7 @@ from orbitkb.generation.change_plan import (
     derive_persistence_migration_review_units,
     derive_runtime_configuration_mismatch_review_units,
     derive_runtime_configuration_review_units,
+    derive_runtime_configuration_source_unknown_review_units,
     validate_decision_selections,
 )
 from orbitkb.generation.freshness import compute_freshness
@@ -1156,6 +1157,16 @@ def plan_change(
             for service in primary_services
             if (row := services_repo.get_service_by_name(conn, service, repository_id=repository_id)) is not None
         }
+        runtime_configuration_source_unknowns_by_service = {
+            service: [
+                dict(unknown)
+                for unknown in kubernetes_configuration_repo.list_kubernetes_configuration_source_unknowns_for_service(
+                    conn, row["id"],
+                )
+            ]
+            for service in primary_services
+            if (row := services_repo.get_service_by_name(conn, service, repository_id=repository_id)) is not None
+        }
         change_units = [
             *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
             *derive_error_mapping_review_units(find_architecture_smells(conn)["findings"], error_mapping_services),
@@ -1168,6 +1179,9 @@ def plan_change(
             ),
             *derive_runtime_configuration_mismatch_review_units(
                 runtime_configuration_mismatches_by_service, primary_services,
+            ),
+            *derive_runtime_configuration_source_unknown_review_units(
+                runtime_configuration_source_unknowns_by_service, primary_services,
             ),
         ]
     plan_run_id = change_plans_repo.record_plan(
@@ -1373,7 +1387,11 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
         if change_unit["target"]["symbol"].startswith("kubernetes:"):
             return [{
                 "service": producer,
-                "purpose": "confirm the indexed Kubernetes configuration mismatch",
+                "purpose": (
+                    "confirm the owner of the unresolved Kubernetes configuration source"
+                    if change_unit["id"].startswith("runtime-configuration-source-unknown:")
+                    else "confirm the indexed Kubernetes configuration mismatch"
+                ),
                 "recommended_query": {
                     "tool": "describe_runtime_configuration", "arguments": {"service": producer},
                 },
