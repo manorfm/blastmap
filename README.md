@@ -134,7 +134,8 @@ consumers, and never guesses code-level change units from service-level matches.
 response has a durable plan ID with audit metadata; it links to an existing surface
 run when available and does not duplicate the task text. `refine_change_plan` records
 one declared option for every pending decision without repeating retrieval or calling
-an LLM; a finalized decision is immutable within that plan.
+an LLM, then returns source-bounded contract units for the selected event strategy; a
+finalized decision is immutable within that plan.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

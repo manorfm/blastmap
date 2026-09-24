@@ -78,9 +78,11 @@ token budget is capped at 2,200 estimated response tokens.
 
 `refine_change_plan` accepts only the pending plan's declared IDs and options. It
 requires one selection per decision, persists the selections, then returns `ready`
-with no remaining decisions. It performs no retrieval or model call. Retrying the
-same finalized selections is safe; changing a finalized choice is rejected, requiring
-a new plan and an explicit impact reassessment.
+with no remaining decisions and a source-bounded producer contract unit. Preserved
+compatibility produces a validation unit; a versioned rollout produces a modification
+unit, both listing indexed consumers as dependencies. It performs no retrieval or
+model call. Retrying the same finalized selections is safe; changing a finalized
+choice is rejected, requiring a new plan and an explicit impact reassessment.
 
 ## Compact change context
 

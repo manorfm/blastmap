@@ -35,6 +35,8 @@ def derive_decision_points(contracts_at_risk: list[dict], primary_services: set[
             ],
             "recommended_default": "preserve backward compatibility unless a versioned rollout is approved",
             "owner": producer,
+            "contract": name,
+            "consumers": consumers,
             "evidence": contract.get("evidence", []),
         })
     return decisions
@@ -67,3 +69,36 @@ def validate_decision_selections(
     if missing:
         return None, f"missing decisions: {', '.join(missing)}"
     return [{"id": decision["id"], "option": chosen[decision["id"]]} for decision in decision_points], None
+
+
+def derive_change_units(decision_points: list[dict], selections: list[dict]) -> list[dict]:
+    """Create source-bounded event-contract work after compatibility is selected."""
+    decisions = {decision["id"]: decision for decision in decision_points}
+    units: list[dict] = []
+    for selection in selections:
+        decision = decisions[selection["id"]]
+        contract = decision.get("contract")
+        consumers = decision.get("consumers")
+        if not isinstance(contract, str) or not isinstance(consumers, list):
+            continue
+        preserve = selection["option"] == "preserve backward compatibility"
+        action = "validate" if preserve else "modify"
+        action_text = "preserve backward compatibility" if preserve else "version the event contract"
+        units.append({
+            "id": f"event-contract:{decision['owner']}:{contract}",
+            "service": decision["owner"],
+            "target": {
+                "role": "contract",
+                "symbol": f"message.publish:{contract}",
+                "evidence": decision["evidence"],
+            },
+            "action": action,
+            "reason": f"{action_text} for {contract} before changing its producer.",
+            "preconditions": [f"{decision['id']}={selection['option']}"],
+            "related_contracts": [contract],
+            "dependencies": consumers,
+            "validation": [f"verify {contract} remains compatible with {consumer}" for consumer in consumers],
+            "confidence": 1.0,
+            "evidence": decision["evidence"],
+        })
+    return units

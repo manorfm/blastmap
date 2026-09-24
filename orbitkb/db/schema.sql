@@ -418,6 +418,7 @@ CREATE TABLE IF NOT EXISTS change_plan_runs (
     truncated             INTEGER NOT NULL CHECK (truncated IN (0, 1)),
     decision_points_json  TEXT NOT NULL DEFAULT '[]',
     selected_decisions_json TEXT NOT NULL DEFAULT '[]',
+    change_units_json     TEXT NOT NULL DEFAULT '[]',
     created_at            TEXT NOT NULL
 );
 

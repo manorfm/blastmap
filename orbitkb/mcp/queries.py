@@ -30,6 +30,7 @@ from orbitkb.generation.architecture import diff_architecture_runs
 from orbitkb.generation.backend_base import LLMBackend
 from orbitkb.generation.change_context import MAX_CONTEXT_SERVICES, build_change_context
 from orbitkb.generation.change_plan import (
+    derive_change_units,
     derive_decision_points,
     validate_decision_selections,
 )
@@ -820,26 +821,28 @@ def refine_change_plan(conn: sqlite3.Connection, plan_id: str, decisions: list[d
         return {"error": f"unknown plan_id: {plan_id}"}
     decision_points = json.loads(stored_plan["decision_points_json"])
     previous_selections = json.loads(stored_plan["selected_decisions_json"])
+    change_units = json.loads(stored_plan["change_units_json"])
     if previous_selections:
         if decisions != previous_selections:
             return {"error": "plan decisions already finalized"}
-        return _refined_plan_response(plan_id, stored_plan["status"], previous_selections)
+        return _refined_plan_response(plan_id, stored_plan["status"], previous_selections, change_units)
     selections, error = validate_decision_selections(decision_points, decisions)
     if error is not None:
         return {"error": error}
     if decision_points:
-        change_plans_repo.finalize_decisions(conn, int(match.group(1)), selections)
-        return _refined_plan_response(plan_id, "ready", selections)
-    return _refined_plan_response(plan_id, stored_plan["status"], selections)
+        change_units = derive_change_units(decision_points, selections)
+        change_plans_repo.finalize_decisions(conn, int(match.group(1)), selections, change_units)
+        return _refined_plan_response(plan_id, "ready", selections, change_units)
+    return _refined_plan_response(plan_id, stored_plan["status"], selections, change_units)
 
 
-def _refined_plan_response(plan_id: str, status: str, selections: list[dict]) -> dict:
+def _refined_plan_response(plan_id: str, status: str, selections: list[dict], change_units: list[dict]) -> dict:
     return {
         "plan_id": plan_id,
         "status": status,
         "selected_decisions": selections,
         "remaining_decision_points": [],
-        "change_units": [],
+        "change_units": change_units,
     }
 
 

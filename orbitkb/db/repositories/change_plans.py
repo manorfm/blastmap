@@ -36,9 +36,11 @@ def get_plan(conn: sqlite3.Connection, plan_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM change_plan_runs WHERE id = ?", (plan_id,)).fetchone()
 
 
-def finalize_decisions(conn: sqlite3.Connection, plan_id: int, selections: list[dict]) -> None:
+def finalize_decisions(conn: sqlite3.Connection, plan_id: int, selections: list[dict], change_units: list[dict]) -> None:
     conn.execute(
-        "UPDATE change_plan_runs SET status = 'ready', selected_decisions_json = ? WHERE id = ?",
-        (json.dumps(selections, sort_keys=True), plan_id),
+        """UPDATE change_plan_runs
+           SET status = 'ready', selected_decisions_json = ?, change_units_json = ?
+           WHERE id = ?""",
+        (json.dumps(selections, sort_keys=True), json.dumps(change_units, sort_keys=True), plan_id),
     )
     conn.commit()
