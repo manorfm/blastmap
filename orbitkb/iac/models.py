@@ -74,6 +74,19 @@ class KubernetesConfigurationSourceImport:
 
 
 @dataclass(frozen=True)
+class KubernetesConfigurationSourceImportUnknown:
+    """An ``envFrom`` source absent from indexed local plain YAML."""
+
+    source_kind: str
+    source_name: str
+    prefix: str | None
+    reference_file_path: str
+    reference_start_line: int
+    reference_end_line: int
+    matched_service_name: str | None = None
+
+
+@dataclass(frozen=True)
 class KubernetesConfigurationSource:
     """A plain-manifest ConfigMap or Secret declaration without its values."""
 

@@ -240,6 +240,9 @@ Secret name/key, workload/container and source evidence, without exposing values
 Literal `envFrom` imports are listed separately with source, optional prefix, workload
 and evidence, but their individual environment keys remain `unknown`; dynamic names
 and unrendered Helm templates remain unknown.
+When an `envFrom` source has no matching local declaration, it is labeled
+`not_declared_locally` as an external-ownership hypothesis, not a missing-source
+deployment failure.
 When exactly one local source declaration exists and it does not list a referenced
 key, the response marks that source-proven mismatch and returns its declaration
 evidence. Sources absent from the indexed repository remain unknown.

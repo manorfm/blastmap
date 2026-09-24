@@ -718,6 +718,15 @@ def describe_runtime_configuration(
         kubernetes_configuration_repo.list_kubernetes_configuration_source_imports_for_service(conn, row["id"]),
         limit, offset,
     )
+    source_import_unknowns_by_reference = {
+        (
+            unknown["source_kind"], unknown["source_name"], unknown["prefix"],
+            unknown["reference_file_path"], unknown["reference_start_line"], unknown["reference_end_line"],
+        )
+        for unknown in kubernetes_configuration_repo.list_kubernetes_configuration_source_import_unknowns_for_service(
+            conn, row["id"],
+        )
+    }
     mismatches_by_reference = {
         (
             mismatch["environment_key"], mismatch["source_kind"], mismatch["source_name"], mismatch["source_key"],
@@ -764,12 +773,20 @@ def describe_runtime_configuration(
         **page,
     }
     if source_imports:
-        response["source_imports"] = [_runtime_configuration_source_import(item) for item in source_imports]
+        response_source_imports = [
+            _runtime_configuration_source_import(item, source_import_unknowns_by_reference)
+            for item in source_imports
+        ]
+        response["source_imports"] = response_source_imports
         response["source_import_total"] = source_import_page["total"]
         response["source_import_truncated"] = source_import_page["truncated"]
         response["unknowns"] = [
             "envFrom imports source keys without explicit per-key references; exact environment keys are not indexed.",
         ]
+        if any(item.get("declaration", {}).get("status") == "not_declared_locally" for item in response_source_imports):
+            response["unknowns"].append(
+                "An envFrom source without a local declaration may be managed by another repository, chart, controller, or deployment process.",
+            )
     return response
 
 
@@ -787,7 +804,9 @@ def _runtime_configuration_reference(item: sqlite3.Row) -> dict:
     }
 
 
-def _runtime_configuration_source_import(item: sqlite3.Row) -> dict:
+def _runtime_configuration_source_import(
+    item: sqlite3.Row, source_import_unknowns_by_reference: set[tuple[str, str, str | None, str, int, int]],
+) -> dict:
     """Shape an ``envFrom`` source while preserving its intentionally unknown keys."""
     response = {
         "source": {"kind": item["source_kind"], "name": item["source_name"]},
@@ -799,6 +818,11 @@ def _runtime_configuration_source_import(item: sqlite3.Row) -> dict:
     }
     if item["prefix"] is not None:
         response["prefix"] = item["prefix"]
+    if (
+        item["source_kind"], item["source_name"], item["prefix"],
+        item["file_path"], item["start_line"], item["end_line"],
+    ) in source_import_unknowns_by_reference:
+        response["declaration"] = {"status": "not_declared_locally"}
     return response
 
 

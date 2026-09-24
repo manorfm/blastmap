@@ -12,6 +12,7 @@ from orbitkb.iac.models import (
     KubernetesConfigurationBinding,
     KubernetesConfigurationKeyMismatch,
     KubernetesConfigurationSourceImport,
+    KubernetesConfigurationSourceImportUnknown,
     KubernetesConfigurationSourceUnknown,
 )
 from orbitkb.mcp import queries
@@ -147,6 +148,33 @@ def test_describe_runtime_configuration_exposes_env_from_sources_with_unknown_ke
     assert result["source_import_truncated"] is False
     assert result["unknowns"] == [
         "envFrom imports source keys without explicit per-key references; exact environment keys are not indexed.",
+    ]
+
+
+def test_describe_runtime_configuration_marks_an_env_from_source_not_declared_locally(tmp_path):
+    conn = open_db(tmp_path / "runtime-configuration-env-from-source-unknown.db")
+    repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")
+    services.ensure_service(conn, "orders", "/repos/shop/orders", "node-ts", repository_id=repository_id)
+    source_import = KubernetesConfigurationSourceImport(
+        source_kind="config_map", source_name="externally-managed-config", prefix=None,
+        workload_kind="Deployment", workload_name="orders", container_name="api",
+        file_path="deploy/orders.yaml", start_line=11, end_line=13, matched_service_name="orders",
+    )
+    kubernetes_configuration.replace_kubernetes_configuration_source_imports(conn, repository_id, [source_import])
+    kubernetes_configuration.replace_kubernetes_configuration_source_import_unknowns(conn, repository_id, [
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="externally-managed-config", prefix=None,
+            reference_file_path="deploy/orders.yaml", reference_start_line=11, reference_end_line=13,
+            matched_service_name="orders",
+        ),
+    ])
+
+    result = queries.describe_runtime_configuration(conn, "orders")
+
+    assert result["source_imports"][0]["declaration"] == {"status": "not_declared_locally"}
+    assert result["unknowns"] == [
+        "envFrom imports source keys without explicit per-key references; exact environment keys are not indexed.",
+        "An envFrom source without a local declaration may be managed by another repository, chart, controller, or deployment process.",
     ]
 
 

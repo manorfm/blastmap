@@ -121,6 +121,23 @@ def test_kubernetes_scanner_marks_a_source_absent_from_local_yaml_as_unknown(tmp
     ]
 
 
+def test_kubernetes_scanner_marks_an_env_from_source_absent_from_local_yaml_as_unknown(tmp_path: Path):
+    service = tmp_path / "orders-service"
+    service.mkdir()
+    (service / "deployment.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders\nspec:\n"
+        "  template:\n    spec:\n      containers:\n        - name: api\n          envFrom:\n"
+        "            - configMapRef:\n                name: externally-managed-config\n"
+    )
+
+    facts = scan_repository_facts(tmp_path, [_candidate("orders-service", service)])
+
+    assert [(issue.source_kind, issue.source_name, issue.prefix, issue.matched_service_name)
+            for issue in facts.configuration_source_import_unknowns] == [
+        ("config_map", "externally-managed-config", None, "orders-service"),
+    ]
+
+
 def test_helm_template_is_skipped_not_mis_parsed(tmp_path: Path):
     chart_root = tmp_path / "chart"
     templates_dir = chart_root / "templates"

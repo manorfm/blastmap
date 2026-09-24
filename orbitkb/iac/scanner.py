@@ -27,6 +27,7 @@ from orbitkb.iac.models import (
     KubernetesConfigurationKeyMismatch,
     KubernetesConfigurationSource,
     KubernetesConfigurationSourceImport,
+    KubernetesConfigurationSourceImportUnknown,
     KubernetesConfigurationSourceUnknown,
 )
 from orbitkb.iac.terraform import parse_terraform_file
@@ -47,6 +48,7 @@ class RepositoryIacFacts:
     resources: list[IacResource]
     configuration_bindings: list[KubernetesConfigurationBinding]
     configuration_source_imports: list[KubernetesConfigurationSourceImport]
+    configuration_source_import_unknowns: list[KubernetesConfigurationSourceImportUnknown]
     configuration_sources: list[KubernetesConfigurationSource]
     configuration_key_mismatches: list[KubernetesConfigurationKeyMismatch]
     configuration_source_unknowns: list[KubernetesConfigurationSourceUnknown]
@@ -54,28 +56,28 @@ class RepositoryIacFacts:
 
 def _parse_file(path: Path) -> RepositoryIacFacts:
     if path.suffix == ".tf":
-        return RepositoryIacFacts(parse_terraform_file(path), [], [], [], [], [])
+        return RepositoryIacFacts(parse_terraform_file(path), [], [], [], [], [], [])
     if _is_compose_file(path):
-        return RepositoryIacFacts(parse_compose_file(path), [], [], [], [], [])
+        return RepositoryIacFacts(parse_compose_file(path), [], [], [], [], [], [])
     if path.suffix == ".json":
-        return RepositoryIacFacts(parse_cloudformation_file(path), [], [], [], [], [])
+        return RepositoryIacFacts(parse_cloudformation_file(path), [], [], [], [], [], [])
     if path.suffix in (".yaml", ".yml"):
         # A CloudFormation YAML template and a plain Kubernetes manifest share
         # the same extension; an unrendered Helm chart template additionally
         # uses Go template syntax that isn't valid YAML on its own. Checking
         # for that first avoids attempting to parse it as either.
         if is_helm_template(path, path.read_text()):
-            return RepositoryIacFacts([], [], [], [], [], [])
+            return RepositoryIacFacts([], [], [], [], [], [], [])
         # parse_cloudformation_file itself no-ops (returns []) on a document
         # with no top-level `Resources:` — which every plain Kubernetes
         # manifest is, since that's not something both schemas coincidentally
         # share — so no separate "is this CloudFormation" sniff is needed.
         bindings, source_imports = parse_kubernetes_configuration_references_file(path)
         return RepositoryIacFacts(
-            parse_cloudformation_file(path), bindings, source_imports,
+            parse_cloudformation_file(path), bindings, source_imports, [],
             parse_kubernetes_configuration_sources_file(path), [], [],
         )
-    return RepositoryIacFacts([], [], [], [], [], [])
+    return RepositoryIacFacts([], [], [], [], [], [], [])
 
 
 def _matching_service_name(file_path: str, candidates: list[ServiceCandidate]) -> str | None:
@@ -109,6 +111,7 @@ def scan_repository_facts(repository_root: Path, candidates: list[ServiceCandida
         source_by_identity.setdefault((source.source_kind, source.source_name), []).append(source)
     mismatches: list[KubernetesConfigurationKeyMismatch] = []
     source_unknowns: list[KubernetesConfigurationSourceUnknown] = []
+    source_import_unknowns: list[KubernetesConfigurationSourceImportUnknown] = []
     for binding in configuration_bindings:
         matching_sources = source_by_identity.get((binding.source_kind, binding.source_name), [])
         if not matching_sources:
@@ -129,8 +132,17 @@ def scan_repository_facts(repository_root: Path, candidates: list[ServiceCandida
             declaration_file_path=source.file_path, declaration_start_line=source.start_line,
             declaration_end_line=source.end_line, matched_service_name=binding.matched_service_name,
         ))
+    for source_import in configuration_source_imports:
+        if source_by_identity.get((source_import.source_kind, source_import.source_name)):
+            continue
+        source_import_unknowns.append(KubernetesConfigurationSourceImportUnknown(
+            source_kind=source_import.source_kind, source_name=source_import.source_name, prefix=source_import.prefix,
+            reference_file_path=source_import.file_path, reference_start_line=source_import.start_line,
+            reference_end_line=source_import.end_line, matched_service_name=source_import.matched_service_name,
+        ))
     return RepositoryIacFacts(
-        resources, configuration_bindings, configuration_source_imports, configuration_sources, mismatches, source_unknowns,
+        resources, configuration_bindings, configuration_source_imports, source_import_unknowns,
+        configuration_sources, mismatches, source_unknowns,
     )
 
 

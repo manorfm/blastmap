@@ -102,6 +102,9 @@ name/key, workload/container and file evidence. Literal `envFrom` imports are
 returned separately with `key_coverage: "unknown"`: their source and optional prefix
 are known, but individual environment keys are not. It never reads values; dynamic
 names and unrendered Helm templates remain unknown.
+An `envFrom` source without a matching local declaration is labeled
+`not_declared_locally`; it may belong to another delivery boundary and is not proof
+of a missing runtime source.
 When a single local source declaration omits a key referenced by that workload, the
 binding reports `key_not_declared` with declaration evidence; absent or ambiguous
 source declarations remain unknown.

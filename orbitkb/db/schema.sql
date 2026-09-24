@@ -283,6 +283,25 @@ CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_source_imports_repositor
 CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_source_imports_service
     ON kubernetes_configuration_source_imports(service_id);
 
+-- An ``envFrom`` source with no matching local ConfigMap/Secret declaration.
+-- This is an ownership hypothesis: a chart or another delivery boundary may own it.
+CREATE TABLE IF NOT EXISTS kubernetes_configuration_source_import_unknowns (
+    id                   INTEGER PRIMARY KEY,
+    repository_id        INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    service_id           INTEGER REFERENCES services(id) ON DELETE SET NULL,
+    source_kind          TEXT NOT NULL CHECK (source_kind IN ('config_map', 'secret')),
+    source_name          TEXT NOT NULL,
+    prefix               TEXT,
+    reference_file_path  TEXT NOT NULL,
+    reference_start_line INTEGER NOT NULL,
+    reference_end_line   INTEGER NOT NULL,
+    updated_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_source_import_unknowns_repository
+    ON kubernetes_configuration_source_import_unknowns(repository_id);
+CREATE INDEX IF NOT EXISTS idx_kubernetes_configuration_source_import_unknowns_service
+    ON kubernetes_configuration_source_import_unknowns(service_id);
+
 -- A source-proven local mismatch: a workload references a key that is absent
 -- from its single ConfigMap/Secret declaration in this repository. This says
 -- nothing about external resources, rendered templates, or runtime values.
