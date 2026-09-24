@@ -272,6 +272,12 @@ reports the handler and the client boundary separately. This is coexistence of s
 facts, not proof that the handler catches the timeout at runtime; a local translation
 or a more specific mapping may run first.
 
+`possible_resilience_policy_on_partial_write_flow` requires a source-proven local
+write, internal HTTP call and literal timeout or retry policy in the same symbol. It
+returns up to three write targets plus `write_count` to keep the result compact. It
+does not infer call order or the absence of transactions, outboxes, idempotency keys or
+compensation; those mechanisms may exist outside the indexed facts.
+
 A RabbitMQ consumer whose indexed contract has no source-proven retry boundary,
 retry delay or dead-letter route is returned as
 `possible_message_consumer_without_recovery_policy`. Its confidence is intentionally

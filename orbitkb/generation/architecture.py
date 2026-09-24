@@ -525,6 +525,81 @@ def find_broad_handlers_that_can_swallow_timeouts(conn: sqlite3.Connection) -> l
     return findings
 
 
+def find_resilience_policies_on_write_flows(conn: sqlite3.Connection) -> list[dict]:
+    """Flag local write flows that also have an internal call under resilience policy.
+
+    Coexisting write, call and policy facts do not establish their order or transaction
+    boundary. The finding makes that uncertainty visible for flows where a timeout or
+    retry could otherwise leave a partial effect to be reasoned about manually.
+    """
+    names = _service_names(conn)
+    policies_by_source = _resilience_policies_by_source(conn, None)
+    writes_by_source: dict[tuple[int, str], list[sqlite3.Row]] = defaultdict(list)
+    for write in conn.execute(
+        """SELECT service_id, from_symbol, to_symbol, file_path, start_line, end_line
+           FROM flow_edges
+           WHERE kind = 'writes'
+           ORDER BY service_id, from_symbol, to_symbol, file_path, start_line""",
+    ).fetchall():
+        writes_by_source[(write["service_id"], write["from_symbol"])].append(write)
+    calls = conn.execute(
+        """SELECT service_id, source, target_service, target_method, target_path,
+                  file_path, start_line, end_line
+           FROM static_service_calls
+           WHERE protocol = 'http'
+           ORDER BY service_id, source, target_service, target_method, target_path,
+                    file_path, start_line""",
+    ).fetchall()
+    findings: list[dict] = []
+    for call in calls:
+        source_key = (call["service_id"], call["source"])
+        policies = policies_by_source.get(source_key)
+        writes = writes_by_source.get(source_key)
+        if not policies or not writes:
+            continue
+        service = names[call["service_id"]]
+        visible_writes = writes[:3]
+        findings.append({
+            "kind": "possible_resilience_policy_on_partial_write_flow", "severity": "warning",
+            "services": [service],
+            "reason": (
+                f"{call['source']} has local writes and calls {call['target_service']} under "
+                "a literal timeout or retry policy; review partial-effect semantics."
+            ),
+            "detail": {
+                "flow": {"symbol": call["source"]},
+                "target": {
+                    "service": call["target_service"], "method": call["target_method"],
+                    "path": call["target_path"],
+                },
+                "resilience_policies": [
+                    {
+                        "kind": policy["kind"], "mechanism": policy["mechanism"],
+                        "value": policy["value"], "unit": policy["unit"],
+                    }
+                    for policy in policies
+                ],
+                "writes": [{"target": write["to_symbol"]} for write in visible_writes],
+                "write_count": len(writes),
+                "confidence": 0.7,
+                "evidence": [
+                    _edge_evidence(call),
+                    *[_edge_evidence(policy) for policy in policies],
+                    *[_edge_evidence(write) for write in visible_writes],
+                ],
+                "unknowns": [
+                    "Static analysis does not establish whether the write occurs before or after the remote call.",
+                    "A transaction, outbox, idempotency key or compensating action may protect this flow outside the indexed facts.",
+                ],
+                "remediation": [
+                    "Review ordering, idempotency and recovery for the write and remote call as one failure boundary.",
+                    "Use a transaction, outbox, compensation or an explicit retry-safe contract where the operation can be partially applied.",
+                ],
+            },
+        })
+    return findings
+
+
 def find_error_semantics_lost(conn: sqlite3.Connection) -> list[dict]:
     """Find a source-proven client/domain error degraded to an HTTP 5xx mapping.
 
@@ -708,17 +783,25 @@ def _retry_policies_by_source(conn: sqlite3.Connection) -> dict[tuple[int, str],
 
 
 def _resilience_policies_by_source(
-    conn: sqlite3.Connection, kind: str,
+    conn: sqlite3.Connection, kind: str | None,
 ) -> dict[tuple[int, str], list[sqlite3.Row]]:
-    """Group one kind of literal resilience declaration by source symbol."""
+    """Group one kind, or all kinds, of literal resilience declarations by source."""
     policies_by_source: dict[tuple[int, str], list[sqlite3.Row]] = defaultdict(list)
-    for policy in conn.execute(
-        """SELECT service_id, source, mechanism, value, unit,
+    query = (
+        """SELECT service_id, source, kind, mechanism, value, unit,
                   file_path, start_line, end_line
            FROM static_resilience_policies
            WHERE kind = ?
-           ORDER BY service_id, source, mechanism, value, unit, file_path, start_line""",
-        (kind,),
+           ORDER BY service_id, source, mechanism, value, unit, file_path, start_line"""
+        if kind is not None
+        else """SELECT service_id, source, kind, mechanism, value, unit,
+                       file_path, start_line, end_line
+                FROM static_resilience_policies
+                ORDER BY service_id, source, kind, mechanism, value, unit, file_path, start_line"""
+    )
+    for policy in conn.execute(
+        query,
+        (kind,) if kind is not None else (),
     ).fetchall():
         policies_by_source[(policy["service_id"], policy["source"])].append(policy)
     return policies_by_source
@@ -1592,6 +1675,7 @@ _DETECTORS = (
     find_unmapped_downstream_errors,
     find_overbroad_exception_handlers,
     find_broad_handlers_that_can_swallow_timeouts,
+    find_resilience_policies_on_write_flows,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
     find_cloud_dead_letter_queue_missing, find_public_object_storage,

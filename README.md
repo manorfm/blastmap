@@ -204,6 +204,12 @@ service. It does not claim that the handler captures that timeout; it highlights
 review point for adding or documenting a more specific timeout contract before the
 generic fallback.
 
+When the same source symbol has a local write, an internal HTTP call and a literal
+timeout or retry policy, OrbitKB flags a possible partial-write flow. It does not infer
+operation order or claim that recovery is absent: transactions, outboxes, idempotency
+keys and compensation may be implemented outside the indexed facts. The signal focuses
+the review on treating the write and remote call as one failure boundary.
+
 When `find_change_surface` identifies a primary Java/Kotlin Spring service, up to
 three unambiguous static HTTP targets can be added as `secondary` findings. They are
 marked `origin: static_dependency` with confidence `0.6`: the dependency is proven,
