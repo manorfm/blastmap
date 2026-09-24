@@ -103,6 +103,9 @@ dynamic names and unrendered Helm templates remain unknown.
 When a single local source declaration omits a key referenced by that workload, the
 binding reports `key_not_declared` with declaration evidence; absent or ambiguous
 source declarations remain unknown.
+The same source-proven conflict appears in `find_architecture_smells` as
+`possible_kubernetes_configuration_key_not_declared`, with a rollout-oriented
+remediation and explicit runtime uncertainty.
 
 `describe_feature_flags` returns literal reads through a locally proven feature-flag
 SDK, currently LaunchDarkly's Node server SDK. It returns key, provider and source

@@ -237,6 +237,9 @@ Secret name/key, workload/container and source evidence, without exposing values
 When exactly one local source declaration exists and it does not list a referenced
 key, the response marks that source-proven mismatch and returns its declaration
 evidence. Sources absent from the indexed repository remain unknown.
+`find_architecture_smells` also reports this as
+`possible_kubernetes_configuration_key_not_declared`, with the same uncertainty
+about transforms and runtime mutation.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and

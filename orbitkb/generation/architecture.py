@@ -1859,6 +1859,54 @@ def find_cloud_iac_unused_in_code(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_kubernetes_configuration_key_mismatches(conn: sqlite3.Connection) -> list[dict]:
+    """Surface only already-proven local manifest key conflicts.
+
+    The scanner excludes absent and ambiguous declarations, but rendered or runtime
+    mutation can still change the deployed source. Keep the finding advisory.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT service_id, environment_key, source_kind, source_name, source_key,
+                  reference_file_path, reference_start_line, reference_end_line,
+                  declaration_file_path, declaration_start_line, declaration_end_line
+           FROM kubernetes_configuration_key_mismatches
+           WHERE service_id IS NOT NULL
+           ORDER BY service_id, environment_key, source_name, source_key, reference_file_path, reference_start_line"""
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        service = names[row["service_id"]]
+        source_label = "ConfigMap" if row["source_kind"] == "config_map" else "Secret"
+        findings.append({
+            "kind": "possible_kubernetes_configuration_key_not_declared", "severity": "warning",
+            "services": [service],
+            "reason": (
+                f"{service} references {source_label} {row['source_name']} key {row['source_key']} for "
+                f"{row['environment_key']}, but its single indexed declaration does not list that key."
+            ),
+            "detail": {
+                "environment_key": row["environment_key"], "source_kind": row["source_kind"],
+                "source_name": row["source_name"], "source_key": row["source_key"], "confidence": 0.9,
+                "evidence": [
+                    {
+                        "file": row["reference_file_path"], "start_line": row["reference_start_line"],
+                        "end_line": row["reference_end_line"],
+                    },
+                    {
+                        "file": row["declaration_file_path"], "start_line": row["declaration_start_line"],
+                        "end_line": row["declaration_end_line"],
+                    },
+                ],
+                "unknowns": [
+                    "Kustomize, admission controllers, or runtime mutation may add the key outside indexed YAML.",
+                ],
+                "remediation": ["Confirm the source declaration and workload reference agree before rollout."],
+            },
+        })
+    return findings
+
+
 def find_shared_cloud_resource(conn: sqlite3.Connection) -> list[dict]:
     """Two or more different services whose code proves they talk to the same
     named cloud resource — coupling through a shared queue/topic/bucket, the
@@ -2087,6 +2135,7 @@ _DETECTORS = (
     find_non_atomic_service_publish_flows,
     find_message_consumers_without_recovery_policy,
     find_cloud_code_without_iac, find_cloud_iac_unused_in_code, find_shared_cloud_resource,
+    find_kubernetes_configuration_key_mismatches,
     find_cloud_dead_letter_queue_missing, find_public_object_storage,
     find_unencrypted_cloud_resource, find_missing_bucket_versioning,
 )

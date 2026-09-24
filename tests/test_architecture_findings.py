@@ -14,22 +14,27 @@ from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import architecture as architecture_repo
 from orbitkb.db.repositories import flows as flows_repo
+from orbitkb.db.repositories import (
+    kubernetes_configuration as kubernetes_configuration_repo,
+)
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import (
     diff_architecture_runs,
+    find_aggregate_ownership_overlap,
     find_cycles,
     find_duplicate_external_integrations,
     find_fan_imbalance,
     find_flow_hypotheses,
-    find_aggregate_ownership_overlap,
+    find_kubernetes_configuration_key_mismatches,
     find_message_consumers_without_recovery_policy,
     find_read_entrypoint_side_effects,
     find_shared_database,
     recompute_architecture_view,
 )
+from orbitkb.iac.models import KubernetesConfigurationKeyMismatch
 from orbitkb.mcp import queries
 
 EVIDENCE = [{"file": "main.py", "start_line": 1, "end_line": 5}]
@@ -61,6 +66,43 @@ def test_find_cycles_detects_a_two_service_cycle(tmp_path: Path):
     assert len(findings) == 1
     assert set(findings[0]["services"]) == {"a-service", "b-service"}
     assert findings[0]["kind"] == "cycle"
+
+
+def test_kubernetes_configuration_key_mismatch_is_a_conservative_architecture_warning(tmp_path: Path):
+    conn = open_db(tmp_path / "configuration-mismatch.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "orders", "/tmp/shop/orders", "node-ts", repository_id=repository_id)
+    kubernetes_configuration_repo.replace_kubernetes_configuration_key_mismatches(conn, repository_id, [
+        KubernetesConfigurationKeyMismatch(
+            environment_key="ORDERS_TOPIC", source_kind="config_map", source_name="orders-config",
+            source_key="orders-topic", reference_file_path="deploy/orders.yaml", reference_start_line=12,
+            reference_end_line=17, declaration_file_path="deploy/config.yaml", declaration_start_line=1,
+            declaration_end_line=7, matched_service_name="orders",
+        ),
+    ])
+
+    assert find_kubernetes_configuration_key_mismatches(conn) == [{
+        "kind": "possible_kubernetes_configuration_key_not_declared",
+        "severity": "warning",
+        "services": ["orders"],
+        "reason": (
+            "orders references ConfigMap orders-config key orders-topic for ORDERS_TOPIC, but its single indexed "
+            "declaration does not list that key."
+        ),
+        "detail": {
+            "environment_key": "ORDERS_TOPIC", "source_kind": "config_map", "source_name": "orders-config",
+            "source_key": "orders-topic", "confidence": 0.9,
+            "evidence": [
+                {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 17},
+                {"file": "deploy/config.yaml", "start_line": 1, "end_line": 7},
+            ],
+            "unknowns": ["Kustomize, admission controllers, or runtime mutation may add the key outside indexed YAML."],
+            "remediation": ["Confirm the source declaration and workload reference agree before rollout."],
+        },
+    }]
+    recompute_architecture_view(conn)
+    response = queries.find_architecture_smells(conn)
+    assert response["findings"][-1]["kind"] == "possible_kubernetes_configuration_key_not_declared"
 
 
 def test_find_cycles_ignores_a_simple_chain(tmp_path: Path):
