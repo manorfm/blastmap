@@ -949,6 +949,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         tree = self.parse(source)
         result = AnalysisResult()
         imports = _node_named_imports(source_text)
+        graphql_error_constructors = _graphql_error_constructors(imports)
         mongoose_models = _mongoose_model_variables(source_text)
         prisma_clients = _prisma_client_variables(source_text)
         client_declarations = node_stateful_client_declarations(source_text)
@@ -1052,6 +1053,9 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 result.edges.extend(function_edges)
                 result.cloud_facts.extend(function_cloud_facts)
                 result.boundaries.extend(self._boundaries_for(function, path, root, source))
+                result.error_contracts.extend(
+                    _graphql_error_contracts(function, path, root, source, graphql_error_constructors)
+                )
         for node in _walk(tree):
             if node.type != "call_expression":
                 continue
@@ -1224,6 +1228,61 @@ def _node_response_receiver(function: _Function, source: bytes) -> str | None:
         return None
     receiver = _text(identifier, source)
     return receiver if receiver in _NODE_RESPONSE_PARAMETER_NAMES else None
+
+
+_GRAPHQL_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+_GRAPHQL_ERROR_KIND = {
+    "BAD_USER_INPUT": "validation",
+    "CONFLICT": "conflict",
+    "FORBIDDEN": "authorization",
+    "NOT_FOUND": "not_found",
+    "RATE_LIMITED": "rate_limit",
+    "THROTTLED": "rate_limit",
+    "UNAUTHENTICATED": "authorization",
+}
+
+
+def _graphql_error_constructors(imports: tuple[tuple[str, str], ...]) -> frozenset[str]:
+    """Return local aliases explicitly imported as GraphQL's error type."""
+    return frozenset(local for local, imported in imports if imported == "graphql.GraphQLError")
+
+
+def _graphql_error_contracts(
+    function: _Function,
+    path: Path,
+    root: Path,
+    source: bytes,
+    constructors: frozenset[str],
+) -> list[ErrorContract]:
+    """Extract thrown, literal GraphQL public codes from one resolver only."""
+    contracts: list[ErrorContract] = []
+    for node in _walk(function.body):
+        if node.type != "new_expression" or node.parent is None or node.parent.type != "throw_statement":
+            continue
+        constructor = node.child_by_field_name("constructor")
+        arguments = node.child_by_field_name("arguments")
+        if constructor is None or arguments is None or _text(constructor, source) not in constructors:
+            continue
+        code_match = re.search(
+            r"\bextensions\s*:\s*\{[^{}]*\bcode\s*:\s*[\"']([^\"']+)[\"']",
+            _text(arguments, source),
+        )
+        if code_match is None or _GRAPHQL_ERROR_CODE.fullmatch(code_match.group(1)) is None:
+            continue
+        code = code_match.group(1)
+        contracts.append(ErrorContract(
+            source=function.symbol,
+            role="raises",
+            error_kind=_GRAPHQL_ERROR_KIND.get(code, "unexpected" if code == "INTERNAL_SERVER_ERROR" else "unknown"),
+            internal_type="GraphQLError",
+            protocol="graphql",
+            transport_code=None,
+            public_code=code,
+            exposes_internal_detail=False,
+            retryability="retryable" if _GRAPHQL_ERROR_KIND.get(code) == "rate_limit" else "not_retryable",
+            evidence=_evidence(path, root, node),
+        ))
+    return contracts
 
 
 class _GraphqlContractExtractor:

@@ -67,6 +67,9 @@ treated as deletion.
    Go mappings currently require literal `net/http` `http.Error` or `WriteHeader` calls
    on a declared `http.ResponseWriter`; dynamic statuses, custom writers and returned
    errors remain unknown.
+   GraphQL mappings currently require a thrown `GraphQLError` explicitly imported from
+   `graphql` with a literal `extensions.code`; generic throws, dynamic extensions and
+   global formatters remain unknown.
 9. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.

@@ -1215,6 +1215,36 @@ input CreateOrderInput { sku: String! note: String }
     }
 
 
+def test_graphql_resolvers_extract_literal_graphql_error_codes(tmp_path: Path):
+    (tmp_path / "resolvers.ts").write_text(
+        '''import { GraphQLError as GqlError } from "graphql";
+export const resolvers = {
+  Mutation: {
+    createOrder: (_: unknown, input: CreateOrderInput) => {
+      if (!input.sku) throw new GqlError("invalid input", { extensions: { code: "BAD_USER_INPUT" } });
+      if (!input.stock) throw new GqlError("out of stock", { extensions: { code: "OUT_OF_STOCK" } });
+      if (input.dynamic) throw new GqlError("dynamic", { extensions: { code: input.dynamic } });
+      return orderService.create(input);
+    },
+  },
+};
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(contract.source, contract.role, contract.error_kind, contract.internal_type,
+             contract.protocol, contract.transport_code, contract.public_code,
+             contract.exposes_internal_detail, contract.retryability)
+            for contract in result.error_contracts] == [
+        ("Mutation.createOrder", "raises", "validation", "GraphQLError", "graphql", None,
+         "BAD_USER_INPUT", False, "not_retryable"),
+        ("Mutation.createOrder", "raises", "unknown", "GraphQLError", "graphql", None,
+         "OUT_OF_STOCK", False, "not_retryable"),
+    ]
+
+
 def test_graphql_contract_includes_local_interface_and_union_return_options(tmp_path: Path):
     (tmp_path / "resolvers.ts").write_text(
         '''export const resolvers = { Query: { node: () => null, search: () => [] } };''', encoding="utf-8",

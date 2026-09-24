@@ -261,6 +261,11 @@ For Go HTTP, OrbitKB indexes only literal 4xx/5xx `http.Error` and
 and the function declares an `http.ResponseWriter` parameter. Dynamic statuses,
 custom writers, returned `error` values, `recover` and response bodies remain unknown.
 
+For GraphQL, OrbitKB indexes only `throw new GraphQLError` in a local resolver when
+the constructor is explicitly imported from `graphql` and `extensions.code` is a safe
+literal. The code is exposed as a public GraphQL code, not an HTTP status; generic
+throws, dynamic extensions, formatters and error messages remain unknown.
+
 `find_architecture_smells` also flags a source-proven internal HTTP call with no
 literal timeout or retry policy on the same source symbol. This is a prompt to review
 the client boundary, not evidence that production has no protection: defaults and
