@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "25"
+STATIC_ANALYSIS_INPUT_VERSION = "26"
 
 
 def _walk(node: Node):
@@ -1776,11 +1776,24 @@ def _graphql_error_contracts(
             protocol="graphql",
             transport_code=None,
             public_code=code,
-            exposes_internal_detail=False,
+            exposes_internal_detail=_graphql_error_exposes_internal_detail(arguments, source),
             retryability="retryable" if _GRAPHQL_ERROR_KIND.get(code) == "rate_limit" else "not_retryable",
             evidence=_evidence(path, root, node),
         ))
     return contracts
+
+
+def _graphql_error_exposes_internal_detail(arguments: Node, source: bytes) -> bool:
+    """Recognize only an error member sent directly as GraphQLError's message."""
+    first_argument = next(iter(arguments.named_children), None)
+    if first_argument is None or first_argument.type != "member_expression":
+        return False
+    property_node = first_argument.child_by_field_name("property")
+    return (
+        property_node is not None
+        and _node_member_root_identifier(first_argument, source) in _NODE_ERROR_IDENTIFIERS
+        and _text(property_node, source) in _NODE_INTERNAL_DETAIL_PROPERTIES
+    )
 
 
 class _GraphqlContractExtractor:

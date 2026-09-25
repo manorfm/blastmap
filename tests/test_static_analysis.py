@@ -1557,6 +1557,8 @@ export const resolvers = {
     createOrder: (_: unknown, input: CreateOrderInput) => {
       if (!input.sku) throw new GqlError("invalid input", { extensions: { code: "BAD_USER_INPUT" } });
       if (!input.stock) throw new GqlError("out of stock", { extensions: { code: "OUT_OF_STOCK" } });
+      if (input.expose) throw new GqlError(error.message, { extensions: { code: "INTERNAL_SERVER_ERROR" } });
+      if (input.redacted) throw new GqlError(redact(error.message), { extensions: { code: "INTERNAL_SERVER_ERROR" } });
       if (input.dynamic) throw new GqlError("dynamic", { extensions: { code: input.dynamic } });
       return orderService.create(input);
     },
@@ -1576,6 +1578,10 @@ export const resolvers = {
          "BAD_USER_INPUT", False, "not_retryable"),
         ("Mutation.createOrder", "raises", "unknown", "GraphQLError", "graphql", None,
          "OUT_OF_STOCK", False, "not_retryable"),
+        ("Mutation.createOrder", "raises", "unexpected", "GraphQLError", "graphql", None,
+         "INTERNAL_SERVER_ERROR", True, "not_retryable"),
+        ("Mutation.createOrder", "raises", "unexpected", "GraphQLError", "graphql", None,
+         "INTERNAL_SERVER_ERROR", False, "not_retryable"),
     ]
 
 

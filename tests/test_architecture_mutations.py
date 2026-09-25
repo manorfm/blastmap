@@ -253,6 +253,25 @@ def test_internal_error_exposure_disappears_when_mapping_stops_exposing_detail(t
     assert find_internal_error_exposures(conn) == []
 
 
+def test_internal_error_exposure_includes_a_public_graphql_error(tmp_path: Path):
+    conn = open_db(tmp_path / "graphql-internal-error-exposure.db")
+    service = services_repo.ensure_service(conn, "orders", "/tmp/orders", "node-ts")
+    exposed = ErrorContract(
+        source="Mutation.createOrder", role="raises", error_kind="unexpected",
+        internal_type="GraphQLError", protocol="graphql", transport_code=None,
+        public_code="INTERNAL_SERVER_ERROR", exposes_internal_detail=True,
+        retryability="not_retryable", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[exposed]))
+
+    findings = find_internal_error_exposures(conn)
+
+    assert _kinds(findings) == {"possible_internal_error_exposure"}
+    assert findings[0]["detail"]["mapping"] == {
+        "symbol": "Mutation.createOrder", "protocol": "graphql", "code": "INTERNAL_SERVER_ERROR",
+    }
+
+
 def test_unmapped_downstream_error_disappears_when_caller_maps_the_known_error(tmp_path: Path):
     conn = open_db(tmp_path / "downstream-error.db")
     checkout = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "jvm-spring")

@@ -1145,23 +1145,31 @@ def find_internal_error_exposures(conn: sqlite3.Connection) -> list[dict]:
         """SELECT service_id, source, protocol, transport_code, public_code,
                   file_path, start_line, end_line
            FROM static_error_contracts
-           WHERE role = 'maps'
-             AND exposes_internal_detail = 1
-             AND protocol IN ('http', 'graphql')
+           WHERE exposes_internal_detail = 1
+             AND (
+                 (role = 'maps' AND protocol = 'http')
+                 OR (role = 'raises' AND protocol = 'graphql')
+             )
            ORDER BY service_id, source, protocol, transport_code""",
     ).fetchall()
     findings: list[dict] = []
     for row in rows:
+        public_result = row["transport_code"] if row["protocol"] == "http" else row["public_code"]
         mapping = {
             "symbol": row["source"], "protocol": row["protocol"],
-            "code": row["transport_code"],
+            "code": public_result,
         }
+        response_description = (
+            f"HTTP {public_result}"
+            if row["protocol"] == "http"
+            else f"GraphQL error code {public_result}"
+        )
         findings.append({
             "kind": "possible_internal_error_exposure", "severity": "critical",
             "services": [names[row["service_id"]]],
             "reason": (
-                f"{names[row['service_id']]} maps an error from {row['source']} to "
-                f"{row['protocol'].upper()} {row['transport_code']} with a direct internal error detail."
+                f"{names[row['service_id']]} exposes a direct internal error detail from "
+                f"{row['source']} through {response_description}."
             ),
             "detail": {
                 "mapping": mapping,

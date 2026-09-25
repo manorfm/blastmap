@@ -77,7 +77,9 @@ reanalyzes the service.
    boolean; wrapped or sanitized values remain unknown.
    GraphQL mappings currently require a thrown `GraphQLError` explicitly imported from
    `graphql` with a literal `extensions.code`; generic throws, dynamic extensions and
-   global formatters remain unknown.
+   global formatters remain unknown. A direct first argument such as `error.message`
+   is additionally recorded only as an internal-detail exposure boolean; wrapped or
+   sanitized values remain unknown.
 9. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_runtime_configuration`, `describe_feature_flags`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.

@@ -471,7 +471,10 @@ values remain unknown.
 For GraphQL, OrbitKB indexes only `throw new GraphQLError` in a local resolver when
 the constructor is explicitly imported from `graphql` and `extensions.code` is a safe
 literal. The code is exposed as a public GraphQL code, not an HTTP status; generic
-throws, dynamic extensions, formatters and error messages remain unknown.
+throws, dynamic extensions and formatters remain unknown. A direct first argument of
+`err.message`, `error.stack` or `exception.cause` is retained only as an
+internal-detail exposure boolean and source location; wrapped or sanitized values are
+unknown.
 
 `find_architecture_smells` also flags a source-proven internal HTTP call with no
 literal timeout or retry policy on the same source symbol. This is a prompt to review
