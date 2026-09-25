@@ -62,7 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "1"
+STATIC_ANALYSIS_INPUT_VERSION = "2"
 
 
 def _walk(node: Node):
@@ -2378,7 +2378,10 @@ class StaticAnalysisEngine:
         self._analyzers = {
             "go": (_GoAnalyzer(Language(tree_sitter_go.language())), ("*.go",)),
             "jvm-spring": (_JvmSpringAnalyzer(), ("*.java", "*.kt")),
-            "node-ts": (_NodeGraphqlAnalyzer(Language(tree_sitter_typescript.language_typescript())), ("*.ts", "*.tsx", "*.graphql", "*.gql", "*.prisma")),
+            "node-ts": (
+                _NodeGraphqlAnalyzer(Language(tree_sitter_typescript.language_typescript())),
+                ("*.js", "*.jsx", "*.ts", "*.tsx", "*.graphql", "*.gql", "*.prisma"),
+            ),
             "node-js": (_NodeGraphqlAnalyzer(Language(tree_sitter_javascript.language())), ("*.js", "*.jsx", "*.graphql", "*.gql", "*.prisma")),
             "python": (_PythonCliAnalyzer(), ("*.py",)),
         }

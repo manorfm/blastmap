@@ -468,6 +468,27 @@ app.post("/orders", createOrder);
     )
 
 
+def test_node_analyzer_includes_javascript_sources_for_node_ts_services(tmp_path: Path):
+    (tmp_path / "orders.js").write_text(
+        '''import express from "express";
+const app = express();
+function createOrder(req, res) { return orderService.create(req.body); }
+app.post("/orders", createOrder);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(entry.kind, entry.method, entry.name, entry.symbol) for entry in result.entrypoints] == [
+        ("http", "POST", "/orders", "orders.createOrder"),
+    ]
+    assert any(
+        edge.source == "orders.createOrder" and edge.target == "orderService.create"
+        for edge in result.edges
+    )
+
+
 def test_node_analyzer_exposes_literal_express_head_and_options_routes(tmp_path: Path):
     (tmp_path / "health.ts").write_text(
         '''import express from "express";
