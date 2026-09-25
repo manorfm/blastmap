@@ -203,6 +203,34 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
     assert response["findings"][-1]["kind"] == "possible_kubernetes_configuration_source_import_not_declared_locally"
 
 
+def test_kubernetes_env_from_source_unknown_orders_initialization_before_application(tmp_path: Path):
+    conn = open_db(tmp_path / "configuration-source-import-unknown-mixed-roles.db")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    services_repo.ensure_service(conn, "orders", "/tmp/shop/orders", "node-ts", repository_id=repository_id)
+    kubernetes_configuration_repo.replace_kubernetes_configuration_source_import_unknowns(conn, repository_id, [
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix=None,
+            reference_file_path="deploy/orders.yaml", reference_start_line=20, reference_end_line=23,
+            container_role="application", matched_service_name="orders",
+        ),
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix=None,
+            reference_file_path="deploy/orders.yaml", reference_start_line=12, reference_end_line=15,
+            container_role="initialization", matched_service_name="orders",
+        ),
+    ])
+
+    detail = find_kubernetes_configuration_source_import_unknowns(conn)[0]["detail"]
+
+    assert detail["container_roles"] == ["initialization", "application"]
+    assert detail["unknowns"].count(
+        "An initialization container using this source must complete before application containers start.",
+    ) == 1
+    assert detail["remediation"].count(
+        "Verify initialization completes before application containers start.",
+    ) == 1
+
+
 def test_kubernetes_env_from_source_with_mixed_availability_stays_conservative(tmp_path: Path):
     conn = open_db(tmp_path / "configuration-source-import-mixed-availability.db")
     repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")

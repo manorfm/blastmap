@@ -1966,11 +1966,10 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
             for row in imports
         })
         prefixes = sorted({row["prefix"] for row in imports if row["prefix"] is not None})
-        container_roles = sorted({
-            row["container_role"]
-            for row in imports
-            if row["container_role"] in {"application", "initialization"}
-        })
+        observed_container_roles = {row["container_role"] for row in imports}
+        container_roles = [
+            role for role in ("initialization", "application") if role in observed_container_roles
+        ]
         availability_values = {None if row["optional"] is None else bool(row["optional"]) for row in imports}
         availability = (
             "optional" if availability_values == {True}

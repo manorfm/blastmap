@@ -126,7 +126,9 @@ it is an ownership hypothesis, groups repeated imports of the same source with t
 prefixes and evidence, and does not infer imported keys. Its detail reports source
 availability; optional sources ask for safe absence behavior rather than asserting
 the source must be provisioned. An initialization-container import also reports the
-need to verify initialization completes before application containers start.
+need to verify initialization completes before application containers start. When
+both roles occur, `container_roles` is lifecycle-ordered: `initialization`, then
+`application`.
 
 `describe_feature_flags` returns literal reads through a locally proven feature-flag
 SDK, currently LaunchDarkly's Node server SDK. It returns key, provider and source

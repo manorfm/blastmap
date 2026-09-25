@@ -526,7 +526,7 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
         KubernetesConfigurationSourceImportUnknown(
             source_kind="config_map", source_name="external-config", prefix="PAYMENTS_",
             reference_file_path="deploy/checkout.yaml", reference_start_line=20, reference_end_line=23,
-            container_role="initialization", optional=True, matched_service_name="checkout-service",
+            container_role="application", optional=True, matched_service_name="checkout-service",
         ),
     ])
 

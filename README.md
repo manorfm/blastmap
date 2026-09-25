@@ -267,7 +267,8 @@ prefixes while imported environment keys remain unknown. Its availability is
 `optional`, `required`, `mixed` or `unknown`; optional sources prompt a behavioral
 absence review instead of an assertion that rollout must provision the source. When
 an initialization container imports the source, the review also checks that it
-completes before application containers start.
+completes before application containers start. When both roles import it, the detail
+orders them by lifecycle: `initialization`, then `application`.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and
