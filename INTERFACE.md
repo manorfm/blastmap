@@ -252,6 +252,7 @@ contract, or the client `describe_service` and remote `list_entrypoints` queries
 resolved HTTP boundary, `describe_persistence` for a schema/migration review, or
 `describe_feature_flags` for a source-proven feature-flag review, or
 `describe_cloud_dependencies` for a deployment review, or
+`list_entrypoints` for an entrypoint review, or
 `describe_configuration` for a proven code-to-Kubernetes configuration binding, or
 `describe_runtime_configuration` for a source-proven Kubernetes key mismatch or
 unresolved source-ownership review, including an `envFrom` source. The latter is

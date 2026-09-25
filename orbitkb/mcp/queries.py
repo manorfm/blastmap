@@ -2143,6 +2143,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
             "purpose": "confirm the indexed cloud dependency and IaC declaration",
             "recommended_query": {"tool": "describe_cloud_dependencies", "arguments": {"service": producer}},
         }]
+    if change_unit["target"]["role"] == "entrypoint":
+        return [{
+            "service": producer,
+            "purpose": "confirm the indexed entrypoint contract and reachable flow",
+            "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": producer}},
+        }]
     if change_unit["target"]["role"] == "configuration":
         if change_unit["target"]["symbol"].startswith("kubernetes:"):
             is_unresolved_import = change_unit["id"].startswith("runtime-configuration-source-import-unknown:")

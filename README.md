@@ -156,7 +156,8 @@ finalized decision is immutable within that plan.
 `describe_change_unit` exposes one accepted unit with its validation and the smallest
 producer/consumer contract queries needed before editing. Deployment reviews direct
 the agent to indexed cloud dependencies and IaC declarations rather than unrelated
-message contracts.
+message contracts. Entrypoint reviews direct it to the indexed endpoint contract and
+reachable flow rather than treating HTTP dependencies as message consumers.
 When a primary service has a source-proven internal HTTP call whose remote method and
 route are indexed, `plan_change` also creates a contract-review unit for that boundary.
 It also adds an error-mapping review only for a high-confidence, source-proven local

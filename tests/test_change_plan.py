@@ -1831,6 +1831,19 @@ def test_deployment_review_units_read_indexed_cloud_dependencies():
     }]
 
 
+def test_entrypoint_review_units_read_indexed_entrypoints():
+    assert queries._minimal_unit_reading({
+        "id": "timeout-fallback:checkout-service:CheckoutController.reserve:TimeoutException:200",
+        "service": "checkout-service",
+        "target": {"role": "entrypoint", "symbol": "CheckoutController.reserve"},
+        "dependencies": ["inventory-service"],
+    }) == [{
+        "service": "checkout-service",
+        "purpose": "confirm the indexed entrypoint contract and reachable flow",
+        "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": "checkout-service"}},
+    }]
+
+
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
     assert derive_runtime_configuration_review_units(
         {"checkout-service": [{
