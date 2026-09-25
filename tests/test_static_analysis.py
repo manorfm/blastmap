@@ -1713,6 +1713,14 @@ func Reject(w http.ResponseWriter, r *http.Request) {
   w.WriteHeader(400)
 }
 
+func Expose(w http.ResponseWriter, r *http.Request, err error) {
+  http.Error(w, err.Error(), http.StatusInternalServerError)
+}
+
+func Redacted(w http.ResponseWriter, r *http.Request, err error) {
+  http.Error(w, redact(err.Error()), http.StatusInternalServerError)
+}
+
 func Dynamic(w http.ResponseWriter, r *http.Request, status int) {
   w.WriteHeader(status)
 }
@@ -1733,6 +1741,8 @@ func External(w customWriter, r *http.Request) {
         ("orders.Create", "maps", "conflict", "http", "409", None, False, "not_retryable"),
         ("orders.Find", "maps", "not_found", "http", "404", None, False, "not_retryable"),
         ("orders.Reject", "maps", "validation", "http", "400", None, False, "not_retryable"),
+        ("orders.Expose", "maps", "unexpected", "http", "500", None, True, "not_retryable"),
+        ("orders.Redacted", "maps", "unexpected", "http", "500", None, False, "not_retryable"),
     ]
 
 

@@ -72,7 +72,9 @@ reanalyzes the service.
    `res`, `response` or `reply`; global middleware, throws and dynamic statuses remain unknown.
    Go mappings currently require literal `net/http` `http.Error` or `WriteHeader` calls
    on a declared `http.ResponseWriter`; dynamic statuses, custom writers and returned
-   errors remain unknown.
+   errors remain unknown. A direct `http.Error(w, err.Error(), ...)` or
+   `error.Error()` reply is additionally recorded only as an internal-detail exposure
+   boolean; wrapped or sanitized values remain unknown.
    GraphQL mappings currently require a thrown `GraphQLError` explicitly imported from
    `graphql` with a literal `extensions.code`; generic throws, dynamic extensions and
    global formatters remain unknown.

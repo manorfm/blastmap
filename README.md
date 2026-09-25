@@ -464,6 +464,9 @@ For Go HTTP, OrbitKB indexes only literal 4xx/5xx `http.Error` and
 `http.ResponseWriter.WriteHeader` replies when the local source imports `net/http`
 and the function declares an `http.ResponseWriter` parameter. Dynamic statuses,
 custom writers, returned `error` values, `recover` and response bodies remain unknown.
+For a direct `http.Error(w, err.Error(), ...)` or `error.Error()` reply it retains
+only the internal-detail exposure boolean and source location; wrapped or sanitized
+values remain unknown.
 
 For GraphQL, OrbitKB indexes only `throw new GraphQLError` in a local resolver when
 the constructor is explicitly imported from `graphql` and `extensions.code` is a safe

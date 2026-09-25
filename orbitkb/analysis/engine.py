@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "24"
+STATIC_ANALYSIS_INPUT_VERSION = "25"
 
 
 def _walk(node: Node):
@@ -685,7 +685,7 @@ def _go_http_error_contracts(
     if writer is None:
         return []
     patterns = (
-        rf"\bhttp\s*\.\s*Error\s*\(\s*{re.escape(writer)}\s*,\s*[^,]+,\s*(?P<status>http\s*\.\s*Status[A-Za-z]+|[45]\d\d)\s*\)",
+        rf"\bhttp\s*\.\s*Error\s*\(\s*{re.escape(writer)}\s*,\s*(?P<detail>[^,]+),\s*(?P<status>http\s*\.\s*Status[A-Za-z]+|[45]\d\d)\s*\)",
         rf"\b{re.escape(writer)}\s*\.\s*WriteHeader\s*\(\s*(?P<status>http\s*\.\s*Status[A-Za-z]+|[45]\d\d)\s*\)",
     )
     contracts: list[ErrorContract] = []
@@ -702,13 +702,20 @@ def _go_http_error_contracts(
                 protocol="http",
                 transport_code=str(status),
                 public_code=None,
-                exposes_internal_detail=False,
+                exposes_internal_detail=_go_http_error_exposes_internal_detail(match.groupdict().get("detail")),
                 retryability="retryable" if status == 429 else "not_retryable",
                 evidence=_declaration_match_evidence(
                     path, root, function.declaration, declaration, match.start(), match.end(),
                 ),
             ))
     return contracts
+
+
+def _go_http_error_exposes_internal_detail(detail: str | None) -> bool:
+    """Recognize only a conventional error value sent directly through http.Error."""
+    if detail is None:
+        return False
+    return re.fullmatch(r"\s*(?:err|error)\s*\.\s*Error\s*\(\s*\)\s*", detail) is not None
 
 
 def _go_response_writer_name(declaration: str) -> str | None:
