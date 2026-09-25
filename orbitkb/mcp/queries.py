@@ -709,6 +709,7 @@ def describe_runtime_configuration(
     source_import_workloads: object = None, source_import_declaration_statuses: object = None,
     source_import_availabilities: object = None, binding_declaration_statuses: object = None,
     binding_source_kinds: object = None, source_import_source_kinds: object = None,
+    source_import_container_roles: object = None,
 ) -> dict:
     """Return source-proven Kubernetes configuration references without values."""
     error = _validate_pagination(limit, offset)
@@ -764,6 +765,13 @@ def describe_runtime_configuration(
     )
     if source_import_source_kinds_error is not None:
         return {"error": source_import_source_kinds_error}
+    selected_source_import_container_roles, source_import_container_roles_error = _runtime_configuration_choice_filter(
+        source_import_container_roles,
+        "source_import_container_roles",
+        ("application", "initialization", "unknown"),
+    )
+    if source_import_container_roles_error is not None:
+        return {"error": source_import_container_roles_error}
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -780,6 +788,10 @@ def describe_runtime_configuration(
     if selected_source_import_source_kinds is not None:
         all_source_imports = _filter_runtime_configuration_source_kinds(
             all_source_imports, selected_source_import_source_kinds,
+        )
+    if selected_source_import_container_roles is not None:
+        all_source_imports = _filter_runtime_configuration_source_import_container_roles(
+            all_source_imports, selected_source_import_container_roles,
         )
     mismatches_by_reference = {
         (
@@ -914,6 +926,21 @@ def _filter_runtime_configuration_source_kinds(
 ) -> list[sqlite3.Row]:
     """Keep only records whose source kind is one of the explicit literal kinds."""
     return [record for record in records if record["source_kind"] in source_kinds]
+
+
+def _filter_runtime_configuration_source_import_container_roles(
+    records: list[sqlite3.Row], container_roles: set[str],
+) -> list[sqlite3.Row]:
+    """Keep imports whose indexed container role is explicitly selected."""
+    return [
+        record for record in records
+        if _runtime_configuration_source_import_container_role(record) in container_roles
+    ]
+
+
+def _runtime_configuration_source_import_container_role(item: sqlite3.Row) -> str:
+    """Normalize only an absent indexed role to unknown."""
+    return item["container_role"] or "unknown"
 
 
 def _filter_runtime_configuration_bindings(

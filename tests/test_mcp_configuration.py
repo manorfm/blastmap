@@ -186,12 +186,14 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         KubernetesConfigurationSourceImport(
             source_kind="config_map", source_name="api-defaults", prefix=None,
             workload_kind="Deployment", workload_name="orders", container_name="api",
-            file_path="deploy/orders.yaml", start_line=11, end_line=14, optional=True, matched_service_name="orders",
+            file_path="deploy/orders.yaml", start_line=11, end_line=14, container_role="initialization",
+            optional=True, matched_service_name="orders",
         ),
         KubernetesConfigurationSourceImport(
             source_kind="secret", source_name="worker-secrets", prefix=None,
             workload_kind="Deployment", workload_name="orders", container_name="worker",
-            file_path="deploy/orders.yaml", start_line=20, end_line=23, optional=False, matched_service_name="orders",
+            file_path="deploy/orders.yaml", start_line=20, end_line=23, container_role="application",
+            optional=False, matched_service_name="orders",
         ),
     ])
     kubernetes_configuration.replace_kubernetes_configuration_source_import_unknowns(conn, repository_id, [
@@ -266,6 +268,12 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         source_import_source_kinds=["secret"],
     )
     assert [item["source"]["name"] for item in secret_imports["source_imports"]] == ["worker-secrets"]
+    initialization_imports = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        source_import_container_roles=["initialization"],
+    )
+    assert [item["source"]["name"] for item in initialization_imports["source_imports"]] == ["api-defaults"]
     assert queries.describe_runtime_configuration(conn, "orders", workloads=[]) == {
         "error": "workloads must be a non-empty list of workload identities",
     }
@@ -290,6 +298,11 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         "orders",
         binding_source_kinds=["vault"],
     ) == {"error": "binding_source_kinds must contain only: config_map, secret"}
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        source_import_container_roles=["sidecar"],
+    ) == {"error": "source_import_container_roles must contain only: application, initialization, unknown"}
     assert queries.describe_runtime_configuration(
         conn,
         "orders",

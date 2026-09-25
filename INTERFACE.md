@@ -224,6 +224,9 @@ declared locally.
 not confirmation that a declaration exists.
 `binding_source_kinds` and `source_import_source_kinds` independently accept literal
 `config_map` or `secret` source kinds for each list.
+`source_import_container_roles` accepts indexed `application`, `initialization`, or
+`unknown` roles. Bindings have no corresponding filter because their role is not an
+indexed fact.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.

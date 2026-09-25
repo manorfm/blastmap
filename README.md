@@ -222,6 +222,9 @@ or `not_reported`; again, `not_reported` denotes no matching indexed finding rat
 than confirmation of a declaration.
 `binding_source_kinds` and `source_import_source_kinds` independently filter literal
 `config_map` or `secret` sources for each list.
+`source_import_container_roles` filters imports by indexed `application`,
+`initialization`, or `unknown` role. Bindings are not role-filterable because that
+fact is not indexed for them.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset
