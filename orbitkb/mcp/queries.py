@@ -706,7 +706,8 @@ def describe_configuration(
 def describe_runtime_configuration(
     conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
     repository: str | None = None, workloads: object = None, binding_workloads: object = None,
-    source_import_workloads: object = None,
+    source_import_workloads: object = None, source_import_declaration_statuses: object = None,
+    source_import_availabilities: object = None,
 ) -> dict:
     """Return source-proven Kubernetes configuration references without values."""
     error = _validate_pagination(limit, offset)
@@ -731,6 +732,20 @@ def describe_runtime_configuration(
         )
         if source_imports_error is not None:
             return {"error": source_imports_error}
+    selected_declaration_statuses, declaration_statuses_error = _runtime_configuration_choice_filter(
+        source_import_declaration_statuses,
+        "source_import_declaration_statuses",
+        ("not_declared_locally", "not_reported"),
+    )
+    if declaration_statuses_error is not None:
+        return {"error": declaration_statuses_error}
+    selected_availabilities, availabilities_error = _runtime_configuration_choice_filter(
+        source_import_availabilities,
+        "source_import_availabilities",
+        ("optional", "required", "unknown"),
+    )
+    if availabilities_error is not None:
+        return {"error": availabilities_error}
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -742,10 +757,6 @@ def describe_runtime_configuration(
         all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_binding_scopes)
     if selected_source_import_scopes is not None:
         all_source_imports = _filter_runtime_configuration_workloads(all_source_imports, selected_source_import_scopes)
-    bindings, page = _paginate(
-        all_bindings, limit, offset,
-    )
-    source_imports, source_import_page = _paginate(all_source_imports, limit, offset)
     source_import_unknowns_by_reference = {
         (
             unknown["source_kind"], unknown["source_name"], unknown["prefix"],
@@ -755,6 +766,17 @@ def describe_runtime_configuration(
             conn, row["id"],
         )
     }
+    if selected_declaration_statuses is not None or selected_availabilities is not None:
+        all_source_imports = _filter_runtime_configuration_source_imports(
+            all_source_imports,
+            source_import_unknowns_by_reference,
+            selected_declaration_statuses,
+            selected_availabilities,
+        )
+    bindings, page = _paginate(
+        all_bindings, limit, offset,
+    )
+    source_imports, source_import_page = _paginate(all_source_imports, limit, offset)
     mismatches_by_reference = {
         (
             mismatch["environment_key"], mismatch["source_kind"], mismatch["source_name"], mismatch["source_key"],
@@ -861,6 +883,66 @@ def _filter_runtime_configuration_workloads(
     ]
 
 
+def _runtime_configuration_choice_filter(
+    values: object, argument_name: str, allowed_values: tuple[str, ...],
+) -> tuple[set[str] | None, str | None]:
+    """Validate an optional finite filter without accepting inferred states."""
+    if values is None:
+        return None, None
+    if not isinstance(values, list) or not values:
+        return None, f"{argument_name} must be a non-empty list"
+    if len(values) > MAX_LIST_LIMIT or any(value not in allowed_values for value in values):
+        return None, f"{argument_name} must contain only: {', '.join(allowed_values)}"
+    return set(values), None
+
+
+def _filter_runtime_configuration_source_imports(
+    records: list[sqlite3.Row],
+    unknowns_by_reference: set[tuple[str, str, str | None, str, int, int]],
+    declaration_statuses: set[str] | None,
+    availabilities: set[str] | None,
+) -> list[sqlite3.Row]:
+    """Keep imports matching only requested static availability and finding states."""
+    return [
+        record for record in records
+        if (
+            declaration_statuses is None
+            or _runtime_configuration_source_import_declaration_status(record, unknowns_by_reference)
+            in declaration_statuses
+        )
+        and (
+            availabilities is None
+            or _runtime_configuration_source_import_availability(record) in availabilities
+        )
+    ]
+
+
+def _runtime_configuration_source_import_declaration_status(
+    item: sqlite3.Row, unknowns_by_reference: set[tuple[str, str, str | None, str, int, int]],
+) -> str:
+    """Return the stored declaration-finding state without claiming source ownership."""
+    if _runtime_configuration_source_import_reference_key(item) in unknowns_by_reference:
+        return "not_declared_locally"
+    return "not_reported"
+
+
+def _runtime_configuration_source_import_availability(item: sqlite3.Row) -> str:
+    """Normalize literal optionality while retaining absent metadata as unknown."""
+    if item["optional"] is None:
+        return "unknown"
+    return "optional" if item["optional"] else "required"
+
+
+def _runtime_configuration_source_import_reference_key(
+    item: sqlite3.Row,
+) -> tuple[str, str, str | None, str, int, int]:
+    """Build the persisted identity shared by source-import findings and output shaping."""
+    return (
+        item["source_kind"], item["source_name"], item["prefix"],
+        item["file_path"], item["start_line"], item["end_line"],
+    )
+
+
 def _runtime_configuration_source_import(
     item: sqlite3.Row, source_import_unknowns_by_reference: set[tuple[str, str, str | None, str, int, int]],
 ) -> dict:
@@ -880,10 +962,7 @@ def _runtime_configuration_source_import(
         response["prefix"] = item["prefix"]
     if item["optional"] is not None:
         response["availability"] = "optional" if item["optional"] else "required"
-    if (
-        item["source_kind"], item["source_name"], item["prefix"],
-        item["file_path"], item["start_line"], item["end_line"],
-    ) in source_import_unknowns_by_reference:
+    if _runtime_configuration_source_import_reference_key(item) in source_import_unknowns_by_reference:
         response["declaration"] = {"status": "not_declared_locally"}
     return response
 

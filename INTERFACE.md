@@ -215,6 +215,10 @@ stable indexed order, not the supplied filter order.
 Use `binding_workloads` and `source_import_workloads` to select different scopes for
 each list; these independent filters cannot be combined with the general `workloads`
 filter.
+For imports, `source_import_declaration_statuses` accepts `not_declared_locally` or
+`not_reported`; `source_import_availabilities` accepts `optional`, `required`, or
+`unknown`. `not_reported` means no matching indexed finding, not that the source is
+declared locally.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.

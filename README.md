@@ -213,6 +213,10 @@ already verified workload references. It accepts at most 500 identities; duplica
 do not change the result, which remains in stable indexed order rather than request order.
 Use `binding_workloads` and `source_import_workloads` when the two lists need different
 scopes; they cannot be combined with the general `workloads` filter.
+For imports, `source_import_declaration_statuses` filters `not_declared_locally` or
+`not_reported` findings, while `source_import_availabilities` filters `optional`,
+`required`, or `unknown`. `not_reported` means no matching indexed finding, not proof
+that a declaration exists.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset
