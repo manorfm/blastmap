@@ -49,6 +49,7 @@ from orbitkb.analysis.models import (
     FeatureFlag,
     FlowBoundary,
     FlowEdge,
+    GrpcClientBinding,
     GrpcHandler,
     Injection,
     MessageContract,
@@ -63,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "11"
+STATIC_ANALYSIS_INPUT_VERSION = "12"
 
 
 def _walk(node: Node):
@@ -972,6 +973,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         command_imports = node_command_imports(source_text)
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
         result.grpc_handlers.extend(_node_nest_grpc_handlers(tree, source, path, root, imports))
+        result.grpc_client_bindings.extend(_node_nest_grpc_client_bindings(tree, source, path, root, imports))
         for injection in _node_nest_constructor_injections(tree, source, path, root, imports):
             result.injections.append(injection)
             result.edges.append(FlowEdge(injection.consumer, injection.contract, "injects", injection.evidence))
@@ -2387,6 +2389,99 @@ def _node_nest_grpc_handlers(
     return handlers
 
 
+def _node_nest_grpc_client_bindings(
+    tree: Node, source: bytes, path: Path, root: Path, imports: tuple[tuple[str, str], ...],
+) -> list[GrpcClientBinding]:
+    """Return literal Nest ``ClientGrpc.getService`` assignments in Nest classes."""
+    nest_imports = {
+        local: imported.rsplit(".", 1)[-1]
+        for local, imported in imports
+        if imported.startswith("common.")
+    }
+    client_types = {local for local, imported in imports if imported == "microservices.ClientGrpc"}
+    if not client_types or not {"Controller", "Injectable"}.intersection(nest_imports.values()):
+        return []
+    bindings: list[GrpcClientBinding] = []
+    for class_node in _walk(tree):
+        if class_node.type != "class_declaration":
+            continue
+        class_name = class_node.child_by_field_name("name")
+        class_body = class_node.child_by_field_name("body")
+        if class_name is None or class_body is None:
+            continue
+        class_decorators = _preceding_decorators(class_node)
+        is_controller = _nest_decorator_path(class_decorators, source, nest_imports, "Controller") is not None
+        is_injectable = any(
+            _nest_direct_decorator(decorator, source, nest_imports, "Injectable")
+            for decorator in class_decorators
+        )
+        if not is_controller and not is_injectable:
+            continue
+        clients = _node_constructor_members_of_types(class_body, source, client_types)
+        if not clients:
+            continue
+        for node in _walk(class_body):
+            if node.type != "assignment_expression":
+                continue
+            member = _node_this_member(node.child_by_field_name("left"), source)
+            value = node.child_by_field_name("right")
+            if member is None or value is None or value.type != "call_expression":
+                continue
+            function = value.child_by_field_name("function")
+            arguments = value.child_by_field_name("arguments")
+            args = arguments.named_children if arguments is not None else []
+            if (
+                function is None
+                or len(args) != 1
+                or not any(_text(function, source) == f"this.{client}.getService" for client in clients)
+            ):
+                continue
+            service = _string(args[0], source)
+            if service is not None:
+                bindings.append(GrpcClientBinding(
+                    _text(class_name, source), member, service, _evidence(path, root, node),
+                ))
+    return bindings
+
+
+def _node_constructor_members_of_types(
+    class_body: Node, source: bytes, accepted_types: set[str],
+) -> set[str]:
+    members: set[str] = set()
+    for method in class_body.named_children:
+        name = method.child_by_field_name("name") if method.type == "method_definition" else None
+        if name is None or _text(name, source) != "constructor":
+            continue
+        parameters = method.child_by_field_name("parameters")
+        if parameters is None:
+            continue
+        for parameter in parameters.named_children:
+            if not any(child.type == "accessibility_modifier" for child in parameter.named_children):
+                continue
+            pattern = parameter.child_by_field_name("pattern")
+            annotation = parameter.child_by_field_name("type")
+            type_nodes = annotation.named_children if annotation is not None else []
+            if (
+                pattern is not None
+                and pattern.type == "identifier"
+                and len(type_nodes) == 1
+                and type_nodes[0].type == "type_identifier"
+                and _text(type_nodes[0], source) in accepted_types
+            ):
+                members.add(_text(pattern, source))
+    return members
+
+
+def _node_this_member(node: Node | None, source: bytes) -> str | None:
+    if node is None or node.type != "member_expression":
+        return None
+    object_node = node.child_by_field_name("object")
+    property_node = node.child_by_field_name("property")
+    if object_node is None or property_node is None or object_node.type != "this":
+        return None
+    return _text(property_node, source)
+
+
 def _node_nest_constructor_injections(
     tree: Node, source: bytes, path: Path, root: Path, imports: tuple[tuple[str, str], ...],
 ) -> list[Injection]:
@@ -2807,6 +2902,7 @@ class StaticAnalysisEngine:
         _enrich_openapi_contracts(result, root)
         _enrich_protobuf_contracts(result, root)
         _link_nest_grpc_handlers(result)
+        _link_nest_grpc_client_calls(result)
         result.configuration_bindings.extend(_literal_configuration_bindings(result.symbols, root))
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
@@ -3295,6 +3391,43 @@ def _link_nest_grpc_handlers(result: AnalysisResult) -> None:
     This establishes source-level intent only. It does not claim a transport
     server, generated stubs or runtime registration is present.
     """
+    declared = _declared_protobuf_rpc_entrypoints(result)
+    handlers: dict[tuple[str, str], list[GrpcHandler]] = {}
+    for handler in result.grpc_handlers:
+        handlers.setdefault((handler.service, handler.rpc), []).append(handler)
+    for key, rpc_entrypoints in declared.items():
+        matching_handlers = handlers.get(key, [])
+        if len(rpc_entrypoints) != 1 or len(matching_handlers) != 1:
+            continue
+        entrypoint = rpc_entrypoints[0]
+        handler = matching_handlers[0]
+        result.edges.append(FlowEdge(entrypoint.symbol, handler.symbol, "invokes", handler.evidence))
+
+
+def _link_nest_grpc_client_calls(result: AnalysisResult) -> None:
+    """Replace an unambiguous literal Nest stub call with its declared RPC symbol."""
+    bindings: dict[tuple[str, str], list[GrpcClientBinding]] = {}
+    for binding in result.grpc_client_bindings:
+        bindings.setdefault((binding.owner, binding.member), []).append(binding)
+    declared = _declared_protobuf_rpc_entrypoints(result)
+    linked_edges: list[FlowEdge] = []
+    for edge in result.edges:
+        receiver, separator, rpc = edge.target.rpartition(".")
+        owner = edge.source.split(".", 1)[0]
+        matching_bindings = bindings.get((owner, receiver.removeprefix("this.")), []) if separator else []
+        if len(matching_bindings) != 1:
+            linked_edges.append(edge)
+            continue
+        binding = matching_bindings[0]
+        rpc_entrypoints = declared.get((binding.service, rpc), [])
+        if len(rpc_entrypoints) != 1:
+            linked_edges.append(edge)
+            continue
+        linked_edges.append(replace(edge, target=rpc_entrypoints[0].symbol, confidence="high"))
+    result.edges = linked_edges
+
+
+def _declared_protobuf_rpc_entrypoints(result: AnalysisResult) -> dict[tuple[str, str], list[EntryPoint]]:
     declared: dict[tuple[str, str], list[EntryPoint]] = {}
     for entrypoint in result.entrypoints:
         if entrypoint.kind != "grpc":
@@ -3306,16 +3439,7 @@ def _link_nest_grpc_handlers(result: AnalysisResult) -> None:
         rpc = contract.get("rpc")
         if isinstance(service, str) and isinstance(rpc, str):
             declared.setdefault((service, rpc), []).append(entrypoint)
-    handlers: dict[tuple[str, str], list[GrpcHandler]] = {}
-    for handler in result.grpc_handlers:
-        handlers.setdefault((handler.service, handler.rpc), []).append(handler)
-    for key, rpc_entrypoints in declared.items():
-        matching_handlers = handlers.get(key, [])
-        if len(rpc_entrypoints) != 1 or len(matching_handlers) != 1:
-            continue
-        entrypoint = rpc_entrypoints[0]
-        handler = matching_handlers[0]
-        result.edges.append(FlowEdge(entrypoint.symbol, handler.symbol, "invokes", handler.evidence))
+    return declared
 
 
 def _protobuf_rpcs(root: Path) -> list[_ProtobufRpc]:

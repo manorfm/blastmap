@@ -118,6 +118,16 @@ class GrpcHandler:
 
 
 @dataclass(frozen=True)
+class GrpcClientBinding:
+    """A direct Nest ClientGrpc service-stub assignment."""
+
+    owner: str
+    member: str
+    service: str
+    evidence: Evidence
+
+
+@dataclass(frozen=True)
 class ResiliencePolicy:
     """A literal timeout or retry limit declared by a local source symbol."""
 
@@ -198,6 +208,7 @@ class AnalysisResult:
     error_contracts: list[ErrorContract] = field(default_factory=list)
     static_service_calls: list[StaticServiceCall] = field(default_factory=list)
     grpc_handlers: list[GrpcHandler] = field(default_factory=list)
+    grpc_client_bindings: list[GrpcClientBinding] = field(default_factory=list)
     resilience_policies: list[ResiliencePolicy] = field(default_factory=list)
     persistence_facts: list[PersistenceFact] = field(default_factory=list)
     migration_facts: list[MigrationFact] = field(default_factory=list)
@@ -216,6 +227,7 @@ class AnalysisResult:
         self.error_contracts.extend(other.error_contracts)
         self.static_service_calls.extend(other.static_service_calls)
         self.grpc_handlers.extend(other.grpc_handlers)
+        self.grpc_client_bindings.extend(other.grpc_client_bindings)
         self.resilience_policies.extend(other.resilience_policies)
         self.persistence_facts.extend(other.persistence_facts)
         self.migration_facts.extend(other.migration_facts)

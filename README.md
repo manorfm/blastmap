@@ -334,9 +334,11 @@ package, request/response types, streaming flags, imports and source evidence. T
 describe the declared wire contract only. When one uniquely declared RPC has one Nest
 `@GrpcMethod("Service", "Method")` handler imported from `@nestjs/microservices`,
 the entrypoint flow links to that method. This is code-level intent, not proof of a
-server, generated stub or runtime registration. Clients and dynamic decorator arguments
-remain unknown. Duplicate service/RPC declarations or handlers are omitted rather than
-arbitrarily selecting one.
+server, generated stub or runtime registration. A Nest `ClientGrpc` imported from the
+same package can also link a direct `this.client.getService<T>("Service")` assignment
+and subsequent literal RPC method call to one unique declared RPC. Host, channel, token,
+stub generation, dynamic bindings and non-unique service/RPC names remain unknown.
+Duplicate declarations or handlers are omitted rather than arbitrarily selecting one.
 
 `describe_configuration` lists literal environment-variable keys read by local
 Node/TypeScript, Java/Kotlin and Go symbols, plus Java/Kotlin `System.getProperty`
