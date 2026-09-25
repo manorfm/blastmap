@@ -33,10 +33,14 @@
     },
     "evidence_follow_up": {
       "type": "object",
-      "required": ["reason", "workloads", "recommended_query"],
+      "required": ["reason", "recommended_next_step", "workloads", "recommended_query"],
       "additionalProperties": false,
       "properties": {
         "reason": {"type": "string"},
+        "recommended_next_step": {
+          "type": "string",
+          "enum": ["inspect_change_unit_evidence", "query_runtime_configuration"]
+        },
         "workloads": {
           "type": "array",
           "minItems": 1,

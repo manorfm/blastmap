@@ -186,6 +186,8 @@ Truncated scopes also report `evidence_total`.
 `describe_change_unit` adds `evidence_follow_up` only in that case, directing the
 agent to complete runtime-configuration context and listing the affected
 workloads/containers.
+Its `recommended_next_step` favors the complete unit evidence for up to five known
+locations, and otherwise directs a runtime-configuration query.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

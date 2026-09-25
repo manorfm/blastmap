@@ -63,6 +63,7 @@ from orbitkb.generation.verification import (
 DEFAULT_LIST_LIMIT = 50
 MAX_RUNTIME_SOURCES_PER_CONFIGURATION_BINDING = 3
 MAX_LIST_LIMIT = 500
+MAX_INLINE_WORKLOAD_EVIDENCE = 5
 DEFAULT_FLOW_EDGE_LIMIT = 50
 MAX_FLOW_EDGE_LIMIT = 200
 DEFAULT_PLAN_TOKEN_BUDGET = 2200
@@ -1386,6 +1387,7 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
     if truncated_workloads:
         response["evidence_follow_up"] = {
             "reason": "workload evidence is truncated",
+            "recommended_next_step": _truncated_workload_evidence_next_step(truncated_workloads),
             "workloads": truncated_workloads,
             "recommended_query": {
                 "tool": "describe_runtime_configuration", "arguments": {"service": change_unit["service"]},
@@ -1523,6 +1525,16 @@ def _truncated_workload_scopes(change_unit: dict) -> list[dict]:
         if scope not in scopes:
             scopes.append(scope)
     return scopes
+
+
+def _truncated_workload_evidence_next_step(workloads: list[dict]) -> str:
+    """Choose the smallest safe next action from persisted evidence counts."""
+    totals = [workload.get("evidence_total") for workload in workloads]
+    if any(not isinstance(total, int) or isinstance(total, bool) or total < 1 for total in totals):
+        return "query_runtime_configuration"
+    if max(totals, default=0) <= MAX_INLINE_WORKLOAD_EVIDENCE:
+        return "inspect_change_unit_evidence"
+    return "query_runtime_configuration"
 
 
 def _kubernetes_workload_reading_scope(target: dict) -> str | None:

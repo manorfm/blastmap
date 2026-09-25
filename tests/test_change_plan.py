@@ -700,6 +700,7 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
 
     assert detail["evidence_follow_up"] == {
         "reason": "workload evidence is truncated",
+        "recommended_next_step": "inspect_change_unit_evidence",
         "workloads": [{
             "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 3,
         }],
@@ -725,6 +726,16 @@ def test_truncated_workload_scopes_are_grouped_and_validated():
         {"kind": "Deployment", "name": "checkout", "container": "api"},
         {"kind": "Deployment", "name": "checkout", "container": "worker"},
     ]
+
+
+def test_truncated_workload_evidence_next_step_uses_count_or_a_safe_legacy_fallback():
+    assert queries._truncated_workload_evidence_next_step([{"evidence_total": 5}]) == (
+        "inspect_change_unit_evidence"
+    )
+    assert queries._truncated_workload_evidence_next_step([{"evidence_total": 6}]) == (
+        "query_runtime_configuration"
+    )
+    assert queries._truncated_workload_evidence_next_step([{}]) == "query_runtime_configuration"
 
 
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():

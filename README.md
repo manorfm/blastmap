@@ -185,6 +185,9 @@ For a truncated scope, `evidence_total` makes that remaining evidence volume exp
 When that flag is present, `describe_change_unit` returns an `evidence_follow_up`
 query for the complete runtime-configuration context, scoped to the affected
 workloads and containers.
+For up to five known evidence locations it recommends reading the complete unit evidence
+first; otherwise (or for legacy plans without a count) it recommends the runtime
+configuration query.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned
