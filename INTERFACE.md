@@ -177,7 +177,11 @@ high-confidence static finding that a known local client/domain error maps to HT
 this is advisory, since middleware and gateways are not proved. It may include an
 `error-exposure` review unit for a high-confidence source-proven public response that
 directly includes an internal error detail; the unit contains only source evidence and
-safe-response validation, never the detail. `ready` means a
+safe-response validation, never the detail. A primary caller can also receive a
+`downstream-error-mapping` review only when a source-proven static HTTP call resolves
+to an indexed downstream endpoint flow with a known 4xx contract; service-wide or
+ambiguous contracts are excluded. The unit keeps the downstream service as a
+dependency and asks for an explicit boundary translation review. `ready` means a
 relevant indexed surface exists without a blocking decision; `needs_decision` means the
 compatibility choice is required; and `insufficient_evidence` means no indexed service
 matched the task. The audit record links to a surface synthesis when one exists and does

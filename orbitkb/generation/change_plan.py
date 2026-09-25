@@ -112,7 +112,7 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
     Architecture findings use ``possible_`` because middleware and gateway behavior
     remain unknown. This function preserves that uncertainty by creating a review,
     never an automatic code change, and requires the detector's high-confidence,
-    source-backed intra-service evidence.
+    source-backed evidence appropriate to each detector.
     """
     units: list[dict] = []
     seen: set[tuple[str, str, str, str]] = set()
@@ -120,15 +120,22 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
         kind = finding.get("kind")
         if kind not in {
             "possible_error_semantics_lost", "possible_internal_error_exposure",
-            "possible_unhandled_endpoint_error",
+            "possible_unhandled_endpoint_error", "possible_unmapped_downstream_error",
         }:
             continue
         services = finding.get("services")
         detail = finding.get("detail")
         confidence = finding.get("confidence")
-        if (
+        if not isinstance(detail, dict) or not isinstance(confidence, (int, float)):
+            continue
+        if kind == "possible_unmapped_downstream_error":
+            if (
+                not isinstance(services, list) or len(services) != 2 or services[0] not in primary_services
+                or confidence < 0.75 or detail.get("scope") != "endpoint_flow"
+            ):
+                continue
+        elif (
             not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
-            or not isinstance(detail, dict) or not isinstance(confidence, (int, float))
             or confidence < (0.75 if kind == "possible_unhandled_endpoint_error" else 0.8)
         ):
             continue
@@ -161,6 +168,52 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
                 "dependencies": [],
                 "validation": [
                     "verify the response returns a stable public error code/message and keeps diagnostic detail internal",
+                ],
+                "confidence": float(confidence),
+                "evidence": evidence,
+            })
+            continue
+        if kind == "possible_unmapped_downstream_error":
+            caller = detail.get("caller")
+            downstream = detail.get("downstream")
+            evidence = detail.get("evidence")
+            if (
+                not isinstance(caller, dict) or not isinstance(downstream, dict) or not isinstance(evidence, list)
+                or caller.get("service") != service or not isinstance(caller.get("symbol"), str)
+                or not isinstance(caller.get("method"), str) or not isinstance(caller.get("path"), str)
+                or downstream.get("service") != services[1] or not isinstance(downstream.get("error_type"), str)
+                or not isinstance(downstream.get("status"), str) or not evidence
+            ):
+                continue
+            caller_symbol = caller["symbol"]
+            method = caller["method"]
+            path = caller["path"]
+            downstream_service = downstream["service"]
+            error_type = downstream["error_type"]
+            status = downstream["status"]
+            public_code = downstream.get("public_code")
+            contract = f"{downstream_service} HTTP {status}"
+            if isinstance(public_code, str):
+                contract = f"{contract} {public_code}"
+            key = service, "unmapped-downstream", caller_symbol, f"{downstream_service}:{error_type}:{status}"
+            if key in seen:
+                continue
+            seen.add(key)
+            units.append({
+                "id": (
+                    f"downstream-error-mapping:{service}:{caller_symbol}:"
+                    f"{downstream_service}:{error_type}:{status}"
+                ),
+                "service": service,
+                "target": {"role": "error_mapping", "symbol": caller_symbol, "evidence": evidence},
+                "action": "review",
+                "reason": finding.get("reason", "review the indexed downstream client-error boundary"),
+                "preconditions": [],
+                "related_contracts": [f"{method} {path}", contract, f"error:{error_type}"],
+                "dependencies": [downstream_service],
+                "validation": [
+                    f"verify {caller_symbol} or its boundary maps {downstream_service} HTTP {status} "
+                    f"for {error_type} to the documented client response",
                 ],
                 "confidence": float(confidence),
                 "evidence": evidence,

@@ -1061,6 +1061,56 @@ def test_error_mapping_units_include_a_reachable_endpoint_without_a_local_mappin
     }]
 
 
+def test_error_mapping_units_include_a_proven_downstream_endpoint_contract_gap():
+    assert derive_error_mapping_review_units([
+        {
+            "kind": "possible_unmapped_downstream_error",
+            "services": ["checkout-service", "inventory-service"],
+            "reason": "checkout-service POST /orders calls inventory-service without a local stock mapping.",
+            "confidence": 0.75,
+            "detail": {
+                "caller": {
+                    "service": "checkout-service", "symbol": "CheckoutService.submit",
+                    "method": "POST", "path": "/orders",
+                },
+                "downstream": {
+                    "service": "inventory-service", "symbol": "InventoryService.reserve",
+                    "error_type": "InsufficientStock", "kind": "conflict",
+                    "status": "409", "public_code": "OUT_OF_STOCK",
+                },
+                "scope": "endpoint_flow",
+                "evidence": [
+                    {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
+                    {"file": "InventoryService.java", "start_line": 31, "end_line": 31},
+                ],
+            },
+        },
+    ], {"checkout-service"}) == [{
+        "id": "downstream-error-mapping:checkout-service:CheckoutService.submit:inventory-service:InsufficientStock:409",
+        "service": "checkout-service",
+        "target": {
+            "role": "error_mapping", "symbol": "CheckoutService.submit",
+            "evidence": [
+                {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
+                {"file": "InventoryService.java", "start_line": 31, "end_line": 31},
+            ],
+        },
+        "action": "review",
+        "reason": "checkout-service POST /orders calls inventory-service without a local stock mapping.",
+        "preconditions": [],
+        "related_contracts": ["POST /orders", "inventory-service HTTP 409 OUT_OF_STOCK", "error:InsufficientStock"],
+        "dependencies": ["inventory-service"],
+        "validation": [
+            "verify CheckoutService.submit or its boundary maps inventory-service HTTP 409 for InsufficientStock to the documented client response",
+        ],
+        "confidence": 0.75,
+        "evidence": [
+            {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
+            {"file": "InventoryService.java", "start_line": 31, "end_line": 31},
+        ],
+    }]
+
+
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
     assert derive_runtime_configuration_review_units(
         {"checkout-service": [{

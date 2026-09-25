@@ -164,6 +164,11 @@ The same high-confidence threshold creates an `error-exposure` review when an in
 public error response directly includes an internal detail. Its validation asks for a
 stable public code/message and internal diagnostic logging; it never includes the
 detail itself in the plan.
+For a primary caller, a source-proven static HTTP call whose indexed downstream
+endpoint flow exposes a 4xx without a local mapping creates a
+`downstream-error-mapping` review. It includes the remote service as a dependency and
+asks the agent to verify a deliberate boundary translation; service-wide or ambiguous
+downstream contracts are excluded.
 When an affected SQL table has an exactly matching indexed migration fact,
 `plan_change` adds a schema-review unit. A destructive operation requires deployment,
 backup and rollback validation; it never asserts that the migration needs to run.
