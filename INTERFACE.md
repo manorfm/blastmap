@@ -130,7 +130,7 @@ need to verify initialization completes before application containers start. Whe
 both roles occur, `container_roles` is lifecycle-ordered: `initialization`, then
 `application`. The finding also includes its proven workload/container scope when
 available, including each scope's known prefixes; legacy snapshots omit it rather
-than guessing.
+than guessing. Each scope also retains its own source file/line evidence.
 
 `describe_feature_flags` returns literal reads through a locally proven feature-flag
 SDK, currently LaunchDarkly's Node server SDK. It returns key, provider and source

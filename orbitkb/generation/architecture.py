@@ -1975,7 +1975,7 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
         workloads = ordered_kubernetes_workloads(
             (
                 row["workload_kind"], row["workload_name"], row["container_name"], row["container_role"],
-                row["prefix"],
+                row["prefix"], row["reference_file_path"], row["reference_start_line"], row["reference_end_line"],
             )
             for row in imports
         )

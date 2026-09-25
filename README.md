@@ -273,7 +273,8 @@ an initialization container imports the source, the review also checks that it
 completes before application containers start. When both roles import it, the detail
 orders them by lifecycle: `initialization`, then `application`. It includes the
 proven workload/container scope and each scope's known prefixes when available;
-legacy snapshots omit that scope.
+it also keeps that scope's source file/line evidence. Legacy snapshots omit this
+context rather than guessing it.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and

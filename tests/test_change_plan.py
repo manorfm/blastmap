@@ -551,10 +551,12 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
                 {
                     "kind": "Deployment", "name": "checkout", "container": "migrate",
                     "container_role": "initialization", "prefixes": ["ORDERS_"],
+                    "evidence": [{"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 15}],
                 },
                 {
                     "kind": "Deployment", "name": "checkout", "container": "api",
                     "container_role": "application", "prefixes": ["PAYMENTS_"],
+                    "evidence": [{"file": "deploy/checkout.yaml", "start_line": 20, "end_line": 23}],
                 },
             ],
         },

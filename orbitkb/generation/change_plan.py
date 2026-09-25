@@ -539,8 +539,11 @@ def derive_runtime_configuration_source_import_unknown_review_units(
                 if container_role in {"application", "initialization"}
             }
             workloads = ordered_kubernetes_workloads(
-                (workload_kind, workload_name, container_name, container_role, prefix)
-                for _reference, _optional, container_role, workload_kind, workload_name, container_name, prefix in records
+                (
+                    workload_kind, workload_name, container_name, container_role, prefix, reference["file"],
+                    reference["start_line"], reference["end_line"],
+                )
+                for reference, _optional, container_role, workload_kind, workload_name, container_name, prefix in records
             )
             availability = (
                 "optional" if availability_values == {True}

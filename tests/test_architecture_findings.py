@@ -187,6 +187,11 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
                 "kind": "Deployment", "name": "orders", "container": "migrate",
                 "container_role": "initialization", "prefixes": ["ORDERS_", "PAYMENTS_"],
                 "includes_unprefixed_import": True,
+                "evidence": [
+                    {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15},
+                    {"file": "deploy/orders.yaml", "start_line": 20, "end_line": 23},
+                    {"file": "deploy/orders.yaml", "start_line": 28, "end_line": 30},
+                ],
             }],
             "evidence": [
                 {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15},
@@ -237,10 +242,12 @@ def test_kubernetes_env_from_source_unknown_orders_initialization_before_applica
         {
             "kind": "Deployment", "name": "orders", "container": "migrate", "container_role": "initialization",
             "includes_unprefixed_import": True,
+            "evidence": [{"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15}],
         },
         {
             "kind": "Deployment", "name": "orders", "container": "api", "container_role": "application",
             "includes_unprefixed_import": True,
+            "evidence": [{"file": "deploy/orders.yaml", "start_line": 20, "end_line": 23}],
         },
     ]
     assert detail["unknowns"].count(
