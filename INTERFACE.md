@@ -191,6 +191,9 @@ locations, and otherwise directs a runtime-configuration query.
 That query path includes an initial `pagination` guide; continue only when
 `source_import_truncated` is returned, using its `next_offset` with the same
 workload selection; stop when all selected workloads are found.
+Call `validate_runtime_configuration_follow_up` after a page with its returned
+workload identities and `source_import_truncated`; it deterministically reports
+whether a further page is useful.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

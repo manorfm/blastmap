@@ -191,6 +191,9 @@ configuration query.
 For that query path, the follow-up supplies an initial pagination guide and asks
 the agent to continue at `next_offset` only when `source_import_truncated` is
 returned, stopping as soon as all selected workloads are found.
+After each runtime-configuration page, `validate_runtime_configuration_follow_up`
+compares its returned workload identities with the persisted target and reports
+whether another page is useful.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

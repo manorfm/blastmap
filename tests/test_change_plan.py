@@ -709,6 +709,36 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         },
     }
     validate(detail, load_schema("describe_change_unit"))
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [{"kind": "Deployment", "name": "checkout", "container": "api"}],
+        source_import_truncated=True,
+    ) == {
+        "plan_id": plan["plan_id"],
+        "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        "status": "complete",
+        "matched_workloads": [{
+            "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 3,
+        }],
+        "missing_workloads": [],
+        "continue_pagination": False,
+    }
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
+        source_import_truncated=True,
+    )["status"] == "needs_next_page"
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
+        source_import_truncated=False,
+    )["status"] == "incomplete"
 
 
 def test_truncated_workload_scopes_are_grouped_and_validated():

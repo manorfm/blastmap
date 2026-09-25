@@ -9,7 +9,7 @@ from orbitkb.db.connection import open_db
 from orbitkb.generation.orchestrator import index_path
 from tests.mcp_test_helpers import content_json as _content_json
 from tests.mcp_test_helpers import server_params
-from tests.test_orchestrator import FakeOrchestratorBackend, SAMPLE_ROOT
+from tests.test_orchestrator import SAMPLE_ROOT, FakeOrchestratorBackend
 
 
 @pytest.mark.anyio
@@ -24,6 +24,9 @@ async def test_mcp_progressive_disclosure_flow(tmp_path: Path):
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
+
+            tools = await session.list_tools()
+            assert "validate_runtime_configuration_follow_up" in {tool.name for tool in tools.tools}
 
             services = _content_json(await session.call_tool("list_services", {}))
             names = {s["name"] for s in services["services"]}

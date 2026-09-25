@@ -1388,6 +1388,54 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
     return response
 
 
+def validate_runtime_configuration_follow_up(
+    conn: sqlite3.Connection, plan_id: str, change_unit_id: str, returned_workloads: object,
+    source_import_truncated: object,
+) -> dict:
+    """Compare one runtime-configuration page with a truncated change-unit target."""
+    if not isinstance(returned_workloads, list):
+        return {"error": "returned_workloads must be a list"}
+    if not isinstance(source_import_truncated, bool):
+        return {"error": "source_import_truncated must be a boolean"}
+    match = re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)
+    if match is None:
+        return {"error": "invalid plan_id"}
+    stored_plan = change_plans_repo.get_plan(conn, int(match.group(1)))
+    if stored_plan is None:
+        return {"error": f"unknown plan_id: {plan_id}"}
+    change_unit = next(
+        (unit for unit in json.loads(stored_plan["change_units_json"]) if unit.get("id") == change_unit_id),
+        None,
+    )
+    if change_unit is None:
+        return {"error": f"unknown change_unit_id: {change_unit_id}"}
+    expected_workloads = _truncated_workload_scopes(change_unit)
+    if not expected_workloads:
+        return {"error": "change unit has no truncated workload evidence"}
+    returned_keys = {
+        scope for workload in returned_workloads if (scope := _workload_scope_key(workload)) is not None
+    }
+    matched_workloads = [
+        workload for workload in expected_workloads if _workload_scope_key(workload) in returned_keys
+    ]
+    missing_workloads = [
+        workload for workload in expected_workloads if _workload_scope_key(workload) not in returned_keys
+    ]
+    status = (
+        "complete" if not missing_workloads
+        else "needs_next_page" if source_import_truncated
+        else "incomplete"
+    )
+    return {
+        "plan_id": plan_id,
+        "change_unit_id": change_unit_id,
+        "status": status,
+        "matched_workloads": matched_workloads,
+        "missing_workloads": missing_workloads,
+        "continue_pagination": status == "needs_next_page",
+    }
+
+
 def assess_working_change(
     conn: sqlite3.Connection, plan_id: str, repository: str, since_commit: str,
 ) -> dict:
@@ -1507,9 +1555,9 @@ def _truncated_workload_scopes(change_unit: dict) -> list[dict]:
     for workload in target["workloads"]:
         if not isinstance(workload, dict) or workload.get("evidence_truncated") is not True:
             continue
-        kind, name, container = (workload.get(field) for field in ("kind", "name", "container"))
-        if not all(isinstance(value, str) and value for value in (kind, name, container)):
+        if (scope_key := _workload_scope_key(workload)) is None:
             continue
+        kind, name, container = scope_key
         scope = {"kind": kind, "name": name, "container": container}
         evidence_total = workload.get("evidence_total")
         if isinstance(evidence_total, int) and not isinstance(evidence_total, bool) and evidence_total > 0:
@@ -1517,6 +1565,16 @@ def _truncated_workload_scopes(change_unit: dict) -> list[dict]:
         if scope not in scopes:
             scopes.append(scope)
     return scopes
+
+
+def _workload_scope_key(workload: object) -> tuple[str, str, str] | None:
+    """Normalize a workload identity without trusting optional evidence fields."""
+    if not isinstance(workload, dict):
+        return None
+    kind, name, container = (workload.get(field) for field in ("kind", "name", "container"))
+    if not all(isinstance(value, str) and value for value in (kind, name, container)):
+        return None
+    return kind, name, container
 
 
 def _truncated_workload_evidence_next_step(workloads: list[dict]) -> str:
