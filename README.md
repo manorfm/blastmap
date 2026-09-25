@@ -125,6 +125,10 @@ and code location are included. It does not reread the source tree while answeri
 Repeated `find_change_surface` requests with the same backend and unchanged candidate
 context reuse their prior structured synthesis at zero model-call cost; current graph,
 freshness and contract facts are still recomputed for each response.
+`plan_change.budget.measurement` records how its response count was calculated. The
+default `byte_estimate` is explicitly approximate; install `orbitkb[tokens]` to use
+the local `tiktoken:o200k_base` tokenizer for a reproducible measurement. The method
+is persisted with the plan, so its token-budget audit metadata remains traceable.
 With the optional local semantic backend installed, semantic and keyword/graph
 candidates are blended before that synthesis, so a broad lexical match does not hide a
 relevant meaning-based candidate. This stays within the normal candidate budget and

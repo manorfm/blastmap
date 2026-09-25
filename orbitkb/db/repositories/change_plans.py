@@ -29,10 +29,12 @@ def record_plan(
     return cur.lastrowid
 
 
-def update_measurements(conn: sqlite3.Connection, plan_id: int, estimated_tokens: int, truncated: bool) -> None:
+def update_measurements(
+    conn: sqlite3.Connection, plan_id: int, estimated_tokens: int, truncated: bool, token_measurement: str,
+) -> None:
     conn.execute(
-        "UPDATE change_plan_runs SET estimated_tokens = ?, truncated = ? WHERE id = ?",
-        (estimated_tokens, int(truncated), plan_id),
+        "UPDATE change_plan_runs SET estimated_tokens = ?, truncated = ?, token_measurement = ? WHERE id = ?",
+        (estimated_tokens, int(truncated), token_measurement, plan_id),
     )
     conn.commit()
 

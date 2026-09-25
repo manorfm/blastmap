@@ -468,7 +468,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         The initial response identifies the indexed surface and explicit unknowns;
         it only adds decision points and change units whose dependencies can be proved
         from the knowledge base. Pass repository when service names are duplicated.
-        token_budget is capped at 2200 estimated response tokens.
+        token_budget is capped at 2200 measured response tokens. The response labels
+        whether its count came from the optional local tokenizer or byte estimate.
         """
         with closing(_conn()) as conn:
             return queries.plan_change(conn, resolved_backend, task, hint_services, repository, token_budget)

@@ -142,8 +142,12 @@ remain unknown.
 `plan_change` is the evidence-first planning contract. Its initial response contains
 a durable `plan_id`, `status`, the bounded
 `surface.primary`/`secondary`/`contracts_at_risk`, explicit `unknowns`, and a
-`budget` with requested and estimated response tokens. It emits an event-compatibility
-`decision_point` only when a primary producer has indexed consumers: the requester must
+`budget` with requested and estimated response tokens.
+`budget.measurement` identifies the method used: `tiktoken:o200k_base` when the
+optional local tokenizer is installed, otherwise the explicitly approximate
+`byte_estimate`. The persisted plan retains the same method with its measurement.
+It emits an event-compatibility `decision_point` only when a primary producer has
+indexed consumers: the requester must
 choose preserved compatibility or a versioned rollout before consumer changes can be
 planned. When no decision blocks the plan, `change_units` may include a review unit
 for a source-proven internal HTTP call only when its method, route and indexed remote
@@ -153,7 +157,7 @@ this is advisory, since middleware and gateways are not proved. `ready` means a
 relevant indexed surface exists without a blocking decision; `needs_decision` means the
 compatibility choice is required; and `insufficient_evidence` means no indexed service
 matched the task. The audit record links to a surface synthesis when one exists and does
-not duplicate task text. The token budget is capped at 2,200 estimated response tokens.
+not duplicate task text. The token budget is capped at 2,200 measured response tokens.
 
 A `persistence` migration-review unit is created only for an affected, evidenced SQL
 table whose name exactly matches a source-proven migration fact in the same primary

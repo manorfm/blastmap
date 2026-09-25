@@ -49,11 +49,12 @@
     "unknowns": {"type": "array", "items": {"type": "object"}},
     "budget": {
       "type": "object",
-      "required": ["requested_tokens", "estimated_tokens", "truncated"],
+      "required": ["requested_tokens", "estimated_tokens", "measurement", "truncated"],
       "additionalProperties": false,
       "properties": {
         "requested_tokens": {"type": "integer", "minimum": 1},
         "estimated_tokens": {"type": "integer", "minimum": 0},
+        "measurement": {"type": "string", "enum": ["tiktoken:o200k_base", "byte_estimate"]},
         "truncated": {"type": "boolean"}
       }
     }

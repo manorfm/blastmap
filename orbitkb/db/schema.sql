@@ -579,6 +579,7 @@ CREATE TABLE IF NOT EXISTS change_plan_runs (
     status                TEXT NOT NULL CHECK (status IN ('ready', 'needs_decision', 'insufficient_evidence', 'stale_knowledge')),
     requested_tokens      INTEGER NOT NULL CHECK (requested_tokens > 0),
     estimated_tokens      INTEGER NOT NULL CHECK (estimated_tokens >= 0),
+    token_measurement     TEXT NOT NULL DEFAULT 'byte_estimate',
     truncated             INTEGER NOT NULL CHECK (truncated IN (0, 1)),
     decision_points_json  TEXT NOT NULL DEFAULT '[]',
     selected_decisions_json TEXT NOT NULL DEFAULT '[]',

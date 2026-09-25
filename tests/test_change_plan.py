@@ -31,6 +31,7 @@ from orbitkb.generation.change_plan import (
     derive_runtime_configuration_source_import_unknown_review_units,
 )
 from orbitkb.generation.llm_harness import load_schema
+from orbitkb.generation.token_budget import TokenMeasurement
 from orbitkb.iac.models import (
     KubernetesConfigurationBinding,
     KubernetesConfigurationKeyMismatch,
@@ -60,6 +61,7 @@ def test_plan_change_wraps_the_indexed_surface_in_a_stable_initial_contract(tmp_
     assert result["change_units"] == []
     assert result["budget"]["requested_tokens"] == 2200
     assert result["budget"]["estimated_tokens"] > 0
+    assert result["budget"]["measurement"] == "byte_estimate"
     assert result["budget"]["truncated"] is False
     validate(result, load_schema("plan_change"))
 
@@ -68,7 +70,30 @@ def test_plan_change_wraps_the_indexed_surface_in_a_stable_initial_contract(tmp_
     assert plan["status"] == "ready"
     assert plan["requested_tokens"] == 2200
     assert plan["estimated_tokens"] == result["budget"]["estimated_tokens"]
+    assert plan["token_measurement"] == result["budget"]["measurement"]
     assert plan["truncated"] == 0
+
+
+def test_plan_change_persists_the_tokenizer_measurement_when_available(tmp_path, monkeypatch):
+    conn = _build_pix_fixture(tmp_path / "tokenizer-plan.db")
+    backend = FakeBackend({"primary": [{
+        "service": "checkout-service", "reason": "owns checkout", "confidence": 0.9,
+        "evidence": [{"file": "checkout.py", "start_line": 1, "end_line": 20}],
+    }], "secondary": [], "no_change": []})
+    def measure_response(response):
+        tokens = 41 if response["budget"]["measurement"] == "tiktoken:o200k_base" else 40
+        return TokenMeasurement(tokens, "tiktoken:o200k_base")
+
+    monkeypatch.setattr(queries, "measure_json_tokens", measure_response)
+
+    result = queries.plan_change(conn, backend, "Add a payment method")
+
+    assert result["budget"] == {
+        "requested_tokens": 2200, "estimated_tokens": 41,
+        "measurement": "tiktoken:o200k_base", "truncated": False,
+    }
+    plan = change_plans.get_plan(conn, int(result["plan_id"].removeprefix("cp_")))
+    assert plan["token_measurement"] == "tiktoken:o200k_base"
 
 
 def test_plan_change_rejects_an_invalid_token_budget_without_calling_the_backend(tmp_path):

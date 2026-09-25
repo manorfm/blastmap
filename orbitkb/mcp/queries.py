@@ -51,6 +51,7 @@ from orbitkb.generation.change_plan import (
 )
 from orbitkb.generation.freshness import compute_freshness
 from orbitkb.generation.provenance import infer_provenance
+from orbitkb.generation.token_budget import TokenMeasurement, measure_json_tokens
 from orbitkb.generation.verification import (
     verify_change_surface as _verify_change_surface,
 )
@@ -1813,14 +1814,30 @@ def plan_change(
         "decision_points": decision_points,
         "change_units": change_units,
         "unknowns": change_surface_result["unknowns"],
-        "budget": {"requested_tokens": token_budget, "estimated_tokens": 0, "truncated": False},
+        "budget": {
+            "requested_tokens": token_budget, "estimated_tokens": 0,
+            "measurement": "byte_estimate", "truncated": False,
+        },
     }
-    response["budget"]["estimated_tokens"] = (len(json.dumps(response, sort_keys=True)) + 3) // 4
+    measurement = _measure_plan_response(response)
     response["budget"]["truncated"] = response["budget"]["estimated_tokens"] > token_budget
     change_plans_repo.update_measurements(
-        conn, plan_run_id, response["budget"]["estimated_tokens"], response["budget"]["truncated"],
+        conn, plan_run_id, response["budget"]["estimated_tokens"], response["budget"]["truncated"], measurement.method,
     )
     return response
+
+
+def _measure_plan_response(response: dict) -> TokenMeasurement:
+    """Stabilize the count after the budget fields themselves enter the JSON."""
+    budget = response["budget"]
+    measurement = measure_json_tokens(response)
+    for _ in range(3):
+        if (budget["estimated_tokens"], budget["measurement"]) == (measurement.tokens, measurement.method):
+            return measurement
+        budget["estimated_tokens"] = measurement.tokens
+        budget["measurement"] = measurement.method
+        measurement = measure_json_tokens(response)
+    return measurement
 
 
 def _derive_http_contract_review_units(

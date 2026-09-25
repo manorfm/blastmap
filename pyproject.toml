@@ -52,6 +52,9 @@ dev = [
 semantic = [
     "fastembed>=0.4",
 ]
+tokens = [
+    "tiktoken>=0.8",
+]
 
 [project.urls]
 Homepage = "https://github.com/manorfm/orbitkb"
