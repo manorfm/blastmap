@@ -29,6 +29,7 @@ from orbitkb.generation.architecture import (
     find_cycles,
     find_error_semantics_lost,
     find_fan_imbalance,
+    find_internal_error_exposures,
     find_message_consumers_without_recovery_policy,
     find_non_atomic_service_publish_flows,
     find_overbroad_exception_handlers,
@@ -218,6 +219,38 @@ def test_unhandled_endpoint_error_disappears_when_a_local_mapping_is_indexed(tmp
     ))
 
     assert find_unhandled_endpoint_errors(conn) == []
+
+
+def test_internal_error_exposure_disappears_when_mapping_stops_exposing_detail(tmp_path: Path):
+    conn = open_db(tmp_path / "internal-error-exposure.db")
+    service = services_repo.ensure_service(conn, "orders", "/tmp/orders", "node-ts")
+    exposed = ErrorContract(
+        source="orders.failOrder", role="maps", error_kind="unexpected",
+        internal_type=None, protocol="http", transport_code="500", public_code=None,
+        exposes_internal_detail=True, retryability="unknown", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[exposed]))
+
+    findings = find_internal_error_exposures(conn)
+
+    assert _kinds(findings) == {"possible_internal_error_exposure"}
+    assert findings[0]["severity"] == "critical"
+    assert findings[0]["detail"]["mapping"] == {
+        "symbol": "orders.failOrder", "protocol": "http", "code": "500",
+    }
+    run_id = recompute_architecture_view(conn)
+    assert {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    } == {"possible_internal_error_exposure"}
+
+    safe = ErrorContract(
+        source="orders.failOrder", role="maps", error_kind="unexpected",
+        internal_type=None, protocol="http", transport_code="500", public_code="INTERNAL_ERROR",
+        exposes_internal_detail=False, retryability="unknown", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[safe]))
+
+    assert find_internal_error_exposures(conn) == []
 
 
 def test_unmapped_downstream_error_disappears_when_caller_maps_the_known_error(tmp_path: Path):

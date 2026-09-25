@@ -1134,6 +1134,51 @@ def find_unhandled_endpoint_errors(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def find_internal_error_exposures(conn: sqlite3.Connection) -> list[dict]:
+    """Flag source-proven public mappings that include an internal error detail.
+
+    Extractors retain only the boolean fact and source evidence. They never persist
+    the message, stack trace or cause that may have been placed in the response.
+    """
+    names = _service_names(conn)
+    rows = conn.execute(
+        """SELECT service_id, source, protocol, transport_code, public_code,
+                  file_path, start_line, end_line
+           FROM static_error_contracts
+           WHERE role = 'maps'
+             AND exposes_internal_detail = 1
+             AND protocol IN ('http', 'graphql')
+           ORDER BY service_id, source, protocol, transport_code""",
+    ).fetchall()
+    findings: list[dict] = []
+    for row in rows:
+        mapping = {
+            "symbol": row["source"], "protocol": row["protocol"],
+            "code": row["transport_code"],
+        }
+        findings.append({
+            "kind": "possible_internal_error_exposure", "severity": "critical",
+            "services": [names[row["service_id"]]],
+            "reason": (
+                f"{names[row['service_id']]} maps an error from {row['source']} to "
+                f"{row['protocol'].upper()} {row['transport_code']} with a direct internal error detail."
+            ),
+            "detail": {
+                "mapping": mapping,
+                "public_code": row["public_code"],
+                "confidence": 0.9,
+                "evidence": [_edge_evidence(row)],
+                "unknowns": [
+                    "Static analysis cannot establish whether a runtime redaction hook transforms this response before it leaves the service.",
+                ],
+                "remediation": [
+                    "Return a stable public error code and message; log diagnostic detail only on the internal, correlated error path.",
+                ],
+            },
+        })
+    return findings
+
+
 def find_static_http_calls_without_resilience_policy(conn: sqlite3.Connection) -> list[dict]:
     """Flag a proven internal HTTP call with no literal policy on its source symbol.
 
@@ -2324,7 +2369,7 @@ _DETECTORS = (
     find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects, find_error_semantics_lost,
-    find_unhandled_endpoint_errors,
+    find_unhandled_endpoint_errors, find_internal_error_exposures,
     find_static_http_calls_without_resilience_policy,
     find_retries_on_potentially_non_idempotent_http_calls,
     find_retries_on_downstream_client_errors,

@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "23"
+STATIC_ANALYSIS_INPUT_VERSION = "24"
 
 
 def _walk(node: Node):
@@ -1570,6 +1570,8 @@ _NODE_HTTP_RESPONSE_STATUS = (
 _NODE_HTTP_SEND_STATUS = (
     r"\b{receiver}\s*\.\s*sendStatus\s*\(\s*(?P<status>[45]\d{{2}})\s*\)"
 )
+_NODE_ERROR_IDENTIFIERS = frozenset({"err", "error", "exception"})
+_NODE_INTERNAL_DETAIL_PROPERTIES = frozenset({"message", "stack", "cause"})
 
 
 def _node_http_error_contracts(
@@ -1584,14 +1586,19 @@ def _node_http_error_contracts(
     receiver = _node_response_receiver(function, source)
     if receiver is None:
         return []
-    declaration = _text(function.declaration, source)
     patterns = (
         _NODE_HTTP_RESPONSE_STATUS,
         _NODE_HTTP_SEND_STATUS,
     )
     contracts: list[ErrorContract] = []
-    for pattern in patterns:
-        for match in re.finditer(pattern.format(receiver=re.escape(receiver)), declaration):
+    for call in _walk(function.body):
+        if call.type != "call_expression":
+            continue
+        response_call = _text(call, source)
+        for pattern in patterns:
+            match = re.search(pattern.format(receiver=re.escape(receiver)), response_call)
+            if match is None:
+                continue
             status = int(match.group("status"))
             contracts.append(ErrorContract(
                 source=function.symbol,
@@ -1601,13 +1608,52 @@ def _node_http_error_contracts(
                 protocol="http",
                 transport_code=str(status),
                 public_code=None,
-                exposes_internal_detail=False,
+                exposes_internal_detail=_node_response_exposes_internal_detail(call, source),
                 retryability="retryable" if status == 429 else "not_retryable",
-                evidence=_declaration_match_evidence(
-                    path, root, function.declaration, declaration, match.start(), match.end(),
-                ),
+                evidence=_evidence(path, root, call),
             ))
     return contracts
+
+
+def _node_response_exposes_internal_detail(response_call: Node, source: bytes) -> bool:
+    """Return whether a public response directly contains an error detail member.
+
+    Inspect only the response call subtree: an error's message logged elsewhere in
+    the handler is not a public exposure. The rule deliberately records a boolean,
+    not the potentially sensitive value itself.
+    """
+    for member in _walk(response_call):
+        if member.type != "member_expression":
+            continue
+        property_node = member.child_by_field_name("property")
+        if property_node is None or not _node_member_is_direct_response_value(member, response_call):
+            continue
+        if (
+            _node_member_root_identifier(member, source) in _NODE_ERROR_IDENTIFIERS
+            and _text(property_node, source) in _NODE_INTERNAL_DETAIL_PROPERTIES
+        ):
+            return True
+    return False
+
+
+def _node_member_is_direct_response_value(member: Node, response_call: Node) -> bool:
+    """Distinguish a public value from a value first passed to a sanitizer."""
+    parent = member.parent
+    if parent is None:
+        return False
+    if parent.type == "pair":
+        return parent.child_by_field_name("value") == member
+    return parent.type == "arguments" and parent.parent == response_call
+
+
+def _node_member_root_identifier(member: Node, source: bytes) -> str | None:
+    """Return the root object of a member chain such as ``error.cause.message``."""
+    object_node = member.child_by_field_name("object")
+    while object_node is not None and object_node.type == "member_expression":
+        object_node = object_node.child_by_field_name("object")
+    if object_node is None or object_node.type != "identifier":
+        return None
+    return _text(object_node, source)
 
 
 def _node_response_receiver(function: _Function, source: bytes) -> str | None:

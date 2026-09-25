@@ -466,6 +466,10 @@ outside the indexed source may intentionally alter the final response.
 whose reachable static flow raises a known client/domain error and has no same-type
 HTTP mapping indexed locally. It does not claim a runtime 500: framework-global
 handlers, gateways and proxies remain unknown.
+`possible_internal_error_exposure` is critical when a supported adapter proves a
+public HTTP or GraphQL mapping directly contains an error `message`, `stack` or
+`cause`. OrbitKB retains only this boolean fact and its source evidence, never the
+potentially sensitive value; a runtime redaction hook remains an explicit unknown.
 
 `possible_unmapped_downstream_error` is a cross-service review signal. It prefers a
 source-proven Java/Kotlin static HTTP call with literal service and route mappings. When the

@@ -744,6 +744,52 @@ fastify.get("/orders/:id", findOrder);
     ]
 
 
+def test_node_analyzer_marks_direct_error_details_in_http_reply_as_exposed(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import express from "express";
+const app = express();
+
+function failOrder(req: Request, res: Response) {
+  return res.status(500).json({ message: error.message, stack: error.stack });
+}
+
+function rejectOrder(req: Request, res: Response) {
+  return res.status(400).json({ code: "INVALID_ORDER" });
+}
+
+function redact(value: string) {
+  return "REDACTED";
+}
+
+function redactFailure(req: Request, res: Response) {
+  return res.status(500).json({ message: redact(error.message) });
+}
+
+function exposeCause(req: Request, res: Response) {
+  return res.status(500).json({ cause: error.cause });
+}
+
+app.post("/orders", failOrder);
+app.put("/orders/:id", rejectOrder);
+app.post("/orders/redacted", redactFailure);
+app.post("/orders/cause", exposeCause);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert {
+        (contract.source, contract.transport_code): contract.exposes_internal_detail
+        for contract in result.error_contracts
+    } == {
+        ("orders.failOrder", "500"): True,
+        ("orders.rejectOrder", "400"): False,
+        ("orders.redactFailure", "500"): False,
+        ("orders.exposeCause", "500"): True,
+    }
+
+
 def test_node_analyzer_skips_fastify_like_route_without_a_local_factory(tmp_path: Path):
     (tmp_path / "orders.ts").write_text(
         '''const app = makeTestServer();

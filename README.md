@@ -455,8 +455,10 @@ messages, payloads, causes and stack traces are not indexed or returned.
 For Node REST, OrbitKB indexes only an explicit 4xx/5xx reply through a conventional
 second handler parameter (`res`, `response` or `reply`): Express
 `status(...).json/send/end` or `sendStatus(...)`, and Fastify `code/status(...).send`.
-It does not infer error semantics from `throw`, promise rejection, global middleware,
-dynamic statuses or the response payload.
+It does not infer error semantics from `throw`, promise rejection, global middleware
+or dynamic statuses. When the reply AST directly contains `err`, `error` or
+`exception`'s `message`, `stack` or `cause`, it retains only an exposure boolean and
+the source location—never the potentially sensitive value.
 
 For Go HTTP, OrbitKB indexes only literal 4xx/5xx `http.Error` and
 `http.ResponseWriter.WriteHeader` replies when the local source imports `net/http`
@@ -478,6 +480,10 @@ For indexed HTTP entrypoints, it also reports
 client/domain error but no HTTP mapping for that exact type is indexed in the same
 service. The finding is a review signal: framework-global handlers, gateways and
 proxies outside indexed source remain unknown.
+It also reports the critical `possible_internal_error_exposure` when a supported
+adapter proves that a public HTTP or GraphQL error mapping directly includes an
+internal error message, stack or cause. The result preserves only the boolean fact
+and source evidence; runtime redaction hooks remain an explicit unknown.
 
 When a source-proven retry policy and a source-proven `POST` or `PATCH` call occur in
 the same Spring symbol, OrbitKB also emits a retry/idempotency review signal. It does
