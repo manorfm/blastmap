@@ -424,8 +424,8 @@ and dynamic mappings are not inferred as failures. Known timeout exception types
 literal Spring mapping statuses such as 500, 503 and 504 rather than being collapsed
 into a generic error category. An explicit Spring `@ExceptionHandler` with a literal
 status may record an internal-detail exposure boolean only when it directly returns a
-typed handler parameter through `ProblemDetail.forStatusAndDetail`; wrappers and
-sanitizers remain unknown. The
+typed handler parameter through `ProblemDetail.forStatusAndDetail` or
+`ResponseEntity.status(...).body(...)`; wrappers and sanitizers remain unknown. The
 `service_calls` list is similarly bounded to reachable symbols and contains only
 source-proven Java/Kotlin Feign calls with literal target service, method and route,
 or injected `RestTemplate`/`WebClient` calls with a literal single-label service host.

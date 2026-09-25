@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "27"
+STATIC_ANALYSIS_INPUT_VERSION = "28"
 
 
 def _walk(node: Node):
@@ -2339,7 +2339,7 @@ def _spring_error_contracts(
         protocol="http",
         transport_code=str(code),
         public_code=None,
-        exposes_internal_detail=_spring_problem_detail_exposes_internal_detail(declaration, exception_parameter),
+        exposes_internal_detail=_spring_response_exposes_internal_detail(declaration, exception_parameter),
         retryability="retryable" if code == 429 else "not_retryable",
         evidence=evidence,
     )]
@@ -2358,8 +2358,8 @@ def _spring_error_handler_parameter_name(
     return match.group("name") if match is not None else None
 
 
-def _spring_problem_detail_exposes_internal_detail(declaration: str, exception_parameter: str | None) -> bool:
-    """Recognize a handler returning its error detail directly through ProblemDetail."""
+def _spring_response_exposes_internal_detail(declaration: str, exception_parameter: str | None) -> bool:
+    """Recognize a handler returning its error detail directly through a Spring response."""
     if exception_parameter is None:
         return False
     direct_detail = (
@@ -2367,10 +2367,12 @@ def _spring_problem_detail_exposes_internal_detail(declaration: str, exception_p
         r"(?:getMessage|getCause|getStackTrace)\s*\(\s*\)"
         rf"|{re.escape(exception_parameter)}\s*\.\s*(?:message|cause|stackTrace)\b"
     )
-    return re.search(
+    response_patterns = (
         rf"\breturn\s+ProblemDetail\s*\.\s*forStatusAndDetail\s*\(\s*[^,]+,\s*(?:{direct_detail})\s*\)",
-        declaration,
-    ) is not None
+        rf"\breturn\s+ResponseEntity\s*\.\s*"
+        rf"(?:status\s*\([^)]*\)|internalServerError\s*\(\s*\))\s*\.\s*body\s*\(\s*(?:{direct_detail})\s*\)",
+    )
+    return any(re.search(pattern, declaration) is not None for pattern in response_patterns)
 
 
 def _spring_raised_error_contracts(

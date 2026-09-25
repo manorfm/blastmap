@@ -1907,6 +1907,11 @@ class ApiExceptionHandler {
   ProblemDetail handleInvalid(InvalidOrderException error) {
     return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, redact(error.getMessage()));
   }
+  @ExceptionHandler(PaymentException.class)
+  @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+  ResponseEntity<String> handlePayment(PaymentException error) {
+    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error.getMessage());
+  }
 }
 ''',
         encoding="utf-8",
@@ -1922,6 +1927,30 @@ class ApiExceptionHandler {
          "http", "409", None, True, "not_retryable"),
         ("ApiExceptionHandler.handleInvalid", "maps", "validation", "InvalidOrderException",
          "http", "400", None, False, "not_retryable"),
+        ("ApiExceptionHandler.handlePayment", "maps", "unexpected", "PaymentException",
+         "http", "500", None, True, "not_retryable"),
+    ]
+
+
+def test_kotlin_spring_exception_handler_marks_direct_response_entity_detail(tmp_path: Path):
+    (tmp_path / "ApiExceptionHandler.kt").write_text(
+        '''@ControllerAdvice
+class ApiExceptionHandler {
+  @ExceptionHandler(PaymentException::class)
+  @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+  fun handlePayment(error: PaymentException): ResponseEntity<String> {
+    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error.message)
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert [(contract.source, contract.internal_type, contract.transport_code, contract.exposes_internal_detail)
+            for contract in result.error_contracts] == [
+        ("ApiExceptionHandler.handlePayment", "PaymentException", "500", True),
     ]
 
 

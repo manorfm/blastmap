@@ -320,7 +320,8 @@ fallbacks). Timeout fallbacks require a typed `catch`, `onErrorResume` or
 `onErrorReturn`; generic callbacks are not guessed. Error messages and stack traces
 are never indexed. For an explicit `@ExceptionHandler` with a literal status,
 `return ProblemDetail.forStatusAndDetail(..., error.getMessage())` records only an
-internal-detail exposure boolean and source location; wrapped or sanitized values,
+internal-detail exposure boolean and source location, as does a direct
+`ResponseEntity.status(...).body(error.getMessage())`; wrapped or sanitized values,
 dynamic global handlers, proxies and gateways remain explicit unknowns rather than
 inferred behavior.
 
