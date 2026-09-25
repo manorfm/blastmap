@@ -302,7 +302,11 @@ bindings with a literal name and simple TypeScript type. Aggregate bindings, dyn
 names and composite types remain unknown. `contract.validation_pipes` similarly
 records direct identifiers registered through imported `@UsePipes`, with controller
 or handler scope. Pipe instances, factories, options and the validation rules they
-enforce remain unknown.
+enforce remain unknown. Cache and rate-limit context is also returned only for direct
+decorators imported from `@nestjs/cache-manager` (`CacheKey`, `CacheTTL`) or
+`@nestjs/throttler` (`Throttle`), again with controller or handler scope. Their
+arguments, global policy and runtime behavior remain unknown; same-named local
+decorators are not classified.
 
 For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven error
 contracts (raised or explicitly mapped exception types and explicit local timeout
@@ -538,7 +542,7 @@ The supported deterministic subset is intentionally focused:
 | --- | --- | --- |
 | Go | HTTP handlers, calls, GORM and `database/sql`, RabbitMQ, Kafka (`segmentio/kafka-go`) | Dynamic routing and types remain unknown. |
 | Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs; Feign and injected `RestTemplate`/`WebClient` calls with literal internal service/route mappings; explicit method-level retry/timeout limits | Only unambiguous local wiring and literal limits are resolved; dynamic URLs, policies and values, IPs, localhost and external domains are not inferred. |
-| Node and TypeScript | Express literal routes and direct route middleware registration, Fastify routes, NestJS controllers, direct `@UseGuards`/`@UsePipes` registrations, direct `@Body()` DTO types and literal path/query/header bindings, GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
+| Node and TypeScript | Express literal routes and direct route middleware registration, Fastify routes, NestJS controllers, direct `@UseGuards`/`@UsePipes`, cache and throttling decorators, direct `@Body()` DTO types and literal path/query/header bindings, GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
 | GraphQL | Operations, local schema contracts, input/output shapes | Remote composition, directives and federation behavior are not inferred. |
 | Persistence and messaging | Postgres/Mongo evidence, RabbitMQ bindings and contracts, Kafka producer/consumer contracts | Only literal, source-proven configuration is exposed; Kafka consumer detection is Go/JVM/Node only, no Python. |
 | Cloud/infra | AWS (SQS, SNS, S3, EventBridge, Kinesis), Azure (Blob Storage, Service Bus, Event Hub) and GCP (Pub/Sub) call sites (Go, Java, Kotlin, Node/TS; Python is AWS-only via `boto3`), plus Terraform/CloudFormation/plain Kubernetes declarations, parsed with real grammars (`python-hcl2`, `cfn-flip`) — never keyword matching. A cloud call also produces a `FlowEdge`, visible in `trace_flow`/`describe_entrypoint`, for every language except Python. | GCS, Dockerfile, and unrendered Helm templates are not resolved; Azure Service Bus code facts can't distinguish queue from topic (defaults to queue — see `describe_cloud_dependencies`). |

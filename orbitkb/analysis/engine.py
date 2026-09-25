@@ -62,7 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "7"
+STATIC_ANALYSIS_INPUT_VERSION = "8"
 
 
 def _walk(node: Node):
@@ -2301,6 +2301,13 @@ _NEST_HTTP_DECORATORS = {
     "Get": "GET", "Post": "POST", "Put": "PUT", "Patch": "PATCH", "Delete": "DELETE",
 }
 
+_NEST_CACHE_DECORATORS = {
+    "cache-manager.CacheKey": "CacheKey",
+    "cache-manager.CacheTTL": "CacheTTL",
+}
+
+_NEST_RATE_LIMIT_DECORATORS = {"throttler.Throttle": "Throttle"}
+
 
 def _nest_http_entrypoint_functions(
     tree: Node, source: bytes, imports: tuple[tuple[str, str], ...],
@@ -2314,6 +2321,7 @@ def _nest_http_entrypoint_functions(
         for local, imported in imports
         if imported.startswith("common.")
     }
+    decorator_imports = dict(imports)
     if "Controller" not in nest_imports.values():
         return []
     entrypoints: list[tuple[_Function, str, str, dict | None]] = []
@@ -2334,6 +2342,12 @@ def _nest_http_entrypoint_functions(
         )
         controller_pipes = _nest_route_decorator_registrations(
             class_decorators, source, nest_imports, "UsePipes", "controller",
+        )
+        controller_cache = _nest_known_route_decorators(
+            class_decorators, source, decorator_imports, _NEST_CACHE_DECORATORS, "controller",
+        )
+        controller_rate_limits = _nest_known_route_decorators(
+            class_decorators, source, decorator_imports, _NEST_RATE_LIMIT_DECORATORS, "controller",
         )
         decorators: list[Node] = []
         for child in class_body.named_children:
@@ -2367,11 +2381,27 @@ def _nest_http_entrypoint_functions(
                     route_decorators, source, nest_imports, "UsePipes", "handler",
                 ),
             ]
+            cache_decorators = [
+                *controller_cache,
+                *_nest_known_route_decorators(
+                    route_decorators, source, decorator_imports, _NEST_CACHE_DECORATORS, "handler",
+                ),
+            ]
+            rate_limit_decorators = [
+                *controller_rate_limits,
+                *_nest_known_route_decorators(
+                    route_decorators, source, decorator_imports, _NEST_RATE_LIMIT_DECORATORS, "handler",
+                ),
+            ]
             contract: dict = {}
             if guards:
                 contract["route_guards"] = guards
             if pipes:
                 contract["validation_pipes"] = pipes
+            if cache_decorators:
+                contract["cache_decorators"] = cache_decorators
+            if rate_limit_decorators:
+                contract["rate_limit_decorators"] = rate_limit_decorators
             if request := _nest_body_dto_contract(child, source, nest_imports):
                 contract["request"] = request
             if parameters := _nest_bound_parameters(child, source, nest_imports):
@@ -2449,6 +2479,22 @@ def _nest_route_decorator_registrations(
             if argument.type == "identifier"
         )
     return guards
+
+
+def _nest_known_route_decorators(
+    decorators: list[Node], source: bytes, imports: dict[str, str], known: dict[str, str], scope: str,
+) -> list[dict[str, str]]:
+    """Return direct route decorators from a small, module-qualified allowlist."""
+    registrations: list[dict[str, str]] = []
+    for decorator in decorators:
+        call = next((child for child in decorator.named_children if child.type == "call_expression"), None)
+        if call is None:
+            continue
+        function = call.child_by_field_name("function")
+        imported_name = imports.get(_text(function, source)) if function is not None else None
+        if decorator_name := known.get(imported_name or ""):
+            registrations.append({"decorator": decorator_name, "scope": scope})
+    return registrations
 
 
 def _nest_body_dto_contract(

@@ -967,6 +967,64 @@ export class OrdersController {
     }
 
 
+def test_node_analyzer_records_direct_nest_cache_and_rate_limit_decorators(tmp_path: Path):
+    (tmp_path / "orders.controller.ts").write_text(
+        '''import { CacheKey, CacheTTL } from "@nestjs/cache-manager";
+import { Controller, Post } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
+
+@Controller("/orders")
+@CacheTTL(60000)
+@Throttle()
+export class OrdersController {
+  @Post()
+  @CacheKey("orders.create")
+  @Throttle()
+  create(input: CreateOrder) {
+    return this.orderService.create(input);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.entrypoints[0].contract == {
+        "cache_decorators": [
+            {"decorator": "CacheTTL", "scope": "controller"},
+            {"decorator": "CacheKey", "scope": "handler"},
+        ],
+        "rate_limit_decorators": [
+            {"decorator": "Throttle", "scope": "controller"},
+            {"decorator": "Throttle", "scope": "handler"},
+        ],
+    }
+
+
+def test_node_analyzer_skips_non_nest_cache_and_rate_limit_decorator_names(tmp_path: Path):
+    (tmp_path / "orders.controller.ts").write_text(
+        '''import { Controller, Post } from "@nestjs/common";
+import { CacheTTL, Throttle } from "./local-decorators";
+
+@Controller("/orders")
+@CacheTTL(60000)
+export class OrdersController {
+  @Post()
+  @Throttle()
+  create(input: CreateOrder) {
+    return this.orderService.create(input);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.entrypoints[0].contract is None
+
+
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
     source = tmp_path / "consumer.go"
     source.write_text(
