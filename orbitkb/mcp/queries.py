@@ -822,6 +822,8 @@ def _runtime_configuration_workload_scopes(
         return None, None
     if not isinstance(workloads, list) or not workloads:
         return None, "workloads must be a non-empty list of workload identities"
+    if len(workloads) > MAX_LIST_LIMIT:
+        return None, f"workloads must contain at most {MAX_LIST_LIMIT} workload identities"
     scopes: set[tuple[str, str, str]] = set()
     for workload in workloads:
         scope = _workload_scope_key(workload)

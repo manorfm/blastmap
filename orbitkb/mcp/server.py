@@ -206,9 +206,9 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         known. Literal source availability is reported when known; a locally
         unresolved source is an ownership hypothesis, not a missing-source finding.
         Values, dynamic names and unrendered Helm templates are excluded.
-        Both lists are capped at `limit` (default 50) starting at `offset`; workloads
-        optionally limits both to exact Kubernetes scopes. Pass repository when service
-        names duplicate."""
+        Both lists are capped at `limit` (default 50) starting at `offset`; up to 500
+        workload identities optionally limits both to exact Kubernetes scopes. Pass
+        repository when service names duplicate."""
         with closing(_conn()) as conn:
             return queries.describe_runtime_configuration(conn, service, limit, offset, repository, workloads)
 

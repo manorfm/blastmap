@@ -209,7 +209,9 @@ and change unit, avoiding repeated long identifiers. Set `include_trace_details=
 to include `plan_id` and `change_unit_id` for audit or external correlation.
 `describe_runtime_configuration` accepts optional exact workload scopes. A follow-up
 next query restarts at offset zero with only `missing_workloads`, so it does not repeat
-already verified workload references from the broader service context.
+already verified workload references from the broader service context. The filter
+accepts at most 500 identities; duplicates are harmless and result order remains the
+stable indexed order, not the supplied filter order.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.

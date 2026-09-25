@@ -209,7 +209,8 @@ plan and change-unit identifiers. Set `include_trace_details=true` to return bot
 original identifiers when audit or external correlation requires them.
 `describe_runtime_configuration` accepts optional exact workload scopes. Runtime
 follow-ups use this filter for their remaining workloads, so later pages do not repeat
-already verified workload references.
+already verified workload references. It accepts at most 500 identities; duplicates
+do not change the result, which remains in stable indexed order rather than request order.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset

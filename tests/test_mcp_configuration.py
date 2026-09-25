@@ -177,9 +177,25 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     assert [item["source"]["name"] for item in result["source_imports"]] == ["worker-secrets"]
     assert result["source_import_total"] == 1
     assert result["source_import_truncated"] is False
+    all_selected = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        workloads=[
+            {"kind": "Deployment", "name": "orders", "container": "worker"},
+            {"kind": "Deployment", "name": "orders", "container": "api"},
+        ],
+    )
+    assert [item["source"]["name"] for item in all_selected["source_imports"]] == [
+        "api-defaults", "worker-secrets",
+    ]
     assert queries.describe_runtime_configuration(conn, "orders", workloads=[]) == {
         "error": "workloads must be a non-empty list of workload identities",
     }
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        workloads=[{"kind": "Deployment", "name": "orders", "container": "api"}] * 501,
+    ) == {"error": "workloads must contain at most 500 workload identities"}
 
 
 def test_describe_runtime_configuration_marks_an_env_from_source_not_declared_locally(tmp_path):
