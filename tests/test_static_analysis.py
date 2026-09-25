@@ -910,6 +910,36 @@ export class OrdersController {
     }
 
 
+def test_node_analyzer_records_literal_nest_route_parameters_per_entrypoint(tmp_path: Path):
+    (tmp_path / "orders.controller.ts").write_text(
+        '''import { Controller, Get, Headers, Param, Query } from "@nestjs/common";
+
+@Controller("/orders")
+export class OrdersController {
+  @Get(":id")
+  find(
+    @Param("id") id: string,
+    @Query("includeArchived") includeArchived?: boolean,
+    @Headers("x-request-id") requestId: RequestId,
+  ) {
+    return this.orderService.find(id, includeArchived, requestId);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.entrypoints[0].contract == {
+        "parameters": [
+            {"kind": "path", "name": "id", "variable": "id", "type": "string", "required": True},
+            {"kind": "query", "name": "includeArchived", "variable": "includeArchived", "type": "boolean", "required": False},
+            {"kind": "header", "name": "x-request-id", "variable": "requestId", "type": "RequestId", "required": True},
+        ],
+    }
+
+
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
     source = tmp_path / "consumer.go"
     source.write_text(

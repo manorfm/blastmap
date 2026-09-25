@@ -62,7 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "5"
+STATIC_ANALYSIS_INPUT_VERSION = "6"
 
 
 def _walk(node: Node):
@@ -2359,6 +2359,8 @@ def _nest_http_entrypoint_functions(
                 contract["route_guards"] = guards
             if request := _nest_body_dto_contract(child, source, nest_imports):
                 contract["request"] = request
+            if parameters := _nest_bound_parameters(child, source, nest_imports):
+                contract["parameters"] = parameters
             entrypoints.append((function, method, _join_route(controller_prefix, path), contract or None))
     return entrypoints
 
@@ -2468,6 +2470,7 @@ def _nest_body_dto_contract(
             arguments is None
             or arguments.named_children
             or pattern is None
+            or pattern.type != "identifier"
             or annotation is None
             or len(type_nodes) != 1
             or type_nodes[0].type != "type_identifier"
@@ -2479,6 +2482,61 @@ def _nest_body_dto_contract(
             "required": parameter.type == "required_parameter",
         })
     return body_parameters[0] if len(body_parameters) == 1 else None
+
+
+def _nest_bound_parameters(
+    method: Node, source: bytes, imported_names: dict[str, str],
+) -> list[dict[str, str | bool]]:
+    """Return direct Nest path, query and header bindings with simple types only."""
+    parameters = method.child_by_field_name("parameters")
+    if parameters is None:
+        return []
+    bindings: list[dict[str, str | bool]] = []
+    decorator_kinds = {"Param": "path", "Query": "query", "Headers": "header"}
+    for parameter in parameters.named_children:
+        parts = _nest_simple_parameter_parts(parameter, source)
+        if parts is None:
+            continue
+        variable, type_name, required = parts
+        candidates: list[tuple[str, str]] = []
+        for decorator in (child for child in parameter.named_children if child.type == "decorator"):
+            call = next((child for child in decorator.named_children if child.type == "call_expression"), None)
+            if call is None:
+                continue
+            function = call.child_by_field_name("function")
+            arguments = call.child_by_field_name("arguments")
+            decorator_name = imported_names.get(_text(function, source)) if function is not None else None
+            kind = decorator_kinds.get(decorator_name or "")
+            args = arguments.named_children if arguments is not None else []
+            name = _string(args[0], source) if len(args) == 1 else None
+            if kind is not None and name is not None:
+                candidates.append((kind, name))
+        if len(candidates) != 1:
+            continue
+        kind, name = candidates[0]
+        bindings.append({
+            "kind": kind,
+            "name": name,
+            "variable": variable,
+            "type": type_name,
+            "required": True if kind == "path" else required,
+        })
+    return bindings
+
+
+def _nest_simple_parameter_parts(parameter: Node, source: bytes) -> tuple[str, str, bool] | None:
+    """Return an identifier plus a non-composite TypeScript annotation."""
+    pattern = parameter.child_by_field_name("pattern")
+    annotation = parameter.child_by_field_name("type")
+    type_nodes = annotation.named_children if annotation is not None else []
+    if (
+        pattern is None
+        or pattern.type != "identifier"
+        or len(type_nodes) != 1
+        or type_nodes[0].type not in {"predefined_type", "type_identifier"}
+    ):
+        return None
+    return _text(pattern, source), _text(type_nodes[0], source), parameter.type == "required_parameter"
 
 
 def _nest_direct_decorator(
