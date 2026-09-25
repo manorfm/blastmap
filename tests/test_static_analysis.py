@@ -844,6 +844,37 @@ app.setErrorHandler(handleError);
     ]
 
 
+def test_node_analyzer_extracts_literal_nest_exception_filter_mapping(tmp_path: Path):
+    (tmp_path / "errors.ts").write_text(
+        '''import { ArgumentsHost, Catch, ExceptionFilter } from "@nestjs/common";
+
+@Catch()
+class HttpExceptionFilter implements ExceptionFilter {
+  catch(exception: Error, host: ArgumentsHost) {
+    const response = host.switchToHttp().getResponse();
+    return response.status(500).json({ message: exception.message });
+  }
+}
+
+class InertFilter {
+  catch(exception: Error, host: ArgumentsHost) {
+    const response = host.switchToHttp().getResponse();
+    return response.status(500).json({ message: exception.message });
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(contract.source, contract.role, contract.error_kind, contract.protocol,
+             contract.transport_code, contract.exposes_internal_detail)
+            for contract in result.error_contracts] == [
+        ("HttpExceptionFilter.catch", "maps", "unexpected", "http", "500", True),
+    ]
+
+
 def test_node_analyzer_skips_fastify_like_route_without_a_local_factory(tmp_path: Path):
     (tmp_path / "orders.ts").write_text(
         '''const app = makeTestServer();

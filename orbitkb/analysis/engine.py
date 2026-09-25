@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "30"
+STATIC_ANALYSIS_INPUT_VERSION = "31"
 
 
 def _walk(node: Node):
@@ -1339,6 +1339,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
         result.grpc_handlers.extend(_node_nest_grpc_handlers(tree, source, path, root, imports))
         result.grpc_client_bindings.extend(_node_nest_grpc_client_bindings(tree, source, path, root, imports))
+        result.error_contracts.extend(_node_nest_exception_filter_contracts(tree, source, path, root, imports))
         for injection in _node_nest_constructor_injections(tree, source, path, root, imports):
             result.injections.append(injection)
             result.edges.append(FlowEdge(injection.consumer, injection.contract, "injects", injection.evidence))
@@ -1614,6 +1615,13 @@ def _node_http_error_contracts(
     )
     if receiver is None:
         return []
+    return _node_http_response_contracts(function, path, root, source, receiver)
+
+
+def _node_http_response_contracts(
+    function: _Function, path: Path, root: Path, source: bytes, receiver: str,
+) -> list[ErrorContract]:
+    """Extract literal HTTP responses after an adapter proves its response receiver."""
     patterns = (
         _NODE_HTTP_RESPONSE_STATUS,
         _NODE_HTTP_SEND_STATUS,
@@ -2841,6 +2849,61 @@ _NEST_CACHE_DECORATORS = {
 }
 
 _NEST_RATE_LIMIT_DECORATORS = {"throttler.Throttle": "Throttle"}
+
+
+def _node_nest_exception_filter_contracts(
+    tree: Node, source: bytes, path: Path, root: Path, imports: tuple[tuple[str, str], ...],
+) -> list[ErrorContract]:
+    """Extract direct HTTP replies from literal Nest ``@Catch`` exception filters."""
+    nest_imports = {
+        local: imported.rsplit(".", 1)[-1]
+        for local, imported in imports
+        if imported.startswith("common.")
+    }
+    if "Catch" not in nest_imports.values():
+        return []
+    contracts: list[ErrorContract] = []
+    for class_node in _walk(tree):
+        if class_node.type != "class_declaration":
+            continue
+        class_name = class_node.child_by_field_name("name")
+        class_body = class_node.child_by_field_name("body")
+        if class_name is None or class_body is None:
+            continue
+        class_decorators = [
+            *_preceding_decorators(class_node),
+            *(child for child in class_node.named_children if child.type == "decorator"),
+        ]
+        if not any(
+            _nest_direct_decorator(decorator, source, nest_imports, "Catch")
+            for decorator in class_decorators
+        ):
+            continue
+        for method in class_body.named_children:
+            name = method.child_by_field_name("name") if method.type == "method_definition" else None
+            body = method.child_by_field_name("body") if method.type == "method_definition" else None
+            parameters = method.child_by_field_name("parameters") if method.type == "method_definition" else None
+            if name is None or body is None or parameters is None or _text(name, source) != "catch":
+                continue
+            parameter_names = [
+                _text(identifier, source)
+                for parameter in parameters.named_children
+                if (identifier := next((node for node in _walk(parameter) if node.type == "identifier"), None)) is not None
+            ]
+            if len(parameter_names) != 2 or parameter_names[0] not in _NODE_ERROR_IDENTIFIERS:
+                continue
+            response = re.search(
+                rf"\b(?:const|let)\s+(?P<receiver>\w+)\s*=\s*{re.escape(parameter_names[1])}"
+                r"\s*\.\s*switchToHttp\s*\(\s*\)\s*\.\s*getResponse\s*\(\s*\)",
+                _text(method, source),
+            )
+            if response is None or response.group("receiver") not in _NODE_RESPONSE_PARAMETER_NAMES:
+                continue
+            function = _Function("catch", f"{_text(class_name, source)}.catch", body, method)
+            contracts.extend(_node_http_response_contracts(
+                function, path, root, source, response.group("receiver"),
+            ))
+    return contracts
 
 
 def _node_nest_grpc_handlers(

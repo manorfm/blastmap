@@ -77,6 +77,10 @@ reanalyzes the service.
    A named Fastify error handler is included only with literal
    `app.setErrorHandler(handler)` registration on a proven receiver and the
    conventional `(error, request, reply)` signature.
+   A Nest exception filter is included only for a `@Catch` class imported from
+   `@nestjs/common`, a conventional `catch(exception, host)` method and a literal
+   `host.switchToHttp().getResponse()` receiver; registration and dynamic composition
+   remain unknown.
    Go mappings currently require literal `net/http` `http.Error` or `WriteHeader` calls
    on a declared `http.ResponseWriter`; dynamic statuses, custom writers and returned
    errors remain unknown. A direct `http.Error(w, err.Error(), ...)` or
