@@ -294,6 +294,10 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     )
     assert [item["environment_key"] for item in evidence_selected["bindings"]] == ["API_TOKEN"]
     assert [item["source"]["name"] for item in evidence_selected["source_imports"]] == ["worker-secrets"]
+    assert evidence_selected["filter_summary"] == {
+        "bindings": {"indexed_total": 2, "selected_total": 1},
+        "source_imports": {"indexed_total": 2, "selected_total": 1},
+    }
     range_selected = queries.describe_runtime_configuration(
         conn,
         "orders",

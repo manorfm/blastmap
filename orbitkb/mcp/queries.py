@@ -809,6 +809,26 @@ def describe_runtime_configuration(
     all_source_imports = kubernetes_configuration_repo.list_kubernetes_configuration_source_imports_for_service(
         conn, row["id"],
     )
+    indexed_binding_total = len(all_bindings)
+    indexed_source_import_total = len(all_source_imports)
+    binding_filters_applied = any((
+        selected_binding_scopes is not None,
+        selected_binding_declaration_statuses is not None,
+        selected_binding_source_kinds is not None,
+        selected_binding_evidence_files is not None,
+        selected_binding_evidence_ranges is not None,
+    ))
+    source_import_filters_applied = any((
+        selected_source_import_scopes is not None,
+        selected_declaration_statuses is not None,
+        selected_availabilities is not None,
+        selected_source_import_source_kinds is not None,
+        selected_source_import_container_roles is not None,
+        selected_prefixes is not None,
+        source_import_include_unprefixed,
+        selected_source_import_evidence_files is not None,
+        selected_source_import_evidence_ranges is not None,
+    ))
     if selected_binding_scopes is not None:
         all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_binding_scopes)
     if selected_source_import_scopes is not None:
@@ -908,6 +928,19 @@ def describe_runtime_configuration(
         "bindings": response_bindings,
         **page,
     }
+    filter_summary = {}
+    if binding_filters_applied:
+        filter_summary["bindings"] = {
+            "indexed_total": indexed_binding_total,
+            "selected_total": len(all_bindings),
+        }
+    if source_import_filters_applied:
+        filter_summary["source_imports"] = {
+            "indexed_total": indexed_source_import_total,
+            "selected_total": len(all_source_imports),
+        }
+    if filter_summary:
+        response["filter_summary"] = filter_summary
     if source_imports:
         response_source_imports = [
             _runtime_configuration_source_import(item, source_import_unknowns_by_reference)

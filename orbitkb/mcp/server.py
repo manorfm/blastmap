@@ -224,7 +224,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         scopes. Source imports and bindings can also be filtered by static
         declaration-finding state and literal source kind; imports support literal
         availability, indexed container role, exact envFrom prefix and exact evidence
-        file or overlapping line range. Pass repository when service names duplicate."""
+        file or overlapping line range. Active filters return compact selected-versus-
+        indexed totals. Pass repository when service names duplicate."""
         with closing(_conn()) as conn:
             return queries.describe_runtime_configuration(
                 conn, service, limit, offset, repository, workloads, binding_workloads, source_import_workloads,
