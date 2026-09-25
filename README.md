@@ -505,6 +505,10 @@ For indexed HTTP entrypoints, it also reports
 client/domain error but no HTTP mapping for that exact type is indexed in the same
 service. The finding is a review signal: framework-global handlers, gateways and
 proxies outside indexed source remain unknown.
+When this source-backed finding is on the primary change surface, `plan_change`
+adds an `error-mapping-gap` review unit at the entrypoint. Its validation explicitly
+asks the agent to verify either an indexed mapping or a framework-global boundary;
+it never assumes that the endpoint returns `500` or directs an automatic code edit.
 It also reports the critical `possible_internal_error_exposure` when a supported
 adapter proves that a public HTTP or GraphQL error mapping directly includes an
 internal error message, stack or cause. The result preserves only the boolean fact

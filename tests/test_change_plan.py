@@ -1015,6 +1015,52 @@ def test_error_mapping_units_include_a_high_confidence_internal_exposure():
     }]
 
 
+def test_error_mapping_units_include_a_reachable_endpoint_without_a_local_mapping():
+    assert derive_error_mapping_review_units([
+        {
+            "kind": "possible_unhandled_endpoint_error",
+            "services": ["payments-service"],
+            "reason": "POST /payments can reach PaymentService.authorize without a local mapping.",
+            "confidence": 0.75,
+            "detail": {
+                "entrypoint": {
+                    "method": "POST", "path": "/payments", "symbol": "PaymentController.create",
+                },
+                "origin": {
+                    "symbol": "PaymentService.authorize", "error_type": "PaymentConflict", "kind": "conflict",
+                },
+                "evidence": [
+                    {"file": "PaymentController.java", "start_line": 12, "end_line": 12},
+                    {"file": "PaymentService.java", "start_line": 28, "end_line": 28},
+                ],
+            },
+        },
+    ], {"payments-service"}) == [{
+        "id": "error-mapping-gap:payments-service:PaymentController.create:PaymentConflict",
+        "service": "payments-service",
+        "target": {
+            "role": "error_mapping", "symbol": "PaymentController.create",
+            "evidence": [
+                {"file": "PaymentController.java", "start_line": 12, "end_line": 12},
+                {"file": "PaymentService.java", "start_line": 28, "end_line": 28},
+            ],
+        },
+        "action": "review",
+        "reason": "POST /payments can reach PaymentService.authorize without a local mapping.",
+        "preconditions": [],
+        "related_contracts": ["POST /payments", "error:PaymentConflict"],
+        "dependencies": [],
+        "validation": [
+            "verify an indexed or framework-global error mapping returns the documented client response for PaymentConflict at POST /payments",
+        ],
+        "confidence": 0.75,
+        "evidence": [
+            {"file": "PaymentController.java", "start_line": 12, "end_line": 12},
+            {"file": "PaymentService.java", "start_line": 28, "end_line": 28},
+        ],
+    }]
+
+
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
     assert derive_runtime_configuration_review_units(
         {"checkout-service": [{

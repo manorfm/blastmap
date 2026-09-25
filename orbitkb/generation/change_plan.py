@@ -107,7 +107,7 @@ def derive_change_units(decision_points: list[dict], selections: list[dict]) -> 
 
 
 def derive_error_mapping_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
-    """Turn proven error degradations or internal exposure into review units.
+    """Turn source-proven error-boundary risks into bounded review units.
 
     Architecture findings use ``possible_`` because middleware and gateway behavior
     remain unknown. This function preserves that uncertainty by creating a review,
@@ -118,14 +118,18 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
     seen: set[tuple[str, str, str, str]] = set()
     for finding in findings:
         kind = finding.get("kind")
-        if kind not in {"possible_error_semantics_lost", "possible_internal_error_exposure"}:
+        if kind not in {
+            "possible_error_semantics_lost", "possible_internal_error_exposure",
+            "possible_unhandled_endpoint_error",
+        }:
             continue
         services = finding.get("services")
         detail = finding.get("detail")
         confidence = finding.get("confidence")
         if (
             not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
-            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.8
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float))
+            or confidence < (0.75 if kind == "possible_unhandled_endpoint_error" else 0.8)
         ):
             continue
         service = services[0]
@@ -157,6 +161,42 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
                 "dependencies": [],
                 "validation": [
                     "verify the response returns a stable public error code/message and keeps diagnostic detail internal",
+                ],
+                "confidence": float(confidence),
+                "evidence": evidence,
+            })
+            continue
+        if kind == "possible_unhandled_endpoint_error":
+            entrypoint = detail.get("entrypoint")
+            origin = detail.get("origin")
+            evidence = detail.get("evidence")
+            if (
+                not isinstance(entrypoint, dict) or not isinstance(origin, dict) or not isinstance(evidence, list)
+                or not isinstance(entrypoint.get("method"), str) or not isinstance(entrypoint.get("path"), str)
+                or not isinstance(entrypoint.get("symbol"), str) or not isinstance(origin.get("error_type"), str)
+                or not evidence
+            ):
+                continue
+            method = entrypoint["method"]
+            path = entrypoint["path"]
+            entrypoint_symbol = entrypoint["symbol"]
+            error_type = origin["error_type"]
+            key = service, "unhandled-endpoint", entrypoint_symbol, error_type
+            if key in seen:
+                continue
+            seen.add(key)
+            units.append({
+                "id": f"error-mapping-gap:{service}:{entrypoint_symbol}:{error_type}",
+                "service": service,
+                "target": {"role": "error_mapping", "symbol": entrypoint_symbol, "evidence": evidence},
+                "action": "review",
+                "reason": finding.get("reason", "review the indexed endpoint error boundary"),
+                "preconditions": [],
+                "related_contracts": [f"{method} {path}", f"error:{error_type}"],
+                "dependencies": [],
+                "validation": [
+                    "verify an indexed or framework-global error mapping returns the documented client response "
+                    f"for {error_type} at {method} {path}",
                 ],
                 "confidence": float(confidence),
                 "evidence": evidence,

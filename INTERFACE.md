@@ -487,6 +487,10 @@ outside the indexed source may intentionally alter the final response.
 whose reachable static flow raises a known client/domain error and has no same-type
 HTTP mapping indexed locally. It does not claim a runtime 500: framework-global
 handlers, gateways and proxies remain unknown.
+For a primary service, `plan_change` converts that source-backed signal into an
+`error-mapping-gap` review unit targeted at the entrypoint. Its validation requires
+checking an indexed or framework-global mapping, rather than prescribing an edit or
+claiming the final runtime status.
 `possible_internal_error_exposure` is critical when a supported adapter proves a
 public HTTP or GraphQL mapping directly contains an error `message`, `stack` or
 `cause`. OrbitKB retains only this boolean fact and its source evidence, never the
