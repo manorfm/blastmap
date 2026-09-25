@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from orbitkb.analysis.models import AnalysisResult
+from orbitkb.analysis.models import AnalysisResult, EntryPoint
 from orbitkb.db.repositories._util import now
 
 
@@ -24,6 +24,7 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
     conn.execute("DELETE FROM static_cloud_facts WHERE service_id = ?", (service_id,))
     indexed_at = now()
     entrypoint_ids: dict[str, int] = {}
+    persisted_entrypoints: list[tuple[EntryPoint, int]] = []
     for entry in analysis.entrypoints:
         cursor = conn.execute(
             """INSERT INTO entrypoints
@@ -35,9 +36,10 @@ def replace_analysis(conn: sqlite3.Connection, service_id: int, analysis: Analys
             ),
         )
         entrypoint_ids[entry.symbol] = cursor.lastrowid
-    for symbol, contract in analysis.contracts.items():
-        entrypoint_id = entrypoint_ids.get(symbol)
-        if entrypoint_id is not None:
+        persisted_entrypoints.append((entry, cursor.lastrowid))
+    for entry, entrypoint_id in persisted_entrypoints:
+        contract = entry.contract or analysis.contracts.get(entry.symbol)
+        if contract is not None:
             conn.execute(
                 "INSERT INTO entrypoint_contracts (entrypoint_id, contract_json) VALUES (?, ?)",
                 (entrypoint_id, json.dumps(contract)),

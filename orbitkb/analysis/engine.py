@@ -62,7 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "2"
+STATIC_ANALYSIS_INPUT_VERSION = "3"
 
 
 def _walk(node: Node):
@@ -999,12 +999,15 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             if callee is None or arguments is None:
                 continue
             chained_route = _express_literal_chained_route(callee, source, express_route_prefixes)
+            entrypoint_contract: dict | None = None
             if chained_route is not None:
                 receiver, method, path_value = chained_route
                 if method not in self.HTTP_ROUTE_METHODS:
                     continue
                 http_methods = (method.upper(),)
-                handler_node = arguments.named_children[-1] if arguments.named_children else None
+                args = arguments.named_children
+                handler_node = args[-1] if args else None
+                entrypoint_contract = _express_route_middleware_contract(args, source)
             else:
                 callee_text = _text(callee, source)
                 if "." not in callee_text:
@@ -1017,6 +1020,8 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                     http_methods = (method.upper(),)
                     path_value = _string(args[0], source) if args else None
                     handler_node = args[-1] if len(args) > 1 else None
+                    if receiver in express_route_prefixes:
+                        entrypoint_contract = _express_route_middleware_contract(args[1:], source)
                 elif method == "route" and receiver in fastify_receivers:
                     route_definition = _fastify_literal_route_definition(args, source)
                     if route_definition is None:
@@ -1042,7 +1047,10 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             if path_value is None or handler is None:
                 continue
             result.entrypoints.extend(
-                EntryPoint("http", http_method, path_value, handler.symbol, _evidence(path, root, node))
+                EntryPoint(
+                    "http", http_method, path_value, handler.symbol, _evidence(path, root, node),
+                    contract=entrypoint_contract,
+                )
                 for http_method in http_methods
             )
         for parent in _walk(tree):
@@ -2179,6 +2187,23 @@ def _express_literal_chained_route(
     if path is None:
         return None
     return receiver, _text(method_node, source), path
+
+
+def _express_route_middleware_contract(arguments: list[Node], source: bytes) -> dict | None:
+    """Return directly registered Express middleware names, excluding the handler.
+
+    Express executes every argument before the final handler as middleware. The
+    analyzer deliberately records only direct identifiers: factories, inline
+    callbacks and computed expressions may be valid middleware but cannot be
+    named without guessing. This is route metadata, not a claim about the
+    middleware's authorization or validation semantics.
+    """
+    middleware = [
+        {"symbol": _text(argument, source)}
+        for argument in arguments[:-1]
+        if argument.type == "identifier"
+    ]
+    return {"route_middlewares": middleware} if middleware else None
 
 
 def _fastify_route_receivers(source: str) -> frozenset[str]:

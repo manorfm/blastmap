@@ -19,6 +19,7 @@ class EntryPoint:
     name: str
     symbol: str
     evidence: Evidence
+    contract: dict | None = None
 
 
 @dataclass(frozen=True)

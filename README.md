@@ -276,6 +276,11 @@ multiply-mounted routers and unresolved handlers are intentionally left out rath
 guessed into an endpoint.
 The deterministic subset scans `.js`, `.jsx`, `.ts` and `.tsx` sources under a
 detected Node service; dynamic registration and unsupported syntax remain unknown.
+For a literal Express route, `describe_entrypoint` also returns
+`contract.route_middlewares` when middleware is registered as a direct identifier
+before the handler. This association belongs to the exact route, even when handlers
+are reused. It records registration only: factories, inline/computed middleware and
+whether a middleware performs authorization or validation remain unknown.
 The same literal method/path and handler rules cover Fastify instances created from a
 locally imported factory, including `app.route({ method, url, handler })` objects with
 all three fields literal or directly named in the same file. A literal `method` array
@@ -520,7 +525,7 @@ The supported deterministic subset is intentionally focused:
 | --- | --- | --- |
 | Go | HTTP handlers, calls, GORM and `database/sql`, RabbitMQ, Kafka (`segmentio/kafka-go`) | Dynamic routing and types remain unknown. |
 | Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs; Feign and injected `RestTemplate`/`WebClient` calls with literal internal service/route mappings; explicit method-level retry/timeout limits | Only unambiguous local wiring and literal limits are resolved; dynamic URLs, policies and values, IPs, localhost and external domains are not inferred. |
-| Node and TypeScript | GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
+| Node and TypeScript | Express literal routes and direct route middleware registration, Fastify routes, NestJS controllers, GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
 | GraphQL | Operations, local schema contracts, input/output shapes | Remote composition, directives and federation behavior are not inferred. |
 | Persistence and messaging | Postgres/Mongo evidence, RabbitMQ bindings and contracts, Kafka producer/consumer contracts | Only literal, source-proven configuration is exposed; Kafka consumer detection is Go/JVM/Node only, no Python. |
 | Cloud/infra | AWS (SQS, SNS, S3, EventBridge, Kinesis), Azure (Blob Storage, Service Bus, Event Hub) and GCP (Pub/Sub) call sites (Go, Java, Kotlin, Node/TS; Python is AWS-only via `boto3`), plus Terraform/CloudFormation/plain Kubernetes declarations, parsed with real grammars (`python-hcl2`, `cfn-flip`) — never keyword matching. A cloud call also produces a `FlowEdge`, visible in `trace_flow`/`describe_entrypoint`, for every language except Python. | GCS, Dockerfile, and unrendered Helm templates are not resolved; Azure Service Bus code facts can't distinguish queue from topic (defaults to queue — see `describe_cloud_dependencies`). |

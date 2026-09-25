@@ -83,6 +83,34 @@ def test_describe_entrypoint_includes_a_deterministic_graphql_contract(tmp_path)
     assert detail["contract"] == {"arguments": [], "returns": {"type": "Receipt", "required": True}}
 
 
+def test_describe_entrypoint_keeps_route_middleware_with_its_exact_route(tmp_path):
+    conn = open_db(tmp_path / "route-middleware-contract.db")
+    service_id = services.ensure_service(conn, "orders", "/repos/orders", "node-ts")
+    evidence = Evidence("orders.ts", 8, 8)
+    flows.replace_analysis(
+        conn,
+        service_id,
+        AnalysisResult(
+            entrypoints=[
+                EntryPoint(
+                    "http", "POST", "/orders", "orders.create", evidence,
+                    contract={"route_middlewares": [{"symbol": "requireAuthentication"}]},
+                ),
+                EntryPoint(
+                    "http", "POST", "/internal/orders", "orders.create", evidence,
+                    contract={"route_middlewares": [{"symbol": "requireEmployee"}]},
+                ),
+            ],
+        ),
+    )
+
+    public = queries.describe_entrypoint(conn, "orders", "http", "post", "/orders")
+    internal = queries.describe_entrypoint(conn, "orders", "http", "post", "/internal/orders")
+
+    assert public["contract"] == {"route_middlewares": [{"symbol": "requireAuthentication"}]}
+    assert internal["contract"] == {"route_middlewares": [{"symbol": "requireEmployee"}]}
+
+
 def test_describe_entrypoint_includes_only_reachable_static_error_contracts(tmp_path):
     conn = open_db(tmp_path / "error-contracts.db")
     service_id = services.ensure_service(conn, "orders", "/repos/orders", "jvm-spring")

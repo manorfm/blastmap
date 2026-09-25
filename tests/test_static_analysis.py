@@ -489,6 +489,30 @@ app.post("/orders", createOrder);
     )
 
 
+def test_node_analyzer_records_literal_express_route_middleware_per_entrypoint(tmp_path: Path):
+    (tmp_path / "orders.ts").write_text(
+        '''import express from "express";
+const app = express();
+
+function requireAuthentication(req: Request, res: Response, next: NextFunction) { next(); }
+function validateOrder(req: Request, res: Response, next: NextFunction) { next(); }
+function createOrder(req: Request, res: Response) { return orderService.create(req.body); }
+
+app.post("/orders", requireAuthentication, validateOrder, createOrder);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.entrypoints[0].contract == {
+        "route_middlewares": [
+            {"symbol": "requireAuthentication"},
+            {"symbol": "validateOrder"},
+        ],
+    }
+
+
 def test_node_analyzer_exposes_literal_express_head_and_options_routes(tmp_path: Path):
     (tmp_path / "health.ts").write_text(
         '''import express from "express";
