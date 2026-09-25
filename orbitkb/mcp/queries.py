@@ -2,6 +2,7 @@
 db.repositories.* modules (and, for find_change_surface, over generation.change_surface)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -1391,6 +1392,7 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
 def validate_runtime_configuration_follow_up(
     conn: sqlite3.Connection, plan_id: str, change_unit_id: str, returned_workloads: object,
     source_import_truncated: object, current_offset: object = 0, current_limit: object = DEFAULT_LIST_LIMIT,
+    previous_page_fingerprint: object = None,
 ) -> dict:
     """Compare one runtime-configuration page with a truncated change-unit target."""
     if not isinstance(returned_workloads, list):
@@ -1407,6 +1409,11 @@ def validate_runtime_configuration_follow_up(
         return {"error": f"current_limit must be an integer between 1 and {MAX_LIST_LIMIT}"}
     if current_offset % current_limit != 0:
         return {"error": "current_offset must be a multiple of current_limit"}
+    if previous_page_fingerprint is not None and (
+        not isinstance(previous_page_fingerprint, str)
+        or re.fullmatch(r"[0-9a-f]{64}", previous_page_fingerprint) is None
+    ):
+        return {"error": "previous_page_fingerprint must be a SHA-256 hex digest"}
     match = re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)
     if match is None:
         return {"error": "invalid plan_id"}
@@ -1436,6 +1443,13 @@ def validate_runtime_configuration_follow_up(
         else "needs_next_page" if source_import_truncated
         else "incomplete"
     )
+    page_fingerprint = None
+    if status == "needs_next_page":
+        page_fingerprint, page_fingerprint_error = _runtime_configuration_page_fingerprint(returned_workloads)
+        if page_fingerprint_error is not None:
+            return {"error": page_fingerprint_error}
+        if previous_page_fingerprint == page_fingerprint:
+            status = "stalled"
     response = {
         "plan_id": plan_id,
         "change_unit_id": change_unit_id,
@@ -1445,6 +1459,7 @@ def validate_runtime_configuration_follow_up(
         "continue_pagination": status == "needs_next_page",
     }
     if status == "needs_next_page":
+        response["page_fingerprint"] = page_fingerprint
         response["next_query"] = {
             "tool": "describe_runtime_configuration",
             "arguments": {
@@ -1452,6 +1467,8 @@ def validate_runtime_configuration_follow_up(
                 "offset": current_offset + current_limit,
             },
         }
+    elif status == "stalled":
+        response["reason"] = "runtime configuration page repeated"
     return response
 
 
@@ -1613,6 +1630,15 @@ def _returned_workload_scope_keys(workloads: list[object]) -> tuple[set[tuple[st
             return set(), "each returned workload must have non-empty kind, name, and container"
         scopes.add(scope)
     return scopes, None
+
+
+def _runtime_configuration_page_fingerprint(workloads: list[object]) -> tuple[str | None, str | None]:
+    """Return a stable marker for one agent-provided runtime-configuration page."""
+    try:
+        canonical_page = json.dumps(workloads, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    except (TypeError, ValueError):
+        return None, "returned_workloads must contain JSON values"
+    return hashlib.sha256(canonical_page.encode()).hexdigest(), None
 
 
 def _truncated_workload_evidence_next_step(workloads: list[dict]) -> str:

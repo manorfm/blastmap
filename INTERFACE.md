@@ -197,6 +197,9 @@ whether a further page is useful.
 Its `returned_workloads` accepts direct identities or the `source_imports` entries
 from `describe_runtime_configuration`. A direct identity that conflicts with a nested
 `workload` is rejected rather than used for pagination.
+When it recommends another page, it returns `page_fingerprint`; pass that as
+`previous_page_fingerprint` for the next validation. An identical page without the
+target is reported as `stalled`, not another pagination instruction.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.

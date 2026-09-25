@@ -197,6 +197,9 @@ whether another page is useful.
 It accepts either direct workload identities or the `source_imports` entries returned
 by `describe_runtime_configuration`; contradictory direct and nested identities are
 rejected rather than continuing from ambiguous context.
+When another page is needed, the response includes `page_fingerprint`. Send it as
+`previous_page_fingerprint` while validating the next page: a repeated page becomes
+`stalled` instead of producing another query.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset

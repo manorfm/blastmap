@@ -742,13 +742,15 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         }],
         source_import_truncated=True,
     ) == {"error": "returned workload identity conflicts with nested workload"}
-    assert queries.validate_runtime_configuration_follow_up(
+    first_follow_up = queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],
         "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         [],
         source_import_truncated=True,
-    ) == {
+    )
+    assert first_follow_up["page_fingerprint"]
+    assert {key: value for key, value in first_follow_up.items() if key != "page_fingerprint"} == {
         "plan_id": plan["plan_id"],
         "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         "status": "needs_next_page",
@@ -762,6 +764,40 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
             "arguments": {"service": "checkout-service", "limit": 50, "offset": 50},
         },
     }
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
+        source_import_truncated=True,
+        current_offset=50,
+        previous_page_fingerprint=first_follow_up["page_fingerprint"],
+    ) == {
+        "plan_id": plan["plan_id"],
+        "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        "status": "stalled",
+        "matched_workloads": [],
+        "missing_workloads": [{
+            "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 3,
+        }],
+        "continue_pagination": False,
+        "reason": "runtime configuration page repeated",
+    }
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
+        source_import_truncated=True,
+        previous_page_fingerprint="invalid",
+    ) == {"error": "previous_page_fingerprint must be a SHA-256 hex digest"}
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [{"kind": "Deployment", "name": "other", "container": "api", "extra": object()}],
+        source_import_truncated=True,
+    ) == {"error": "returned_workloads must contain JSON values"}
     assert queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],
