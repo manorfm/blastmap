@@ -49,6 +49,7 @@ from orbitkb.analysis.models import (
     FeatureFlag,
     FlowBoundary,
     FlowEdge,
+    GrpcHandler,
     Injection,
     MessageContract,
     MigrationFact,
@@ -62,7 +63,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "10"
+STATIC_ANALYSIS_INPUT_VERSION = "11"
 
 
 def _walk(node: Node):
@@ -970,6 +971,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         client_declarations = node_stateful_client_declarations(source_text)
         command_imports = node_command_imports(source_text)
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
+        result.grpc_handlers.extend(_node_nest_grpc_handlers(tree, source, path, root, imports))
         for injection in _node_nest_constructor_injections(tree, source, path, root, imports):
             result.injections.append(injection)
             result.edges.append(FlowEdge(injection.consumer, injection.contract, "injects", injection.evidence))
@@ -2343,6 +2345,48 @@ _NEST_CACHE_DECORATORS = {
 _NEST_RATE_LIMIT_DECORATORS = {"throttler.Throttle": "Throttle"}
 
 
+def _node_nest_grpc_handlers(
+    tree: Node, source: bytes, path: Path, root: Path, imports: tuple[tuple[str, str], ...],
+) -> list[GrpcHandler]:
+    """Return Nest gRPC handlers with explicit service and RPC literals only."""
+    nest_imports = {
+        local: imported.rsplit(".", 1)[-1]
+        for local, imported in imports
+        if imported.startswith("common.")
+    }
+    imported_names = dict(imports)
+    if "Controller" not in nest_imports.values() or "microservices.GrpcMethod" not in imported_names.values():
+        return []
+    handlers: list[GrpcHandler] = []
+    for class_node in _walk(tree):
+        if class_node.type != "class_declaration":
+            continue
+        class_name = class_node.child_by_field_name("name")
+        class_body = class_node.child_by_field_name("body")
+        if class_name is None or class_body is None:
+            continue
+        if _nest_decorator_path(_preceding_decorators(class_node), source, nest_imports, "Controller") is None:
+            continue
+        decorators: list[Node] = []
+        for child in class_body.named_children:
+            if child.type == "decorator":
+                decorators.append(child)
+                continue
+            if child.type != "method_definition":
+                decorators.clear()
+                continue
+            grpc_method = _nest_grpc_method(list(decorators), source, imported_names)
+            decorators.clear()
+            name = child.child_by_field_name("name")
+            if grpc_method is None or name is None:
+                continue
+            service, rpc = grpc_method
+            handlers.append(GrpcHandler(
+                service, rpc, f"{_text(class_name, source)}.{_text(name, source)}", _evidence(path, root, child),
+            ))
+    return handlers
+
+
 def _node_nest_constructor_injections(
     tree: Node, source: bytes, path: Path, root: Path, imports: tuple[tuple[str, str], ...],
 ) -> list[Injection]:
@@ -2548,6 +2592,26 @@ def _nest_method_route(
     return None
 
 
+def _nest_grpc_method(
+    decorators: list[Node], source: bytes, imports: dict[str, str],
+) -> tuple[str, str] | None:
+    for decorator in decorators:
+        call = next((child for child in decorator.named_children if child.type == "call_expression"), None)
+        if call is None:
+            continue
+        function = call.child_by_field_name("function")
+        arguments = call.child_by_field_name("arguments")
+        if function is None or arguments is None or imports.get(_text(function, source)) != "microservices.GrpcMethod":
+            continue
+        args = arguments.named_children
+        if len(args) != 2:
+            continue
+        service, rpc = (_string(argument, source) for argument in args)
+        if service is not None and rpc is not None:
+            return service, rpc
+    return None
+
+
 def _nest_route_decorator_registrations(
     decorators: list[Node], source: bytes, imported_names: dict[str, str], expected: str, scope: str,
 ) -> list[dict[str, str]]:
@@ -2742,6 +2806,7 @@ class StaticAnalysisEngine:
         _enrich_rabbitmq_contracts(result.contracts, files)
         _enrich_openapi_contracts(result, root)
         _enrich_protobuf_contracts(result, root)
+        _link_nest_grpc_handlers(result)
         result.configuration_bindings.extend(_literal_configuration_bindings(result.symbols, root))
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
@@ -3222,6 +3287,35 @@ def _enrich_protobuf_contracts(result: AnalysisResult, root: Path) -> None:
             continue
         result.entrypoints.append(entrypoint)
         result.contracts[entrypoint.symbol] = {"formal_contract": candidate.contract}
+
+
+def _link_nest_grpc_handlers(result: AnalysisResult) -> None:
+    """Link one unique declared Protobuf RPC to one explicit Nest handler.
+
+    This establishes source-level intent only. It does not claim a transport
+    server, generated stubs or runtime registration is present.
+    """
+    declared: dict[tuple[str, str], list[EntryPoint]] = {}
+    for entrypoint in result.entrypoints:
+        if entrypoint.kind != "grpc":
+            continue
+        contract = result.contracts.get(entrypoint.symbol, {}).get("formal_contract", {})
+        if not isinstance(contract, dict):
+            continue
+        service = contract.get("service")
+        rpc = contract.get("rpc")
+        if isinstance(service, str) and isinstance(rpc, str):
+            declared.setdefault((service, rpc), []).append(entrypoint)
+    handlers: dict[tuple[str, str], list[GrpcHandler]] = {}
+    for handler in result.grpc_handlers:
+        handlers.setdefault((handler.service, handler.rpc), []).append(handler)
+    for key, rpc_entrypoints in declared.items():
+        matching_handlers = handlers.get(key, [])
+        if len(rpc_entrypoints) != 1 or len(matching_handlers) != 1:
+            continue
+        entrypoint = rpc_entrypoints[0]
+        handler = matching_handlers[0]
+        result.edges.append(FlowEdge(entrypoint.symbol, handler.symbol, "invokes", handler.evidence))
 
 
 def _protobuf_rpcs(root: Path) -> list[_ProtobufRpc]:

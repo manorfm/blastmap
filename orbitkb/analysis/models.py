@@ -108,6 +108,16 @@ class StaticServiceCall:
 
 
 @dataclass(frozen=True)
+class GrpcHandler:
+    """A Nest handler explicitly bound to a literal Protobuf service/RPC name."""
+
+    service: str
+    rpc: str
+    symbol: str
+    evidence: Evidence
+
+
+@dataclass(frozen=True)
 class ResiliencePolicy:
     """A literal timeout or retry limit declared by a local source symbol."""
 
@@ -187,6 +197,7 @@ class AnalysisResult:
     boundaries: list[FlowBoundary] = field(default_factory=list)
     error_contracts: list[ErrorContract] = field(default_factory=list)
     static_service_calls: list[StaticServiceCall] = field(default_factory=list)
+    grpc_handlers: list[GrpcHandler] = field(default_factory=list)
     resilience_policies: list[ResiliencePolicy] = field(default_factory=list)
     persistence_facts: list[PersistenceFact] = field(default_factory=list)
     migration_facts: list[MigrationFact] = field(default_factory=list)
@@ -204,6 +215,7 @@ class AnalysisResult:
         self.boundaries.extend(other.boundaries)
         self.error_contracts.extend(other.error_contracts)
         self.static_service_calls.extend(other.static_service_calls)
+        self.grpc_handlers.extend(other.grpc_handlers)
         self.resilience_policies.extend(other.resilience_policies)
         self.persistence_facts.extend(other.persistence_facts)
         self.migration_facts.extend(other.migration_facts)

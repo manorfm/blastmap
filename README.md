@@ -331,9 +331,12 @@ Conflicting operations from more than one specification are also left unlinked.
 
 Literal Protobuf service RPC signatures are exposed as `grpc` entrypoints, with
 package, request/response types, streaming flags, imports and source evidence. They
-describe the declared wire contract only: OrbitKB does not infer a server handler,
-client or runtime registration from a `.proto` file. Duplicate service/RPC declarations
-are omitted rather than arbitrarily selecting one.
+describe the declared wire contract only. When one uniquely declared RPC has one Nest
+`@GrpcMethod("Service", "Method")` handler imported from `@nestjs/microservices`,
+the entrypoint flow links to that method. This is code-level intent, not proof of a
+server, generated stub or runtime registration. Clients and dynamic decorator arguments
+remain unknown. Duplicate service/RPC declarations or handlers are omitted rather than
+arbitrarily selecting one.
 
 `describe_configuration` lists literal environment-variable keys read by local
 Node/TypeScript, Java/Kotlin and Go symbols, plus Java/Kotlin `System.getProperty`

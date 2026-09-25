@@ -2146,6 +2146,42 @@ service Inventory {
     }
 
 
+def test_static_analysis_links_a_literal_nest_grpc_handler_to_a_unique_proto_rpc(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "inventory.grpc-controller.ts").write_text(
+        '''import { Controller } from "@nestjs/common";
+import { GrpcMethod } from "@nestjs/microservices";
+
+@Controller()
+export class InventoryGrpcController {
+  @GrpcMethod("Inventory", "Reserve")
+  reserve(input: ReserveRequest) {
+    return this.inventoryService.reserve(input);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert any(
+        edge.source == "proto.inventory.v1.Inventory.Reserve"
+        and edge.target == "InventoryGrpcController.reserve"
+        and edge.kind == "invokes"
+        for edge in result.edges
+    )
+
+
 def test_static_analysis_ignores_ambiguous_protobuf_rpc_declarations(tmp_path: Path):
     for name in ("inventory.proto", "inventory-duplicate.proto"):
         (tmp_path / name).write_text(
