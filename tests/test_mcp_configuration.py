@@ -151,6 +151,37 @@ def test_describe_runtime_configuration_exposes_env_from_sources_with_unknown_ke
     ]
 
 
+def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
+    conn = open_db(tmp_path / "runtime-configuration-workload-filter.db")
+    repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")
+    services.ensure_service(conn, "orders", "/repos/shop/orders", "node-ts", repository_id=repository_id)
+    kubernetes_configuration.replace_kubernetes_configuration_source_imports(conn, repository_id, [
+        KubernetesConfigurationSourceImport(
+            source_kind="config_map", source_name="api-defaults", prefix=None,
+            workload_kind="Deployment", workload_name="orders", container_name="api",
+            file_path="deploy/orders.yaml", start_line=11, end_line=14, matched_service_name="orders",
+        ),
+        KubernetesConfigurationSourceImport(
+            source_kind="secret", source_name="worker-secrets", prefix=None,
+            workload_kind="Deployment", workload_name="orders", container_name="worker",
+            file_path="deploy/orders.yaml", start_line=20, end_line=23, matched_service_name="orders",
+        ),
+    ])
+
+    result = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        workloads=[{"kind": "Deployment", "name": "orders", "container": "worker"}],
+    )
+
+    assert [item["source"]["name"] for item in result["source_imports"]] == ["worker-secrets"]
+    assert result["source_import_total"] == 1
+    assert result["source_import_truncated"] is False
+    assert queries.describe_runtime_configuration(conn, "orders", workloads=[]) == {
+        "error": "workloads must be a non-empty list of workload identities",
+    }
+
+
 def test_describe_runtime_configuration_marks_an_env_from_source_not_declared_locally(tmp_path):
     conn = open_db(tmp_path / "runtime-configuration-env-from-source-unknown.db")
     repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")

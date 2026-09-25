@@ -778,7 +778,10 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         "continue_pagination": True,
         "next_query": {
             "tool": "describe_runtime_configuration",
-            "arguments": {"service": "checkout-service", "limit": 50, "offset": 50},
+            "arguments": {
+                "service": "checkout-service", "limit": 50, "offset": 0,
+                "workloads": [{"kind": "Deployment", "name": "checkout", "container": "api"}],
+            },
         },
     }
     stalled_follow_up = queries.validate_runtime_configuration_follow_up(
@@ -838,7 +841,7 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         [],
         source_import_truncated=True,
         current_offset=50,
-    )["next_query"]["arguments"]["offset"] == 100
+    )["next_query"]["arguments"]["offset"] == 0
     assert queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],
@@ -849,7 +852,10 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         current_limit=25,
     )["next_query"] == {
         "tool": "describe_runtime_configuration",
-        "arguments": {"service": "checkout-service", "limit": 25, "offset": 50},
+        "arguments": {
+            "service": "checkout-service", "limit": 25, "offset": 0,
+            "workloads": [{"kind": "Deployment", "name": "checkout", "container": "api"}],
+        },
     }
     assert queries.validate_runtime_configuration_follow_up(
         conn,

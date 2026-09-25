@@ -705,23 +705,29 @@ def describe_configuration(
 
 def describe_runtime_configuration(
     conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
-    repository: str | None = None,
+    repository: str | None = None, workloads: object = None,
 ) -> dict:
     """Return source-proven Kubernetes configuration references without values."""
     error = _validate_pagination(limit, offset)
     if error:
         return {"error": error}
+    selected_workload_scopes, workloads_error = _runtime_configuration_workload_scopes(workloads)
+    if workloads_error is not None:
+        return {"error": workloads_error}
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
+    all_bindings = kubernetes_configuration_repo.list_kubernetes_configuration_bindings_for_service(conn, row["id"])
+    all_source_imports = kubernetes_configuration_repo.list_kubernetes_configuration_source_imports_for_service(
+        conn, row["id"],
+    )
+    if selected_workload_scopes is not None:
+        all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_workload_scopes)
+        all_source_imports = _filter_runtime_configuration_workloads(all_source_imports, selected_workload_scopes)
     bindings, page = _paginate(
-        kubernetes_configuration_repo.list_kubernetes_configuration_bindings_for_service(conn, row["id"]),
-        limit, offset,
+        all_bindings, limit, offset,
     )
-    source_imports, source_import_page = _paginate(
-        kubernetes_configuration_repo.list_kubernetes_configuration_source_imports_for_service(conn, row["id"]),
-        limit, offset,
-    )
+    source_imports, source_import_page = _paginate(all_source_imports, limit, offset)
     source_import_unknowns_by_reference = {
         (
             unknown["source_kind"], unknown["source_name"], unknown["prefix"],
@@ -806,6 +812,33 @@ def _runtime_configuration_reference(item: sqlite3.Row) -> dict:
             "file": item["file_path"], "start_line": item["start_line"], "end_line": item["end_line"],
         },
     }
+
+
+def _runtime_configuration_workload_scopes(
+    workloads: object,
+) -> tuple[set[tuple[str, str, str]] | None, str | None]:
+    """Validate optional direct workload scopes used to reduce runtime context."""
+    if workloads is None:
+        return None, None
+    if not isinstance(workloads, list) or not workloads:
+        return None, "workloads must be a non-empty list of workload identities"
+    scopes: set[tuple[str, str, str]] = set()
+    for workload in workloads:
+        scope = _workload_scope_key(workload)
+        if scope is None:
+            return None, "workloads must be a non-empty list of workload identities"
+        scopes.add(scope)
+    return scopes, None
+
+
+def _filter_runtime_configuration_workloads(
+    records: list[sqlite3.Row], selected_scopes: set[tuple[str, str, str]],
+) -> list[sqlite3.Row]:
+    """Keep indexed runtime references only for explicitly selected workloads."""
+    return [
+        record for record in records
+        if (record["workload_kind"], record["workload_name"], record["container_name"]) in selected_scopes
+    ]
 
 
 def _runtime_configuration_source_import(
@@ -1474,7 +1507,11 @@ def validate_runtime_configuration_follow_up(
             "tool": "describe_runtime_configuration",
             "arguments": {
                 "service": change_unit["service"], "limit": current_limit,
-                "offset": current_offset + current_limit,
+                "offset": 0,
+                "workloads": [
+                    {field: workload[field] for field in ("kind", "name", "container")}
+                    for workload in missing_workloads
+                ],
             },
         }
     elif status == "stalled":

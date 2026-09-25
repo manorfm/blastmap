@@ -207,6 +207,9 @@ only when an audit needs the detailed matched scopes.
 The default response uses a short deterministic `trace_id` instead of repeating the
 plan and change-unit identifiers. Set `include_trace_details=true` to return both
 original identifiers when audit or external correlation requires them.
+`describe_runtime_configuration` accepts optional exact workload scopes. Runtime
+follow-ups use this filter for their remaining workloads, so later pages do not repeat
+already verified workload references.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset
