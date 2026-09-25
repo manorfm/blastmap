@@ -178,6 +178,10 @@ a state-writing consumer through the same literal channel, `plan_change` creates
 `retry-delivery` review. It links the persistent consumers as dependencies and asks
 for outbox/idempotency and consumer de-duplication checks; broker delivery remains an
 explicit runtime unknown.
+For a primary caller with a literal retry and a resolved downstream endpoint flow that
+exposes 4xx, `plan_change` creates a `retry-downstream-error` review. It asks to
+exclude the response from retries unless the remote contract explicitly marks it
+transient; unscoped service-level contracts remain excluded.
 For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific

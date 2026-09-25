@@ -480,6 +480,72 @@ def derive_retry_delivery_review_units(findings: list[dict], primary_services: s
     return units
 
 
+def derive_retry_downstream_error_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create retry reviews for resolved downstream endpoint 4xx contracts.
+
+    A source-level retry cannot prove its predicate handles a response, and some 4xx
+    contracts may be transient. The unit asks for an explicit exception instead of
+    classifying every downstream client error as permanently non-retryable.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_on_downstream_client_error":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 2 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.8
+            or detail.get("scope") != "endpoint_flow"
+        ):
+            continue
+        caller = detail.get("caller")
+        downstream = detail.get("downstream")
+        retry_policies = detail.get("retry_policies")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(caller, dict) or not isinstance(downstream, dict) or not isinstance(retry_policies, list)
+            or not retry_policies or not isinstance(evidence, list) or not evidence or caller.get("service") != services[0]
+            or not isinstance(caller.get("symbol"), str) or not isinstance(caller.get("method"), str)
+            or not isinstance(caller.get("path"), str) or downstream.get("service") != services[1]
+            or not isinstance(downstream.get("error_type"), str) or not isinstance(downstream.get("status"), str)
+            or not all(isinstance(policy, dict) and isinstance(policy.get("mechanism"), str) for policy in retry_policies)
+        ):
+            continue
+        service = services[0]
+        symbol = caller["symbol"]
+        method = caller["method"]
+        path = caller["path"]
+        dependency = downstream["service"]
+        error_type = downstream["error_type"]
+        status = downstream["status"]
+        key = service, symbol, dependency, error_type, status
+        if key in seen:
+            continue
+        seen.add(key)
+        units.append({
+            "id": f"retry-downstream-error:{service}:{symbol}:{dependency}:{error_type}:{status}",
+            "service": service,
+            "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review retry behavior for the indexed downstream client error"),
+            "preconditions": [],
+            "related_contracts": [f"{method} {path}", f"{dependency} HTTP {status}", f"error:{error_type}"],
+            "dependencies": [dependency],
+            "validation": [
+                f"verify retries in {symbol} exclude {dependency} HTTP {status} for {error_type} "
+                "unless its contract explicitly marks it transient",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_timeout_fallback_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
     """Create endpoint reviews for source-proven successful timeout fallbacks.
 

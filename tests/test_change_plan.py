@@ -30,6 +30,7 @@ from orbitkb.generation.change_plan import (
     derive_public_object_storage_review_units,
     derive_read_entrypoint_side_effect_review_units,
     derive_retry_delivery_review_units,
+    derive_retry_downstream_error_review_units,
     derive_retry_policy_review_units,
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
@@ -1470,6 +1471,67 @@ def test_retry_delivery_units_exclude_low_confidence_findings():
             "detail": {},
         },
     ], {"orders-service"}) == []
+
+
+def test_retry_downstream_error_units_include_a_resolved_endpoint_contract():
+    assert derive_retry_downstream_error_review_units([
+        {
+            "kind": "possible_retry_on_downstream_client_error",
+            "services": ["checkout-service", "inventory-service"],
+            "reason": "CheckoutService.submit retries inventory-service HTTP 409.",
+            "confidence": 0.8,
+            "detail": {
+                "caller": {
+                    "service": "checkout-service", "symbol": "CheckoutService.submit",
+                    "method": "POST", "path": "/orders",
+                },
+                "downstream": {
+                    "service": "inventory-service", "symbol": "InventoryService.reserve",
+                    "error_type": "InsufficientStock", "kind": "conflict", "status": "409",
+                },
+                "retry_policies": [{"mechanism": "reactor.retry", "value": 3, "unit": "attempts"}],
+                "scope": "endpoint_flow",
+                "evidence": [
+                    {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
+                    {"file": "InventoryService.java", "start_line": 31, "end_line": 31},
+                ],
+            },
+        },
+    ], {"checkout-service"}) == [{
+        "id": "retry-downstream-error:checkout-service:CheckoutService.submit:inventory-service:InsufficientStock:409",
+        "service": "checkout-service",
+        "target": {
+            "role": "application_flow", "symbol": "CheckoutService.submit",
+            "evidence": [
+                {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
+                {"file": "InventoryService.java", "start_line": 31, "end_line": 31},
+            ],
+        },
+        "action": "review",
+        "reason": "CheckoutService.submit retries inventory-service HTTP 409.",
+        "preconditions": [],
+        "related_contracts": ["POST /orders", "inventory-service HTTP 409", "error:InsufficientStock"],
+        "dependencies": ["inventory-service"],
+        "validation": [
+            "verify retries in CheckoutService.submit exclude inventory-service HTTP 409 for InsufficientStock unless its contract explicitly marks it transient",
+        ],
+        "confidence": 0.8,
+        "evidence": [
+            {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
+            {"file": "InventoryService.java", "start_line": 31, "end_line": 31},
+        ],
+    }]
+
+
+def test_retry_downstream_error_units_exclude_service_wide_contracts():
+    assert derive_retry_downstream_error_review_units([
+        {
+            "kind": "possible_retry_on_downstream_client_error",
+            "services": ["checkout-service", "inventory-service"],
+            "confidence": 0.8,
+            "detail": {"scope": "service_contracts"},
+        },
+    ], {"checkout-service"}) == []
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
