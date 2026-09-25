@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "16"
+STATIC_ANALYSIS_INPUT_VERSION = "17"
 
 
 def _walk(node: Node):
@@ -962,6 +962,10 @@ _KOTLIN_GRPC_IMPL_BASE = re.compile(
 _JVM_GRPC_STUB_FIELD = re.compile(
     r"\b(?P<service>[A-Za-z_]\w*)Grpc\.[A-Za-z_]\w*Stub\s+(?P<member>[A-Za-z_]\w*)\b",
 )
+_KOTLIN_GRPC_STUB_PROPERTY = re.compile(
+    r"\b(?:val|var)\s+(?P<member>[A-Za-z_]\w*)\s*:\s*(?:[A-Za-z_]\w*\.)*"
+    r"(?P<service>[A-Za-z_]\w*)GrpcKt\.[A-Za-z_]\w*Stub\b",
+)
 
 
 def _jvm_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
@@ -1054,6 +1058,34 @@ def _jvm_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClientB
                 match = matches[0]
                 bindings.append(GrpcClientBinding(
                     _text(class_name, source), match.group("member"), match.group("service"), _evidence(path, root, field),
+                ))
+    return bindings
+
+
+def _kotlin_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClientBinding]:
+    """Return direct Kotlin properties typed as generated gRPC coroutine stubs."""
+    parser = Parser(Language(tree_sitter_kotlin.language()))
+    bindings: list[GrpcClientBinding] = []
+    for path in files:
+        if path.suffix != ".kt":
+            continue
+        source = path.read_bytes()
+        tree = parser.parse(source)
+        for class_node in (node for node in _walk(tree.root_node) if node.type == "class_declaration"):
+            class_name = class_node.child_by_field_name("name")
+            class_body = next((node for node in class_node.named_children if node.type == "class_body"), None)
+            if class_name is None or class_body is None:
+                continue
+            for property_node in class_body.named_children:
+                if property_node.type != "property_declaration":
+                    continue
+                matches = list(_KOTLIN_GRPC_STUB_PROPERTY.finditer(_text(property_node, source)))
+                if len(matches) != 1:
+                    continue
+                match = matches[0]
+                bindings.append(GrpcClientBinding(
+                    _text(class_name, source), match.group("member"), match.group("service"),
+                    _evidence(path, root, property_node),
                 ))
     return bindings
 
@@ -3008,6 +3040,7 @@ class StaticAnalysisEngine:
             result.grpc_handlers.extend(_jvm_grpc_handlers(files, root))
             result.grpc_handlers.extend(_kotlin_grpc_handlers(files, root))
             result.grpc_client_bindings.extend(_jvm_grpc_client_bindings(files, root))
+            result.grpc_client_bindings.extend(_kotlin_grpc_client_bindings(files, root))
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)
         _enrich_openapi_contracts(result, root)
