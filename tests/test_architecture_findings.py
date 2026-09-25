@@ -185,7 +185,8 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
             "container_roles": ["initialization"], "availability": "optional", "confidence": 0.4,
             "workloads": [{
                 "kind": "Deployment", "name": "orders", "container": "migrate",
-                "container_role": "initialization",
+                "container_role": "initialization", "prefixes": ["ORDERS_", "PAYMENTS_"],
+                "includes_unprefixed_import": True,
             }],
             "evidence": [
                 {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15},
@@ -233,8 +234,14 @@ def test_kubernetes_env_from_source_unknown_orders_initialization_before_applica
 
     assert detail["container_roles"] == ["initialization", "application"]
     assert detail["workloads"] == [
-        {"kind": "Deployment", "name": "orders", "container": "migrate", "container_role": "initialization"},
-        {"kind": "Deployment", "name": "orders", "container": "api", "container_role": "application"},
+        {
+            "kind": "Deployment", "name": "orders", "container": "migrate", "container_role": "initialization",
+            "includes_unprefixed_import": True,
+        },
+        {
+            "kind": "Deployment", "name": "orders", "container": "api", "container_role": "application",
+            "includes_unprefixed_import": True,
+        },
     ]
     assert detail["unknowns"].count(
         "An initialization container using this source must complete before application containers start.",
@@ -265,6 +272,7 @@ def test_kubernetes_env_from_source_with_mixed_availability_stays_conservative(t
 
     assert finding["detail"]["availability"] == "mixed"
     assert finding["detail"]["includes_unprefixed_import"] is True
+    assert "workloads" not in finding["detail"]
     assert finding["detail"]["remediation"][-1] == (
         "Confirm source availability before relying on imported configuration during rollout."
     )

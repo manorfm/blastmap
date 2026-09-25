@@ -1973,7 +1973,10 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
             role for role in ("initialization", "application") if role in observed_container_roles
         ]
         workloads = ordered_kubernetes_workloads(
-            (row["workload_kind"], row["workload_name"], row["container_name"], row["container_role"])
+            (
+                row["workload_kind"], row["workload_name"], row["container_name"], row["container_role"],
+                row["prefix"],
+            )
             for row in imports
         )
         availability_values = {None if row["optional"] is None else bool(row["optional"]) for row in imports}

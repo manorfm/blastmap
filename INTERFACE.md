@@ -129,7 +129,8 @@ the source must be provisioned. An initialization-container import also reports 
 need to verify initialization completes before application containers start. When
 both roles occur, `container_roles` is lifecycle-ordered: `initialization`, then
 `application`. The finding also includes its proven workload/container scope when
-available; legacy snapshots omit it rather than guessing.
+available, including each scope's known prefixes; legacy snapshots omit it rather
+than guessing.
 
 `describe_feature_flags` returns literal reads through a locally proven feature-flag
 SDK, currently LaunchDarkly's Node server SDK. It returns key, provider and source

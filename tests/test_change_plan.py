@@ -548,8 +548,14 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
                 {"file": "deploy/checkout.yaml", "start_line": 20, "end_line": 23},
             ],
             "workloads": [
-                {"kind": "Deployment", "name": "checkout", "container": "migrate", "container_role": "initialization"},
-                {"kind": "Deployment", "name": "checkout", "container": "api", "container_role": "application"},
+                {
+                    "kind": "Deployment", "name": "checkout", "container": "migrate",
+                    "container_role": "initialization", "prefixes": ["ORDERS_"],
+                },
+                {
+                    "kind": "Deployment", "name": "checkout", "container": "api",
+                    "container_role": "application", "prefixes": ["PAYMENTS_"],
+                },
             ],
         },
         "action": "review",
@@ -597,6 +603,7 @@ def test_env_from_source_import_review_requires_availability_confirmation_when_u
         "confirm the owning repository, chart, controller, or deployment process for ConfigMap external-config",
         "confirm source availability before relying on imported configuration during rollout",
     ]
+    assert "workloads" not in units[0]["target"]
 
 
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():

@@ -521,25 +521,26 @@ def derive_runtime_configuration_source_import_unknown_review_units(
             ):
                 grouped.setdefault((source_kind, source_name), []).append((
                     reference, unknown.get("optional"), unknown.get("container_role"), unknown.get("workload_kind"),
-                    unknown.get("workload_name"), unknown.get("container_name"),
+                    unknown.get("workload_name"), unknown.get("container_name"), unknown.get("prefix"),
                 ))
         for (source_kind, source_name), records in sorted(grouped.items()):
             evidence = _sorted_evidence([
-                reference for reference, _optional, _container_role, _workload_kind, _workload_name, _container_name in records
+                reference
+                for reference, _optional, _container_role, _workload_kind, _workload_name, _container_name, _prefix in records
             ])
             source_label = "ConfigMap" if source_kind == "config_map" else "Secret"
             availability_values = {
                 None if optional is None else bool(optional)
-                for _reference, optional, _container_role, _workload_kind, _workload_name, _container_name in records
+                for _reference, optional, _container_role, _workload_kind, _workload_name, _container_name, _prefix in records
             }
             container_roles = {
                 container_role
-                for _reference, _optional, container_role, _workload_kind, _workload_name, _container_name in records
+                for _reference, _optional, container_role, _workload_kind, _workload_name, _container_name, _prefix in records
                 if container_role in {"application", "initialization"}
             }
             workloads = ordered_kubernetes_workloads(
-                (workload_kind, workload_name, container_name, container_role)
-                for _reference, _optional, container_role, workload_kind, workload_name, container_name in records
+                (workload_kind, workload_name, container_name, container_role, prefix)
+                for _reference, _optional, container_role, workload_kind, workload_name, container_name, prefix in records
             )
             availability = (
                 "optional" if availability_values == {True}
