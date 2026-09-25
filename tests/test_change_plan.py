@@ -738,6 +738,28 @@ def test_truncated_workload_evidence_next_step_uses_count_or_a_safe_legacy_fallb
     assert queries._truncated_workload_evidence_next_step([{}]) == "query_runtime_configuration"
 
 
+def test_evidence_follow_up_adds_pagination_for_a_large_workload_evidence_set():
+    assert queries._evidence_follow_up({
+        "service": "checkout-service",
+        "target": {
+            "workloads": [{
+                "kind": "Deployment", "name": "checkout", "container": "api",
+                "evidence_truncated": True, "evidence_total": 6,
+            }],
+        },
+    }) == {
+        "reason": "workload evidence is truncated",
+        "recommended_next_step": "query_runtime_configuration",
+        "workloads": [{
+            "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 6,
+        }],
+        "recommended_query": {
+            "tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"},
+        },
+        "pagination": {"limit": 50, "offset": 0, "continue_when": "source_import_truncated"},
+    }
+
+
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():
     assert derive_error_mapping_review_units([
         {

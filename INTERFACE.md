@@ -188,6 +188,8 @@ agent to complete runtime-configuration context and listing the affected
 workloads/containers.
 Its `recommended_next_step` favors the complete unit evidence for up to five known
 locations, and otherwise directs a runtime-configuration query.
+That query path includes an initial `pagination` guide; continue only when
+`source_import_truncated` is returned.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

@@ -1383,16 +1383,8 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
         "minimal_reading": _minimal_unit_reading(change_unit),
         "validation": change_unit["validation"],
     }
-    truncated_workloads = _truncated_workload_scopes(change_unit)
-    if truncated_workloads:
-        response["evidence_follow_up"] = {
-            "reason": "workload evidence is truncated",
-            "recommended_next_step": _truncated_workload_evidence_next_step(truncated_workloads),
-            "workloads": truncated_workloads,
-            "recommended_query": {
-                "tool": "describe_runtime_configuration", "arguments": {"service": change_unit["service"]},
-            },
-        }
+    if (evidence_follow_up := _evidence_follow_up(change_unit)) is not None:
+        response["evidence_follow_up"] = evidence_follow_up
     return response
 
 
@@ -1535,6 +1527,27 @@ def _truncated_workload_evidence_next_step(workloads: list[dict]) -> str:
     if max(totals, default=0) <= MAX_INLINE_WORKLOAD_EVIDENCE:
         return "inspect_change_unit_evidence"
     return "query_runtime_configuration"
+
+
+def _evidence_follow_up(change_unit: dict) -> dict | None:
+    """Build a bounded next action only when workload evidence was truncated."""
+    workloads = _truncated_workload_scopes(change_unit)
+    if not workloads:
+        return None
+    next_step = _truncated_workload_evidence_next_step(workloads)
+    follow_up = {
+        "reason": "workload evidence is truncated",
+        "recommended_next_step": next_step,
+        "workloads": workloads,
+        "recommended_query": {
+            "tool": "describe_runtime_configuration", "arguments": {"service": change_unit["service"]},
+        },
+    }
+    if next_step == "query_runtime_configuration":
+        follow_up["pagination"] = {
+            "limit": DEFAULT_LIST_LIMIT, "offset": 0, "continue_when": "source_import_truncated",
+        }
+    return follow_up
 
 
 def _kubernetes_workload_reading_scope(target: dict) -> str | None:
