@@ -241,7 +241,8 @@ arguments.
 Each surface accepts at most four active filter dimensions. Split a more specific
 investigation into separate queries rather than treating an empty intersection as a
 fact about the architecture. The structured `split_guidance.query_groups` lists the
-filter dimensions to carry into each query.
+filter dimensions to carry into each query. Its zero-based `execution_order` is a
+deterministic evidence-locality heuristic, not a claim about result cardinality.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.

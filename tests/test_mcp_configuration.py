@@ -318,6 +318,7 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
                 ],
                 ["binding_evidence_ranges"],
             ],
+            "execution_order": [1, 0],
         },
     }
     assert queries.describe_runtime_configuration(
@@ -337,6 +338,7 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
                 "source_import_workloads", "source_import_declaration_statuses",
                 "source_import_availabilities", "source_import_source_kinds",
             ], ["source_import_container_roles"]],
+            "execution_order": [0, 1],
         },
     }
     range_selected = queries.describe_runtime_configuration(

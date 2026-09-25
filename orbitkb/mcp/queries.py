@@ -73,6 +73,21 @@ DEFAULT_PLAN_TOKEN_BUDGET = 2200
 MAX_PLAN_TOKEN_BUDGET = 2200
 _FLOW_KINDS = {"invokes", "injects", "validates", "reads", "writes", "publishes", "consumes"}
 _EPIC_TYPE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+_RUNTIME_FILTER_DIMENSION_PRIORITY = {
+    "binding_evidence_ranges": 0,
+    "source_import_evidence_ranges": 0,
+    "binding_evidence_files": 1,
+    "source_import_evidence_files": 1,
+    "binding_workloads": 2,
+    "source_import_workloads": 2,
+    "binding_declaration_statuses": 3,
+    "source_import_declaration_statuses": 3,
+    "binding_source_kinds": 4,
+    "source_import_source_kinds": 4,
+    "source_import_availabilities": 5,
+    "source_import_container_roles": 6,
+    "source_import_prefixes": 7,
+}
 logger = logging.getLogger(__name__)
 
 
@@ -1004,17 +1019,30 @@ def _runtime_configuration_workload_scopes(
 
 def _runtime_configuration_filter_complexity_error(surface: str, dimensions: list[str]) -> dict:
     """Provide deterministic query groups when active filters exceed the safe bound."""
+    query_groups = [
+        dimensions[index : index + MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS]
+        for index in range(0, len(dimensions), MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS)
+    ]
     return {
         "error": f"{surface} filters must use at most {MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS} dimensions",
         "split_guidance": {
             "recommended_next_step": "split_filter_dimensions",
             "max_dimensions": MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS,
-            "query_groups": [
-                dimensions[index : index + MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS]
-                for index in range(0, len(dimensions), MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS)
-            ],
+            "query_groups": query_groups,
+            "execution_order": _runtime_configuration_filter_group_execution_order(query_groups),
         },
     }
+
+
+def _runtime_configuration_filter_group_execution_order(query_groups: list[list[str]]) -> list[int]:
+    """Order query groups by their most context-localizing dimension, stably."""
+    return sorted(
+        range(len(query_groups)),
+        key=lambda index: (
+            min(_RUNTIME_FILTER_DIMENSION_PRIORITY[dimension] for dimension in query_groups[index]),
+            index,
+        ),
+    )
 
 
 def _filter_runtime_configuration_workloads(
