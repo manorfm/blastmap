@@ -208,6 +208,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         source_import_container_roles: list[str] | None = None,
         source_import_prefixes: list[str] | None = None,
         source_import_include_unprefixed: bool = False,
+        binding_evidence_files: list[str] | None = None,
+        source_import_evidence_files: list[str] | None = None,
     ) -> dict:
         """List literal Kubernetes workload environment references to ConfigMaps
         and Secrets, plus literal ``envFrom`` sources with unknown per-key coverage.
@@ -219,14 +221,15 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         workload identities optionally limits both or either list to exact Kubernetes
         scopes. Source imports and bindings can also be filtered by static
         declaration-finding state and literal source kind; imports support literal
-        availability, indexed container role and exact envFrom prefix. Pass repository
-        when service names duplicate."""
+        availability, indexed container role, exact envFrom prefix and exact evidence
+        file. Pass repository when service names duplicate."""
         with closing(_conn()) as conn:
             return queries.describe_runtime_configuration(
                 conn, service, limit, offset, repository, workloads, binding_workloads, source_import_workloads,
                 source_import_declaration_statuses, source_import_availabilities, binding_declaration_statuses,
                 binding_source_kinds, source_import_source_kinds, source_import_container_roles,
-                source_import_prefixes, source_import_include_unprefixed,
+                source_import_prefixes, source_import_include_unprefixed, binding_evidence_files,
+                source_import_evidence_files,
             )
 
     @mcp.tool()

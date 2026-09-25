@@ -159,18 +159,18 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         KubernetesConfigurationBinding(
             environment_key="API_TOKEN", source_kind="config_map", source_name="api-config", source_key="token",
             workload_kind="Deployment", workload_name="orders", container_name="api",
-            file_path="deploy/orders.yaml", start_line=5, end_line=8, matched_service_name="orders",
+            file_path="deploy/api.yaml", start_line=5, end_line=8, matched_service_name="orders",
         ),
         KubernetesConfigurationBinding(
             environment_key="WORKER_TOKEN", source_kind="secret", source_name="worker-secrets", source_key="token",
             workload_kind="Deployment", workload_name="orders", container_name="worker",
-            file_path="deploy/orders.yaml", start_line=15, end_line=18, matched_service_name="orders",
+            file_path="deploy/worker.yaml", start_line=15, end_line=18, matched_service_name="orders",
         ),
     ])
     kubernetes_configuration.replace_kubernetes_configuration_key_mismatches(conn, repository_id, [
         KubernetesConfigurationKeyMismatch(
             environment_key="API_TOKEN", source_kind="config_map", source_name="api-config", source_key="token",
-            reference_file_path="deploy/orders.yaml", reference_start_line=5, reference_end_line=8,
+            reference_file_path="deploy/api.yaml", reference_start_line=5, reference_end_line=8,
             declaration_file_path="deploy/api-secrets.yaml", declaration_start_line=1, declaration_end_line=3,
             matched_service_name="orders",
         ),
@@ -178,7 +178,7 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     kubernetes_configuration.replace_kubernetes_configuration_source_unknowns(conn, repository_id, [
         KubernetesConfigurationSourceUnknown(
             environment_key="WORKER_TOKEN", source_kind="secret", source_name="worker-secrets", source_key="token",
-            reference_file_path="deploy/orders.yaml", reference_start_line=15, reference_end_line=18,
+            reference_file_path="deploy/worker.yaml", reference_start_line=15, reference_end_line=18,
             matched_service_name="orders",
         ),
     ])
@@ -186,20 +186,20 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         KubernetesConfigurationSourceImport(
             source_kind="config_map", source_name="api-defaults", prefix="API_",
             workload_kind="Deployment", workload_name="orders", container_name="api",
-            file_path="deploy/orders.yaml", start_line=11, end_line=14, container_role="initialization",
+            file_path="deploy/api.yaml", start_line=11, end_line=14, container_role="initialization",
             optional=True, matched_service_name="orders",
         ),
         KubernetesConfigurationSourceImport(
             source_kind="secret", source_name="worker-secrets", prefix=None,
             workload_kind="Deployment", workload_name="orders", container_name="worker",
-            file_path="deploy/orders.yaml", start_line=20, end_line=23, container_role="application",
+            file_path="deploy/worker.yaml", start_line=20, end_line=23, container_role="application",
             optional=False, matched_service_name="orders",
         ),
     ])
     kubernetes_configuration.replace_kubernetes_configuration_source_import_unknowns(conn, repository_id, [
         KubernetesConfigurationSourceImportUnknown(
             source_kind="config_map", source_name="api-defaults", prefix="API_",
-            reference_file_path="deploy/orders.yaml", reference_start_line=11, reference_end_line=14,
+            reference_file_path="deploy/api.yaml", reference_start_line=11, reference_end_line=14,
             matched_service_name="orders",
         ),
     ])
@@ -286,6 +286,14 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         source_import_include_unprefixed=True,
     )
     assert [item["source"]["name"] for item in unprefixed_imports["source_imports"]] == ["worker-secrets"]
+    evidence_selected = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_evidence_files=["deploy/api.yaml"],
+        source_import_evidence_files=["deploy/worker.yaml"],
+    )
+    assert [item["environment_key"] for item in evidence_selected["bindings"]] == ["API_TOKEN"]
+    assert [item["source"]["name"] for item in evidence_selected["source_imports"]] == ["worker-secrets"]
     assert queries.describe_runtime_configuration(conn, "orders", workloads=[]) == {
         "error": "workloads must be a non-empty list of workload identities",
     }
@@ -320,6 +328,11 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         "orders",
         source_import_prefixes=[""],
     ) == {"error": "source_import_prefixes must be a non-empty list of non-empty strings"}
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_evidence_files=[""],
+    ) == {"error": "binding_evidence_files must be a non-empty list of non-empty strings"}
     assert queries.describe_runtime_configuration(
         conn,
         "orders",

@@ -230,6 +230,8 @@ indexed fact.
 `source_import_prefixes` accepts exact non-empty `envFrom` prefixes. Set
 `source_import_include_unprefixed=true` to include only, or also include, imports
 without a prefix; this never infers individual imported environment keys.
+`binding_evidence_files` and `source_import_evidence_files` accept exact persisted
+evidence paths for their respective list. They do not read or pattern-match files.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.

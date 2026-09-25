@@ -710,7 +710,8 @@ def describe_runtime_configuration(
     source_import_availabilities: object = None, binding_declaration_statuses: object = None,
     binding_source_kinds: object = None, source_import_source_kinds: object = None,
     source_import_container_roles: object = None, source_import_prefixes: object = None,
-    source_import_include_unprefixed: object = False,
+    source_import_include_unprefixed: object = False, binding_evidence_files: object = None,
+    source_import_evidence_files: object = None,
 ) -> dict:
     """Return source-proven Kubernetes configuration references without values."""
     error = _validate_pagination(limit, offset)
@@ -773,11 +774,23 @@ def describe_runtime_configuration(
     )
     if source_import_container_roles_error is not None:
         return {"error": source_import_container_roles_error}
-    selected_prefixes, prefixes_error = _runtime_configuration_prefix_filter(source_import_prefixes)
+    selected_prefixes, prefixes_error = _runtime_configuration_string_filter(
+        source_import_prefixes, "source_import_prefixes",
+    )
     if prefixes_error is not None:
         return {"error": prefixes_error}
     if not isinstance(source_import_include_unprefixed, bool):
         return {"error": "source_import_include_unprefixed must be a boolean"}
+    selected_binding_evidence_files, binding_evidence_files_error = _runtime_configuration_string_filter(
+        binding_evidence_files, "binding_evidence_files",
+    )
+    if binding_evidence_files_error is not None:
+        return {"error": binding_evidence_files_error}
+    selected_source_import_evidence_files, source_import_evidence_files_error = _runtime_configuration_string_filter(
+        source_import_evidence_files, "source_import_evidence_files",
+    )
+    if source_import_evidence_files_error is not None:
+        return {"error": source_import_evidence_files_error}
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -789,6 +802,12 @@ def describe_runtime_configuration(
         all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_binding_scopes)
     if selected_source_import_scopes is not None:
         all_source_imports = _filter_runtime_configuration_workloads(all_source_imports, selected_source_import_scopes)
+    if selected_binding_evidence_files is not None:
+        all_bindings = _filter_runtime_configuration_evidence_files(all_bindings, selected_binding_evidence_files)
+    if selected_source_import_evidence_files is not None:
+        all_source_imports = _filter_runtime_configuration_evidence_files(
+            all_source_imports, selected_source_import_evidence_files,
+        )
     if selected_binding_source_kinds is not None:
         all_bindings = _filter_runtime_configuration_source_kinds(all_bindings, selected_binding_source_kinds)
     if selected_source_import_source_kinds is not None:
@@ -938,6 +957,13 @@ def _filter_runtime_configuration_source_kinds(
     return [record for record in records if record["source_kind"] in source_kinds]
 
 
+def _filter_runtime_configuration_evidence_files(
+    records: list[sqlite3.Row], evidence_files: set[str],
+) -> list[sqlite3.Row]:
+    """Keep only records with an exact persisted evidence file path."""
+    return [record for record in records if record["file_path"] in evidence_files]
+
+
 def _filter_runtime_configuration_source_import_container_roles(
     records: list[sqlite3.Row], container_roles: set[str],
 ) -> list[sqlite3.Row]:
@@ -1005,19 +1031,21 @@ def _runtime_configuration_choice_filter(
     return set(values), None
 
 
-def _runtime_configuration_prefix_filter(prefixes: object) -> tuple[set[str] | None, str | None]:
-    """Validate exact non-empty envFrom prefixes without interpreting key names."""
-    error = "source_import_prefixes must be a non-empty list of non-empty strings"
-    if prefixes is None:
+def _runtime_configuration_string_filter(
+    values: object, argument_name: str,
+) -> tuple[set[str] | None, str | None]:
+    """Validate exact non-empty strings used to filter persisted scalar facts."""
+    error = f"{argument_name} must be a non-empty list of non-empty strings"
+    if values is None:
         return None, None
     if (
-        not isinstance(prefixes, list)
-        or not prefixes
-        or len(prefixes) > MAX_LIST_LIMIT
-        or any(not isinstance(prefix, str) or not prefix for prefix in prefixes)
+        not isinstance(values, list)
+        or not values
+        or len(values) > MAX_LIST_LIMIT
+        or any(not isinstance(value, str) or not value for value in values)
     ):
         return None, error
-    return set(prefixes), None
+    return set(values), None
 
 
 def _filter_runtime_configuration_source_import_prefixes(
