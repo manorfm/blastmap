@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "12"
+STATIC_ANALYSIS_INPUT_VERSION = "13"
 
 
 def _walk(node: Node):
@@ -3419,11 +3419,12 @@ def _link_nest_grpc_client_calls(result: AnalysisResult) -> None:
             linked_edges.append(edge)
             continue
         binding = matching_bindings[0]
-        rpc_entrypoints = declared.get((binding.service, rpc), [])
-        if len(rpc_entrypoints) != 1:
+        resolved_rpc = _resolve_declared_protobuf_rpc(declared, binding.service, rpc)
+        if resolved_rpc is None:
             linked_edges.append(edge)
             continue
-        linked_edges.append(replace(edge, target=rpc_entrypoints[0].symbol, confidence="high"))
+        entrypoint, confidence = resolved_rpc
+        linked_edges.append(replace(edge, target=entrypoint.symbol, confidence=confidence))
     result.edges = linked_edges
 
 
@@ -3440,6 +3441,21 @@ def _declared_protobuf_rpc_entrypoints(result: AnalysisResult) -> dict[tuple[str
         if isinstance(service, str) and isinstance(rpc, str):
             declared.setdefault((service, rpc), []).append(entrypoint)
     return declared
+
+
+def _resolve_declared_protobuf_rpc(
+    declared: dict[tuple[str, str], list[EntryPoint]], service: str, rpc: str,
+) -> tuple[EntryPoint, str] | None:
+    exact = declared.get((service, rpc), [])
+    if len(exact) == 1:
+        return exact[0], "high"
+    camel_case_candidates = [
+        entrypoint
+        for (candidate_service, candidate_rpc), entrypoints in declared.items()
+        if candidate_service == service and candidate_rpc.casefold() == rpc.casefold()
+        for entrypoint in entrypoints
+    ]
+    return (camel_case_candidates[0], "medium") if len(camel_case_candidates) == 1 else None
 
 
 def _protobuf_rpcs(root: Path) -> list[_ProtobufRpc]:

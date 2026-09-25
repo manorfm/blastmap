@@ -338,7 +338,9 @@ server, generated stub or runtime registration. A Nest `ClientGrpc` imported fro
 same package can also link a direct `this.client.getService<T>("Service")` assignment
 and subsequent literal RPC method call to one unique declared RPC. Host, channel, token,
 stub generation, dynamic bindings and non-unique service/RPC names remain unknown.
-Duplicate declarations or handlers are omitted rather than arbitrarily selecting one.
+An exact RPC method name has high confidence; a unique case-only match such as
+`ReserveStock` → `reserveStock` has medium confidence. Duplicate declarations or
+handlers are omitted rather than arbitrarily selecting one.
 
 `describe_configuration` lists literal environment-variable keys read by local
 Node/TypeScript, Java/Kotlin and Go symbols, plus Java/Kotlin `System.getProperty`
