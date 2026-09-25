@@ -756,7 +756,9 @@ def test_evidence_follow_up_adds_pagination_for_a_large_workload_evidence_set():
         "recommended_query": {
             "tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"},
         },
-        "pagination": {"limit": 50, "offset": 0, "continue_when": "source_import_truncated"},
+        "pagination": {
+            "limit": 50, "offset": 0, "next_offset": 50, "continue_when": "source_import_truncated",
+        },
     }
 
 

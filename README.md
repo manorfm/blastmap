@@ -189,7 +189,8 @@ For up to five known evidence locations it recommends reading the complete unit 
 first; otherwise (or for legacy plans without a count) it recommends the runtime
 configuration query.
 For that query path, the follow-up supplies an initial pagination guide and asks
-the agent to continue only when `source_import_truncated` is returned.
+the agent to continue at `next_offset` only when `source_import_truncated` is
+returned.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned
