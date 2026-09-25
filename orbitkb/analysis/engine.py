@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "21"
+STATIC_ANALYSIS_INPUT_VERSION = "22"
 
 
 def _walk(node: Node):
@@ -969,6 +969,9 @@ _KOTLIN_GRPC_STUB_PROPERTY = re.compile(
     r"\b(?:val|var)\s+(?P<member>[A-Za-z_]\w*)\s*:\s*(?:[A-Za-z_]\w*\.)*"
     r"(?P<service>[A-Za-z_]\w*)Grpc(?:Kt)?\.[A-Za-z_]\w*Stub\b",
 )
+_GO_GRPC_UNIMPLEMENTED_SERVER = re.compile(
+    r"\b(?:[A-Za-z_]\w*\.)?Unimplemented(?P<service>[A-Za-z_]\w*)Server\b",
+)
 
 
 def _jvm_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
@@ -1130,6 +1133,58 @@ def _kotlin_direct_superclass(class_node: Node, source: bytes) -> str | None:
         return None
     match = re.fullmatch(r"\s*(?P<name>[A-Za-z_]\w*)\s*\([^()]*\)\s*", _text(specifications[0], source))
     return match.group("name") if match else None
+
+
+def _go_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
+    """Return Go methods on structs embedding one generated gRPC server base."""
+    parser = Parser(Language(tree_sitter_go.language()))
+    servers: dict[str, list[str]] = {}
+    methods: list[tuple[Node, bytes, Path]] = []
+    for path in files:
+        if path.suffix != ".go":
+            continue
+        source = path.read_bytes()
+        tree = parser.parse(source)
+        for node in _walk(tree.root_node):
+            if node.type == "type_spec":
+                name = node.child_by_field_name("name")
+                struct_type = node.child_by_field_name("type")
+                if name is None or struct_type is None or struct_type.type != "struct_type":
+                    continue
+                field_list = next(
+                    (child for child in struct_type.named_children if child.type == "field_declaration_list"), None,
+                )
+                if field_list is None:
+                    continue
+                matches = []
+                for field in field_list.named_children:
+                    if field.child_by_field_name("name") is None:
+                        matches.extend(_GO_GRPC_UNIMPLEMENTED_SERVER.finditer(_text(field, source)))
+                if len(matches) == 1:
+                    servers.setdefault(_text(name, source), []).append(matches[0].group("service"))
+            elif node.type == "method_declaration":
+                methods.append((node, source, path))
+    handlers: list[GrpcHandler] = []
+    for method, source, path in methods:
+        receiver = method.child_by_field_name("receiver")
+        name = method.child_by_field_name("name")
+        if receiver is None or name is None:
+            continue
+        receiver_match = re.fullmatch(
+            r"\s*\(\s*(?:[A-Za-z_]\w*\s+)?\*?(?P<type>[A-Za-z_]\w*)\s*\)\s*",
+            _text(receiver, source),
+        )
+        if receiver_match is None:
+            continue
+        receiver_type = receiver_match.group("type")
+        services = servers.get(receiver_type, [])
+        if len(services) != 1:
+            continue
+        method_name = _text(name, source)
+        handlers.append(GrpcHandler(
+            services[0], method_name, f"{receiver_type}.{method_name}", _evidence(path, root, method),
+        ))
+    return handlers
 
 
 class _NodeGraphqlAnalyzer(_FileAnalyzer):
@@ -3083,6 +3138,8 @@ class StaticAnalysisEngine:
             result.grpc_handlers.extend(_kotlin_grpc_handlers(files, root))
             result.grpc_client_bindings.extend(_jvm_grpc_client_bindings(files, root))
             result.grpc_client_bindings.extend(_kotlin_grpc_client_bindings(files, root))
+        if stack == "go":
+            result.grpc_handlers.extend(_go_grpc_handlers(files, root))
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)
         _enrich_openapi_contracts(result, root)

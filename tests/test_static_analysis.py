@@ -2368,6 +2368,71 @@ class InventoryGrpcService : InventoryGrpc.InventoryImplBase() {
     )
 
 
+def test_static_analysis_links_a_go_grpc_service_handler_to_a_unique_proto_rpc(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "inventory_server.go").write_text(
+        '''package inventory
+
+type InventoryServer struct {
+  pb.UnimplementedInventoryServer
+}
+
+func (s *InventoryServer) Reserve(ctx context.Context, request *pb.ReserveRequest) (*pb.ReserveResponse, error) {
+  return nil, nil
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert any(
+        edge.source == "proto.inventory.v1.Inventory.Reserve"
+        and edge.target == "InventoryServer.Reserve"
+        and edge.confidence == "high"
+        for edge in result.edges
+    )
+
+
+def test_static_analysis_ignores_a_go_named_generated_server_field(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "inventory_server.go").write_text(
+        '''package inventory
+
+type InventoryServer struct {
+  generated pb.UnimplementedInventoryServer
+}
+
+func (s *InventoryServer) Reserve(ctx context.Context, request *pb.ReserveRequest) (*pb.ReserveResponse, error) {
+  return nil, nil
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert not any(edge.target == "InventoryServer.Reserve" for edge in result.edges)
+
+
 def test_static_analysis_ignores_kotlin_grpc_handler_without_the_official_grpc_service_import(tmp_path: Path):
     (tmp_path / "inventory.proto").write_text(
         '''syntax = "proto3";

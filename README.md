@@ -351,6 +351,10 @@ service/RPC names remain unknown. An exact RPC method name has high confidence; 
 unique case-only match such as
 `ReserveStock` → `reserveStock` has medium confidence. Duplicate declarations or
 handlers are omitted rather than arbitrarily selecting one.
+Go methods on a struct that embeds exactly one generated
+`Unimplemented<Service>Server` receive the same handler link. This identifies source
+intent only; `grpc.Server` registration, interceptors and runtime exposure remain
+unknown.
 
 `describe_configuration` lists literal environment-variable keys read by local
 Node/TypeScript, Java/Kotlin and Go symbols, plus Java/Kotlin `System.getProperty`
