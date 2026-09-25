@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "20"
+STATIC_ANALYSIS_INPUT_VERSION = "21"
 
 
 def _walk(node: Node):
@@ -959,6 +959,9 @@ _JVM_GRPC_IMPL_BASE = re.compile(
 _KOTLIN_GRPC_IMPL_BASE = re.compile(
     r":\s+(?:[\w.]+\.)?(?P<service>[A-Za-z_]\w*)GrpcKt\.\w*CoroutineImplBase\s*\(",
 )
+_KOTLIN_JAVA_GRPC_IMPL_BASE = re.compile(
+    r":\s+(?:[\w.]+\.)?(?P<service>[A-Za-z_]\w*)Grpc\.\w*ImplBase\s*\(",
+)
 _JVM_GRPC_STUB_FIELD = re.compile(
     r"\b(?P<service>[A-Za-z_]\w*)Grpc\.[A-Za-z_]\w*Stub\s+(?P<member>[A-Za-z_]\w*)\b",
 )
@@ -1001,7 +1004,7 @@ def _jvm_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
 
 
 def _kotlin_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
-    """Return direct Kotlin ``@GrpcService`` coroutine implementations."""
+    """Return direct Kotlin ``@GrpcService`` implementations of generated bases."""
     parser = Parser(Language(tree_sitter_kotlin.language()))
     handlers: list[GrpcHandler] = []
     for path in files:
@@ -1013,7 +1016,8 @@ def _kotlin_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
         tree = parser.parse(source)
         for class_node in (node for node in _walk(tree.root_node) if node.type == "class_declaration"):
             annotations = _class_annotations(class_node, source)
-            base = _KOTLIN_GRPC_IMPL_BASE.search(_text(class_node, source))
+            class_source = _text(class_node, source)
+            base = _KOTLIN_GRPC_IMPL_BASE.search(class_source) or _KOTLIN_JAVA_GRPC_IMPL_BASE.search(class_source)
             class_name = class_node.child_by_field_name("name")
             class_body = next((node for node in class_node.named_children if node.type == "class_body"), None)
             if "@GrpcService" not in annotations or base is None or class_name is None or class_body is None:

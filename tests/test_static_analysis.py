@@ -2334,6 +2334,40 @@ class InventoryGrpcService : InventoryGrpcKt.InventoryCoroutineImplBase() {
     )
 
 
+def test_static_analysis_links_a_kotlin_java_grpc_service_handler_to_a_unique_proto_rpc(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "InventoryGrpcService.kt").write_text(
+        '''import net.devh.boot.grpc.server.service.GrpcService
+
+@GrpcService
+class InventoryGrpcService : InventoryGrpc.InventoryImplBase() {
+  override fun reserve(request: ReserveRequest, observer: StreamObserver<ReserveResponse>) {
+    inventoryService.reserve(request)
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert any(
+        edge.source == "proto.inventory.v1.Inventory.Reserve"
+        and edge.target == "InventoryGrpcService.reserve"
+        and edge.confidence == "medium"
+        for edge in result.edges
+    )
+
+
 def test_static_analysis_ignores_kotlin_grpc_handler_without_the_official_grpc_service_import(tmp_path: Path):
     (tmp_path / "inventory.proto").write_text(
         '''syntax = "proto3";
