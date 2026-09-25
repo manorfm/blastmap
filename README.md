@@ -182,6 +182,11 @@ For a primary caller with a literal retry and a resolved downstream endpoint flo
 exposes 4xx, `plan_change` creates a `retry-downstream-error` review. It asks to
 exclude the response from retries unless the remote contract explicitly marks it
 transient; unscoped service-level contracts remain excluded.
+For a primary symbol with local writes, a literal timeout/retry policy and a static
+HTTP call, `plan_change` creates a `partial-write-resilience` review. It asks for
+ordering, idempotency and recovery validation without assuming the execution order or
+whether a transaction, outbox, compensation, or retry-safe contract already protects
+the flow.
 For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific

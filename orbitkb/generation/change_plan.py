@@ -546,6 +546,68 @@ def derive_retry_downstream_error_review_units(
     return units
 
 
+def derive_partial_write_resilience_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create recovery reviews for local writes under literal HTTP resilience.
+
+    The source facts do not establish operation order or an enclosing transaction,
+    so the unit explicitly asks for recovery semantics rather than proposing a fix.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_resilience_policy_on_partial_write_flow":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.7
+        ):
+            continue
+        flow = detail.get("flow")
+        target = detail.get("target")
+        policies = detail.get("resilience_policies")
+        writes = detail.get("writes")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(flow, dict) or not isinstance(flow.get("symbol"), str) or not isinstance(target, dict)
+            or not isinstance(target.get("service"), str) or not isinstance(policies, list) or not policies
+            or not isinstance(writes, list) or not writes or not isinstance(evidence, list) or not evidence
+            or not all(isinstance(policy, dict) and isinstance(policy.get("kind"), str) for policy in policies)
+        ):
+            continue
+        service = services[0]
+        symbol = flow["symbol"]
+        dependency = target["service"]
+        key = service, symbol, dependency
+        if key in seen:
+            continue
+        seen.add(key)
+        method = target.get("method")
+        path = target.get("path")
+        contracts = [f"{method} {path}"] if isinstance(method, str) and isinstance(path, str) else [f"service:{dependency}"]
+        units.append({
+            "id": f"partial-write-resilience:{service}:{symbol}:{dependency}",
+            "service": service,
+            "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed write and resilient remote-call boundary"),
+            "preconditions": [],
+            "related_contracts": contracts,
+            "dependencies": [dependency],
+            "validation": [
+                f"verify ordering, idempotency, and recovery for writes in {symbol} and its {dependency} call",
+                "verify a transaction, outbox, compensation, or retry-safe contract protects partial effects",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_timeout_fallback_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
     """Create endpoint reviews for source-proven successful timeout fallbacks.
 

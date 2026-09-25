@@ -192,7 +192,11 @@ de-duplication; broker delivery and duplicate execution remain unknown. A primar
 caller can receive a `retry-downstream-error` review when a literal retry shares a
 source with a resolved downstream endpoint flow exposing 4xx. It asks to exclude that
 response unless its remote contract explicitly marks it transient; service-wide
-contracts are excluded. A primary service can receive a
+contracts are excluded. A primary service can receive a `partial-write-resilience`
+review when local writes, a literal timeout/retry policy, and a static HTTP call share
+one symbol. It asks for ordering, idempotency and recovery validation without claiming
+operation order or absence of transaction/outbox/compensation protection. A primary
+service can receive a
 `broad-error-handler` review for an explicit broad exception mapping; it preserves the
 handler as a potential final fallback and asks whether expected client/domain errors
 have specific mappings. A primary service can receive a `timeout-error-mapping`

@@ -26,6 +26,7 @@ from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.change_plan import (
     derive_error_mapping_review_units,
+    derive_partial_write_resilience_review_units,
     derive_persistence_migration_review_units,
     derive_public_object_storage_review_units,
     derive_read_entrypoint_side_effect_review_units,
@@ -1532,6 +1533,62 @@ def test_retry_downstream_error_units_exclude_service_wide_contracts():
             "detail": {"scope": "service_contracts"},
         },
     ], {"checkout-service"}) == []
+
+
+def test_partial_write_resilience_units_include_local_writes_and_remote_call():
+    assert derive_partial_write_resilience_review_units([
+        {
+            "kind": "possible_resilience_policy_on_partial_write_flow",
+            "services": ["orders-service"],
+            "reason": "OrderService.create writes locally and calls inventory under retry.",
+            "confidence": 0.7,
+            "detail": {
+                "flow": {"symbol": "OrderService.create"},
+                "target": {"service": "inventory-service", "method": "POST", "path": "/reservations"},
+                "resilience_policies": [{"kind": "retry", "mechanism": "reactor.retry", "value": 3, "unit": "attempts"}],
+                "writes": [{"target": "orders"}], "write_count": 1,
+                "evidence": [
+                    {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+                    {"file": "OrderService.java", "start_line": 22, "end_line": 22},
+                ],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "partial-write-resilience:orders-service:OrderService.create:inventory-service",
+        "service": "orders-service",
+        "target": {
+            "role": "application_flow", "symbol": "OrderService.create",
+            "evidence": [
+                {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+                {"file": "OrderService.java", "start_line": 22, "end_line": 22},
+            ],
+        },
+        "action": "review",
+        "reason": "OrderService.create writes locally and calls inventory under retry.",
+        "preconditions": [],
+        "related_contracts": ["POST /reservations"],
+        "dependencies": ["inventory-service"],
+        "validation": [
+            "verify ordering, idempotency, and recovery for writes in OrderService.create and its inventory-service call",
+            "verify a transaction, outbox, compensation, or retry-safe contract protects partial effects",
+        ],
+        "confidence": 0.7,
+        "evidence": [
+            {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+            {"file": "OrderService.java", "start_line": 22, "end_line": 22},
+        ],
+    }]
+
+
+def test_partial_write_resilience_units_exclude_low_confidence_findings():
+    assert derive_partial_write_resilience_review_units([
+        {
+            "kind": "possible_resilience_policy_on_partial_write_flow",
+            "services": ["orders-service"],
+            "confidence": 0.69,
+            "detail": {},
+        },
+    ], {"orders-service"}) == []
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
