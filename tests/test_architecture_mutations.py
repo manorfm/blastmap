@@ -45,6 +45,7 @@ from orbitkb.generation.architecture import (
     find_timeout_fallbacks_masking_failures,
     find_timeouts_mapped_as_internal_server_errors,
     find_timeouts_without_local_fallback,
+    find_unhandled_endpoint_errors,
     find_unmapped_downstream_errors,
     recompute_architecture_view,
 )
@@ -174,6 +175,49 @@ def test_error_semantics_lost_disappears_when_a_conflict_is_mapped_to_409(tmp_pa
     flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[raised, preserved]))
 
     assert find_error_semantics_lost(conn) == []
+
+
+def test_unhandled_endpoint_error_disappears_when_a_local_mapping_is_indexed(tmp_path: Path):
+    conn = open_db(tmp_path / "unhandled-endpoint-error.db")
+    service = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
+    entrypoint = EntryPoint("http", "POST", "/orders", "OrdersController.create", STATIC_EVIDENCE)
+    raised = ErrorContract(
+        source="OrderService.create", role="raises", error_kind="validation",
+        internal_type="InvalidOrderException", protocol="internal", transport_code=None,
+        public_code=None, exposes_internal_detail=False, retryability="not_retryable", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, service, AnalysisResult(
+        entrypoints=[entrypoint],
+        edges=[FlowEdge("OrdersController.create", "OrderService.create", "invokes", STATIC_EVIDENCE)],
+        error_contracts=[raised],
+    ))
+
+    findings = find_unhandled_endpoint_errors(conn)
+
+    assert _kinds(findings) == {"possible_unhandled_endpoint_error"}
+    assert findings[0]["detail"]["entrypoint"] == {
+        "method": "POST", "path": "/orders", "symbol": "OrdersController.create",
+    }
+    assert findings[0]["detail"]["origin"] == {
+        "symbol": "OrderService.create", "error_type": "InvalidOrderException", "kind": "validation",
+    }
+    run_id = recompute_architecture_view(conn)
+    assert {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    } == {"possible_unhandled_endpoint_error"}
+
+    mapped = ErrorContract(
+        source="ApiExceptionHandler.invalidOrder", role="maps", error_kind="validation",
+        internal_type="InvalidOrderException", protocol="http", transport_code="400",
+        public_code="INVALID_ORDER", exposes_internal_detail=False, retryability="not_retryable", evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(conn, service, AnalysisResult(
+        entrypoints=[entrypoint],
+        edges=[FlowEdge("OrdersController.create", "OrderService.create", "invokes", STATIC_EVIDENCE)],
+        error_contracts=[raised, mapped],
+    ))
+
+    assert find_unhandled_endpoint_errors(conn) == []
 
 
 def test_unmapped_downstream_error_disappears_when_caller_maps_the_known_error(tmp_path: Path):

@@ -462,6 +462,10 @@ When indexed Spring facts prove it, `find_architecture_smells` may also return
 the same source-proven client/domain exception is raised as a 4xx category and mapped
 to HTTP 5xx in one service. Both remain hypotheses: handlers, gateways or proxies
 outside the indexed source may intentionally alter the final response.
+`possible_unhandled_endpoint_error` is emitted only for an indexed HTTP entrypoint
+whose reachable static flow raises a known client/domain error and has no same-type
+HTTP mapping indexed locally. It does not claim a runtime 500: framework-global
+handlers, gateways and proxies remain unknown.
 
 `possible_unmapped_downstream_error` is a cross-service review signal. It prefers a
 source-proven Java/Kotlin static HTTP call with literal service and route mappings. When the

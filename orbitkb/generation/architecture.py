@@ -23,6 +23,7 @@ FAN_THRESHOLD = 4
 READ_ENTRYPOINT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 BROAD_EXCEPTION_TYPES = frozenset({"exception", "throwable", "error", "runtimeexception"})
 POTENTIALLY_NON_IDEMPOTENT_HTTP_METHODS = frozenset({"POST", "PATCH"})
+CLIENT_ERROR_KINDS = frozenset({"authorization", "conflict", "not_found", "rate_limit", "validation"})
 
 
 def _internal_edges(conn: sqlite3.Connection) -> list[tuple[int, int]]:
@@ -1051,6 +1052,85 @@ def find_error_semantics_lost(conn: sqlite3.Connection) -> list[dict]:
                 ],
             },
         })
+    return findings
+
+
+def find_unhandled_endpoint_errors(conn: sqlite3.Connection) -> list[dict]:
+    """Flag known client errors reachable from an HTTP entrypoint without a local mapping.
+
+    The static graph proves that an error-producing symbol is reachable from the
+    entrypoint. It cannot prove framework-global handlers, gateways or proxies, so
+    the finding remains a review signal rather than a claim about a runtime 5xx.
+    """
+    names = _service_names(conn)
+    entrypoints = conn.execute(
+        """SELECT service_id, method, name, symbol, file_path, start_line, end_line
+           FROM entrypoints WHERE kind = 'http'
+           ORDER BY service_id, method, name, symbol""",
+    ).fetchall()
+    mapped_by_service: dict[int, set[str]] = {}
+    findings: list[dict] = []
+    for entrypoint in entrypoints:
+        service_id = entrypoint["service_id"]
+        mapped_types = mapped_by_service.get(service_id)
+        if mapped_types is None:
+            mapped_rows = conn.execute(
+                """SELECT DISTINCT internal_type FROM static_error_contracts
+                   WHERE service_id = ? AND role = 'maps' AND protocol = 'http'
+                     AND internal_type IS NOT NULL""",
+                (service_id,),
+            ).fetchall()
+            mapped_types = {row["internal_type"] for row in mapped_rows}
+            mapped_by_service[service_id] = mapped_types
+        edges = flows_repo.list_reachable_edges(conn, service_id, entrypoint["symbol"], max_edges=200)
+        sources = {entrypoint["symbol"]}
+        for edge in edges:
+            sources.add(edge["from_symbol"])
+            sources.add(edge["to_symbol"])
+        raised_by_type: dict[str, sqlite3.Row] = {}
+        for contract in flows_repo.list_static_error_contracts_for_sources(conn, service_id, sources):
+            error_type = contract["internal_type"]
+            if (
+                contract["role"] == "raises"
+                and isinstance(error_type, str)
+                and contract["error_kind"] in CLIENT_ERROR_KINDS
+                and error_type not in mapped_types
+            ):
+                raised_by_type.setdefault(error_type, contract)
+        for error_type, contract in raised_by_type.items():
+            findings.append({
+                "kind": "possible_unhandled_endpoint_error", "severity": "warning",
+                "services": [names[service_id]],
+                "reason": (
+                    f"{names[service_id]} {entrypoint['method']} {entrypoint['name']} can reach "
+                    f"{contract['source']}, which raises {contract['error_kind']} error '{error_type}'; "
+                    "no local HTTP mapping for that type is indexed."
+                ),
+                "detail": {
+                    "entrypoint": {
+                        "method": entrypoint["method"], "path": entrypoint["name"],
+                        "symbol": entrypoint["symbol"],
+                    },
+                    "origin": {
+                        "symbol": contract["source"], "error_type": error_type,
+                        "kind": contract["error_kind"],
+                    },
+                    "confidence": 0.75,
+                    "evidence": [
+                        {
+                            "file": entrypoint["file_path"], "start_line": entrypoint["start_line"],
+                            "end_line": entrypoint["end_line"],
+                        },
+                        _edge_evidence(contract),
+                    ],
+                    "unknowns": [
+                        "A framework-global handler, gateway or proxy may map this error outside indexed source.",
+                    ],
+                    "remediation": [
+                        "Add or verify a safe HTTP mapping for the expected error type, including its public status and code.",
+                    ],
+                },
+            })
     return findings
 
 
@@ -2244,6 +2324,7 @@ _DETECTORS = (
     find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects, find_error_semantics_lost,
+    find_unhandled_endpoint_errors,
     find_static_http_calls_without_resilience_policy,
     find_retries_on_potentially_non_idempotent_http_calls,
     find_retries_on_downstream_client_errors,

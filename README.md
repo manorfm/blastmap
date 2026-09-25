@@ -473,6 +473,11 @@ literal timeout or retry policy on the same source symbol. This is a prompt to r
 the client boundary, not evidence that production has no protection: defaults and
 client configuration may live outside indexed source. Retrying non-idempotent work is
 not recommended without an idempotency guarantee.
+For indexed HTTP entrypoints, it also reports
+`possible_unhandled_endpoint_error` when a reachable local symbol raises a known
+client/domain error but no HTTP mapping for that exact type is indexed in the same
+service. The finding is a review signal: framework-global handlers, gateways and
+proxies outside indexed source remain unknown.
 
 When a source-proven retry policy and a source-proven `POST` or `PATCH` call occur in
 the same Spring symbol, OrbitKB also emits a retry/idempotency review signal. It does
