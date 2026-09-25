@@ -43,6 +43,7 @@ from orbitkb.generation.change_plan import (
     derive_error_mapping_review_units,
     derive_feature_flag_review_units,
     derive_persistence_migration_review_units,
+    derive_retry_policy_review_units,
     derive_runtime_configuration_mismatch_review_units,
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
@@ -1780,9 +1781,11 @@ def plan_change(
             for service in primary_services
             if (row := services_repo.get_service_by_name(conn, service, repository_id=repository_id)) is not None
         }
+        architecture_findings = find_architecture_smells(conn)["findings"]
         change_units = [
             *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
-            *derive_error_mapping_review_units(find_architecture_smells(conn)["findings"], error_mapping_services),
+            *derive_error_mapping_review_units(architecture_findings, error_mapping_services),
+            *derive_retry_policy_review_units(architecture_findings, error_mapping_services),
             *derive_persistence_migration_review_units(
                 change_surface_result["persistence_affected"], migration_facts_by_service, primary_services,
             ),

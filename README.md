@@ -169,6 +169,10 @@ endpoint flow exposes a 4xx without a local mapping creates a
 `downstream-error-mapping` review. It includes the remote service as a dependency and
 asks the agent to verify a deliberate boundary translation; service-wide or ambiguous
 downstream contracts are excluded.
+For a primary service, a literal retry policy in the same symbol as a source-proven
+non-retryable local error creates a `retry-policy` review. It asks to verify that the
+retry predicate excludes the permanent error, without assuming the recorded branch is
+actually retried at runtime.
 When an affected SQL table has an exactly matching indexed migration fact,
 `plan_change` adds a schema-review unit. A destructive operation requires deployment,
 backup and rollback validation; it never asserts that the migration needs to run.

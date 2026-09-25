@@ -288,6 +288,65 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
     return units
 
 
+def derive_retry_policy_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
+    """Turn source-proven retries of permanent local errors into review units.
+
+    This stays advisory because a source-level retry declaration cannot prove its
+    predicate retries the recorded branch. It deliberately excludes lower-confidence
+    retry findings that rely on call shape or downstream inference.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_on_non_retryable_error":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.8
+        ):
+            continue
+        error = detail.get("error")
+        retry_policies = detail.get("retry_policies")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(error, dict) or not isinstance(retry_policies, list) or not retry_policies
+            or not isinstance(evidence, list) or not evidence or not isinstance(error.get("symbol"), str)
+            or not isinstance(error.get("type"), str) or not isinstance(error.get("kind"), str)
+            or not all(isinstance(policy, dict) and isinstance(policy.get("mechanism"), str) for policy in retry_policies)
+        ):
+            continue
+        service = services[0]
+        symbol = error["symbol"]
+        error_type = error["type"]
+        error_kind = error["kind"]
+        key = service, symbol, error_type
+        if key in seen:
+            continue
+        seen.add(key)
+        contracts = [f"error:{error_type}"]
+        if isinstance(error.get("status"), str):
+            contracts.append(f"HTTP {error['status']}")
+        units.append({
+            "id": f"retry-policy:{service}:{symbol}:{error_type}",
+            "service": service,
+            "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed retry predicate for a permanent error"),
+            "preconditions": [],
+            "related_contracts": contracts,
+            "dependencies": [],
+            "validation": [
+                f"verify retries in {symbol} exclude the non-retryable {error_kind} error {error_type}",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_persistence_migration_review_units(
     persistence_affected: list[dict], migration_facts_by_service: dict[str, list[dict]], primary_services: set[str],
 ) -> list[dict]:

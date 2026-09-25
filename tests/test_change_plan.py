@@ -27,6 +27,7 @@ from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.change_plan import (
     derive_error_mapping_review_units,
     derive_persistence_migration_review_units,
+    derive_retry_policy_review_units,
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
 )
@@ -1107,6 +1108,51 @@ def test_error_mapping_units_include_a_proven_downstream_endpoint_contract_gap()
         "evidence": [
             {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
             {"file": "InventoryService.java", "start_line": 31, "end_line": 31},
+        ],
+    }]
+
+
+def test_retry_policy_units_include_a_non_retryable_error_in_the_same_symbol():
+    assert derive_retry_policy_review_units([
+        {
+            "kind": "possible_retry_on_non_retryable_error",
+            "services": ["orders-service"],
+            "reason": "OrderService.create retries a non-retryable validation error.",
+            "confidence": 0.8,
+            "detail": {
+                "error": {
+                    "symbol": "OrderService.create", "type": "InvalidOrderException",
+                    "kind": "validation", "status": "400",
+                },
+                "retry_policies": [{"mechanism": "reactor.retry", "value": 3, "unit": "attempts"}],
+                "evidence": [
+                    {"file": "OrderService.java", "start_line": 17, "end_line": 17},
+                    {"file": "OrderService.java", "start_line": 22, "end_line": 22},
+                ],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "retry-policy:orders-service:OrderService.create:InvalidOrderException",
+        "service": "orders-service",
+        "target": {
+            "role": "application_flow", "symbol": "OrderService.create",
+            "evidence": [
+                {"file": "OrderService.java", "start_line": 17, "end_line": 17},
+                {"file": "OrderService.java", "start_line": 22, "end_line": 22},
+            ],
+        },
+        "action": "review",
+        "reason": "OrderService.create retries a non-retryable validation error.",
+        "preconditions": [],
+        "related_contracts": ["error:InvalidOrderException", "HTTP 400"],
+        "dependencies": [],
+        "validation": [
+            "verify retries in OrderService.create exclude the non-retryable validation error InvalidOrderException",
+        ],
+        "confidence": 0.8,
+        "evidence": [
+            {"file": "OrderService.java", "start_line": 17, "end_line": 17},
+            {"file": "OrderService.java", "start_line": 22, "end_line": 22},
         ],
     }]
 
