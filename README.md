@@ -217,6 +217,9 @@ For imports, `source_import_declaration_statuses` filters `not_declared_locally`
 `not_reported` findings, while `source_import_availabilities` filters `optional`,
 `required`, or `unknown`. `not_reported` means no matching indexed finding, not proof
 that a declaration exists.
+`binding_declaration_statuses` filters `key_not_declared`, `not_declared_locally`,
+or `not_reported`; again, `not_reported` denotes no matching indexed finding rather
+than confirmation of a declaration.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset

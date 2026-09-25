@@ -707,7 +707,7 @@ def describe_runtime_configuration(
     conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
     repository: str | None = None, workloads: object = None, binding_workloads: object = None,
     source_import_workloads: object = None, source_import_declaration_statuses: object = None,
-    source_import_availabilities: object = None,
+    source_import_availabilities: object = None, binding_declaration_statuses: object = None,
 ) -> dict:
     """Return source-proven Kubernetes configuration references without values."""
     error = _validate_pagination(limit, offset)
@@ -746,6 +746,13 @@ def describe_runtime_configuration(
     )
     if availabilities_error is not None:
         return {"error": availabilities_error}
+    selected_binding_declaration_statuses, binding_declaration_statuses_error = _runtime_configuration_choice_filter(
+        binding_declaration_statuses,
+        "binding_declaration_statuses",
+        ("key_not_declared", "not_declared_locally", "not_reported"),
+    )
+    if binding_declaration_statuses_error is not None:
+        return {"error": binding_declaration_statuses_error}
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -757,26 +764,6 @@ def describe_runtime_configuration(
         all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_binding_scopes)
     if selected_source_import_scopes is not None:
         all_source_imports = _filter_runtime_configuration_workloads(all_source_imports, selected_source_import_scopes)
-    source_import_unknowns_by_reference = {
-        (
-            unknown["source_kind"], unknown["source_name"], unknown["prefix"],
-            unknown["reference_file_path"], unknown["reference_start_line"], unknown["reference_end_line"],
-        )
-        for unknown in kubernetes_configuration_repo.list_kubernetes_configuration_source_import_unknowns_for_service(
-            conn, row["id"],
-        )
-    }
-    if selected_declaration_statuses is not None or selected_availabilities is not None:
-        all_source_imports = _filter_runtime_configuration_source_imports(
-            all_source_imports,
-            source_import_unknowns_by_reference,
-            selected_declaration_statuses,
-            selected_availabilities,
-        )
-    bindings, page = _paginate(
-        all_bindings, limit, offset,
-    )
-    source_imports, source_import_page = _paginate(all_source_imports, limit, offset)
     mismatches_by_reference = {
         (
             mismatch["environment_key"], mismatch["source_kind"], mismatch["source_name"], mismatch["source_key"],
@@ -795,13 +782,38 @@ def describe_runtime_configuration(
             conn, row["id"],
         )
     }
+    source_import_unknowns_by_reference = {
+        (
+            unknown["source_kind"], unknown["source_name"], unknown["prefix"],
+            unknown["reference_file_path"], unknown["reference_start_line"], unknown["reference_end_line"],
+        )
+        for unknown in kubernetes_configuration_repo.list_kubernetes_configuration_source_import_unknowns_for_service(
+            conn, row["id"],
+        )
+    }
+    if selected_binding_declaration_statuses is not None:
+        all_bindings = _filter_runtime_configuration_bindings(
+            all_bindings,
+            mismatches_by_reference,
+            unknowns_by_reference,
+            selected_binding_declaration_statuses,
+        )
+    if selected_declaration_statuses is not None or selected_availabilities is not None:
+        all_source_imports = _filter_runtime_configuration_source_imports(
+            all_source_imports,
+            source_import_unknowns_by_reference,
+            selected_declaration_statuses,
+            selected_availabilities,
+        )
+    bindings, page = _paginate(
+        all_bindings, limit, offset,
+    )
+    source_imports, source_import_page = _paginate(all_source_imports, limit, offset)
     response_bindings = []
     for item in bindings:
         response_binding = {"environment_key": item["environment_key"], **_runtime_configuration_reference(item)}
-        mismatch = mismatches_by_reference.get((
-            item["environment_key"], item["source_kind"], item["source_name"], item["source_key"],
-            item["file_path"], item["start_line"], item["end_line"],
-        ))
+        reference_key = _runtime_configuration_binding_reference_key(item)
+        mismatch = mismatches_by_reference.get(reference_key)
         if mismatch is not None:
             response_binding["declaration"] = {
                 "status": "key_not_declared",
@@ -811,10 +823,7 @@ def describe_runtime_configuration(
                     "end_line": mismatch["declaration_end_line"],
                 },
             }
-        elif (
-            item["environment_key"], item["source_kind"], item["source_name"], item["source_key"],
-            item["file_path"], item["start_line"], item["end_line"],
-        ) in unknowns_by_reference:
+        elif reference_key in unknowns_by_reference:
             response_binding["declaration"] = {"status": "not_declared_locally"}
         response_bindings.append(response_binding)
     response = {
@@ -881,6 +890,45 @@ def _filter_runtime_configuration_workloads(
         record for record in records
         if (record["workload_kind"], record["workload_name"], record["container_name"]) in selected_scopes
     ]
+
+
+def _filter_runtime_configuration_bindings(
+    records: list[sqlite3.Row],
+    mismatches_by_reference: dict[tuple[str, str, str, str, str, int, int], sqlite3.Row],
+    unknowns_by_reference: dict[tuple[str, str, str, str, str, int, int], sqlite3.Row],
+    declaration_statuses: set[str],
+) -> list[sqlite3.Row]:
+    """Keep bindings matching only requested persisted declaration-finding states."""
+    return [
+        record for record in records
+        if _runtime_configuration_binding_declaration_status(
+            record, mismatches_by_reference, unknowns_by_reference,
+        ) in declaration_statuses
+    ]
+
+
+def _runtime_configuration_binding_declaration_status(
+    item: sqlite3.Row,
+    mismatches_by_reference: dict[tuple[str, str, str, str, str, int, int], sqlite3.Row],
+    unknowns_by_reference: dict[tuple[str, str, str, str, str, int, int], sqlite3.Row],
+) -> str:
+    """Return the stored finding state without asserting a local declaration exists."""
+    reference_key = _runtime_configuration_binding_reference_key(item)
+    if reference_key in mismatches_by_reference:
+        return "key_not_declared"
+    if reference_key in unknowns_by_reference:
+        return "not_declared_locally"
+    return "not_reported"
+
+
+def _runtime_configuration_binding_reference_key(
+    item: sqlite3.Row,
+) -> tuple[str, str, str, str, str, int, int]:
+    """Build the persisted identity shared by binding findings and response shaping."""
+    return (
+        item["environment_key"], item["source_kind"], item["source_name"], item["source_key"],
+        item["file_path"], item["start_line"], item["end_line"],
+    )
 
 
 def _runtime_configuration_choice_filter(

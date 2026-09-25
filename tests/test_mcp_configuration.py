@@ -167,6 +167,21 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
             file_path="deploy/orders.yaml", start_line=15, end_line=18, matched_service_name="orders",
         ),
     ])
+    kubernetes_configuration.replace_kubernetes_configuration_key_mismatches(conn, repository_id, [
+        KubernetesConfigurationKeyMismatch(
+            environment_key="API_TOKEN", source_kind="secret", source_name="api-secrets", source_key="token",
+            reference_file_path="deploy/orders.yaml", reference_start_line=5, reference_end_line=8,
+            declaration_file_path="deploy/api-secrets.yaml", declaration_start_line=1, declaration_end_line=3,
+            matched_service_name="orders",
+        ),
+    ])
+    kubernetes_configuration.replace_kubernetes_configuration_source_unknowns(conn, repository_id, [
+        KubernetesConfigurationSourceUnknown(
+            environment_key="WORKER_TOKEN", source_kind="secret", source_name="worker-secrets", source_key="token",
+            reference_file_path="deploy/orders.yaml", reference_start_line=15, reference_end_line=18,
+            matched_service_name="orders",
+        ),
+    ])
     kubernetes_configuration.replace_kubernetes_configuration_source_imports(conn, repository_id, [
         KubernetesConfigurationSourceImport(
             source_kind="config_map", source_name="api-defaults", prefix=None,
@@ -215,6 +230,18 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     )
     assert [item["environment_key"] for item in independently_selected["bindings"]] == ["API_TOKEN"]
     assert [item["source"]["name"] for item in independently_selected["source_imports"]] == ["worker-secrets"]
+    key_mismatch_selected = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_declaration_statuses=["key_not_declared"],
+    )
+    assert [item["environment_key"] for item in key_mismatch_selected["bindings"]] == ["API_TOKEN"]
+    source_unknown_selected = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_declaration_statuses=["not_declared_locally"],
+    )
+    assert [item["environment_key"] for item in source_unknown_selected["bindings"]] == ["WORKER_TOKEN"]
     declaration_selected = queries.describe_runtime_configuration(
         conn,
         "orders",
@@ -241,6 +268,11 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         "orders",
         source_import_availabilities=["configured"],
     ) == {"error": "source_import_availabilities must contain only: optional, required, unknown"}
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_declaration_statuses=["declared"],
+    ) == {"error": "binding_declaration_statuses must contain only: key_not_declared, not_declared_locally, not_reported"}
     assert queries.describe_runtime_configuration(
         conn,
         "orders",

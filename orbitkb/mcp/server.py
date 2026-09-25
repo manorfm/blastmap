@@ -202,6 +202,7 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         source_import_workloads: list[dict] | None = None,
         source_import_declaration_statuses: list[str] | None = None,
         source_import_availabilities: list[str] | None = None,
+        binding_declaration_statuses: list[str] | None = None,
     ) -> dict:
         """List literal Kubernetes workload environment references to ConfigMaps
         and Secrets, plus literal ``envFrom`` sources with unknown per-key coverage.
@@ -211,12 +212,13 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         Values, dynamic names and unrendered Helm templates are excluded.
         Both lists are capped at `limit` (default 50) starting at `offset`; up to 500
         workload identities optionally limits both or either list to exact Kubernetes
-        scopes. Source imports can also be filtered by static declaration-finding state
-        and literal availability. Pass repository when service names duplicate."""
+        scopes. Source imports and bindings can also be filtered by static
+        declaration-finding state; imports support literal availability. Pass repository
+        when service names duplicate."""
         with closing(_conn()) as conn:
             return queries.describe_runtime_configuration(
                 conn, service, limit, offset, repository, workloads, binding_workloads, source_import_workloads,
-                source_import_declaration_statuses, source_import_availabilities,
+                source_import_declaration_statuses, source_import_availabilities, binding_declaration_statuses,
             )
 
     @mcp.tool()
