@@ -749,7 +749,8 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         [],
         source_import_truncated=True,
     )
-    assert first_follow_up["page_fingerprint"]
+    assert len(first_follow_up["page_fingerprint"]) == 43
+    assert first_follow_up["page_fingerprint"].replace("-", "").replace("_", "").isalnum()
     assert {key: value for key, value in first_follow_up.items() if key != "page_fingerprint"} == {
         "plan_id": plan["plan_id"],
         "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
@@ -790,7 +791,7 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         [],
         source_import_truncated=True,
         previous_page_fingerprint="invalid",
-    ) == {"error": "previous_page_fingerprint must be a SHA-256 hex digest"}
+    ) == {"error": "previous_page_fingerprint must be a URL-safe SHA-256 digest"}
     assert queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],

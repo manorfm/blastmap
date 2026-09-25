@@ -2,6 +2,7 @@
 db.repositories.* modules (and, for find_change_surface, over generation.change_surface)."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -1411,9 +1412,9 @@ def validate_runtime_configuration_follow_up(
         return {"error": "current_offset must be a multiple of current_limit"}
     if previous_page_fingerprint is not None and (
         not isinstance(previous_page_fingerprint, str)
-        or re.fullmatch(r"[0-9a-f]{64}", previous_page_fingerprint) is None
+        or re.fullmatch(r"[A-Za-z0-9_-]{43}", previous_page_fingerprint) is None
     ):
-        return {"error": "previous_page_fingerprint must be a SHA-256 hex digest"}
+        return {"error": "previous_page_fingerprint must be a URL-safe SHA-256 digest"}
     match = re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)
     if match is None:
         return {"error": "invalid plan_id"}
@@ -1638,7 +1639,8 @@ def _runtime_configuration_page_fingerprint(workloads: list[object]) -> tuple[st
         canonical_page = json.dumps(workloads, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     except (TypeError, ValueError):
         return None, "returned_workloads must contain JSON values"
-    return hashlib.sha256(canonical_page.encode()).hexdigest(), None
+    digest = hashlib.sha256(canonical_page.encode()).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("="), None
 
 
 def _truncated_workload_evidence_next_step(workloads: list[dict]) -> str:
