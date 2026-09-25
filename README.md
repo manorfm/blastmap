@@ -179,6 +179,8 @@ safe behavior when absent rather than requiring its keys before rollout. When in
 the change target also names the affected Kubernetes workloads and containers.
 Its `describe_change_unit` reading purpose repeats that proven scope, without adding
 another retrieval or model call, with up to two file/line locations per workload.
+The structured workload target uses the same bound and flags `evidence_truncated`
+when the complete unit-level evidence should be consulted.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

@@ -627,6 +627,37 @@ def test_workload_evidence_locations_are_bounded_and_deduplicated():
     ]) == ["deploy/orders.yaml:12-15", "deploy/orders.yaml:20-23"]
 
 
+def test_env_from_source_import_review_caps_structured_workload_evidence():
+    units = derive_runtime_configuration_source_import_unknown_review_units({
+        "checkout-service": [
+            {
+                "source_kind": "config_map", "source_name": "external-config", "prefix": None,
+                "workload_kind": "Deployment", "workload_name": "checkout", "container_name": "api",
+                "reference_file_path": "deploy/checkout.yaml", "reference_start_line": 12, "reference_end_line": 15,
+            },
+            {
+                "source_kind": "config_map", "source_name": "external-config", "prefix": None,
+                "workload_kind": "Deployment", "workload_name": "checkout", "container_name": "api",
+                "reference_file_path": "deploy/checkout.yaml", "reference_start_line": 20, "reference_end_line": 23,
+            },
+            {
+                "source_kind": "config_map", "source_name": "external-config", "prefix": None,
+                "workload_kind": "Deployment", "workload_name": "checkout", "container_name": "api",
+                "reference_file_path": "deploy/checkout.yaml", "reference_start_line": 28, "reference_end_line": 31,
+            },
+        ],
+    }, {"checkout-service"})
+
+    assert units[0]["target"]["workloads"] == [{
+        "kind": "Deployment", "name": "checkout", "container": "api", "includes_unprefixed_import": True,
+        "evidence": [
+            {"file": "deploy/checkout.yaml", "start_line": 12, "end_line": 15},
+            {"file": "deploy/checkout.yaml", "start_line": 20, "end_line": 23},
+        ],
+        "evidence_truncated": True,
+    }]
+
+
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():
     assert derive_error_mapping_review_units([
         {
