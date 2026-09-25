@@ -719,12 +719,20 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         "plan_id": plan["plan_id"],
         "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         "status": "complete",
-        "matched_workloads": [{
-            "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 3,
-        }],
+        "matched_workload_count": 1,
         "missing_workloads": [],
         "continue_pagination": False,
     }
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [{"kind": "Deployment", "name": "checkout", "container": "api"}],
+        source_import_truncated=True,
+        include_matched_workloads=True,
+    )["matched_workloads"] == [{
+        "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 3,
+    }]
     assert queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],
@@ -755,7 +763,7 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         "plan_id": plan["plan_id"],
         "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         "status": "needs_next_page",
-        "matched_workloads": [],
+        "matched_workload_count": 0,
         "missing_workloads": [{
             "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 3,
         }],
@@ -777,7 +785,7 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         "plan_id": plan["plan_id"],
         "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         "status": "stalled",
-        "matched_workloads": [],
+        "matched_workload_count": 0,
         "missing_workloads": [{
             "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 3,
         }],
@@ -792,6 +800,14 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         source_import_truncated=True,
         previous_page_fingerprint="invalid",
     ) == {"error": "previous_page_fingerprint must be a URL-safe SHA-256 digest"}
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
+        source_import_truncated=True,
+        include_matched_workloads=1,
+    ) == {"error": "include_matched_workloads must be a boolean"}
     assert queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],

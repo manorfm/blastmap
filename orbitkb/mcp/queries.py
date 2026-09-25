@@ -1394,12 +1394,15 @@ def validate_runtime_configuration_follow_up(
     conn: sqlite3.Connection, plan_id: str, change_unit_id: str, returned_workloads: object,
     source_import_truncated: object, current_offset: object = 0, current_limit: object = DEFAULT_LIST_LIMIT,
     previous_page_fingerprint: object = None,
+    include_matched_workloads: object = False,
 ) -> dict:
     """Compare one runtime-configuration page with a truncated change-unit target."""
     if not isinstance(returned_workloads, list):
         return {"error": "returned_workloads must be a list"}
     if not isinstance(source_import_truncated, bool):
         return {"error": "source_import_truncated must be a boolean"}
+    if not isinstance(include_matched_workloads, bool):
+        return {"error": "include_matched_workloads must be a boolean"}
     if not isinstance(current_offset, int) or isinstance(current_offset, bool) or current_offset < 0:
         return {"error": "current_offset must be a non-negative integer"}
     if (
@@ -1455,10 +1458,12 @@ def validate_runtime_configuration_follow_up(
         "plan_id": plan_id,
         "change_unit_id": change_unit_id,
         "status": status,
-        "matched_workloads": matched_workloads,
+        "matched_workload_count": len(matched_workloads),
         "missing_workloads": missing_workloads,
         "continue_pagination": status == "needs_next_page",
     }
+    if include_matched_workloads:
+        response["matched_workloads"] = matched_workloads
     if status == "needs_next_page":
         response["page_fingerprint"] = page_fingerprint
         response["next_query"] = {

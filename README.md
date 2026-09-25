@@ -201,6 +201,9 @@ When another page is needed, the response includes `page_fingerprint`. Send it a
 `previous_page_fingerprint` while validating the next page: a repeated page becomes
 `stalled` instead of producing another query. It is the complete SHA-256 digest in
 URL-safe Base64 (43 characters without padding), reducing the continuation payload.
+The default progress response returns `matched_workload_count` and keeps only the
+decision-relevant `missing_workloads` list. Pass `include_matched_workloads=true`
+only when an audit needs the detailed matched scopes.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset

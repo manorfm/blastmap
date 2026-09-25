@@ -219,15 +219,16 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         current_offset: int = 0,
         current_limit: int = queries.DEFAULT_LIST_LIMIT,
         previous_page_fingerprint: str | None = None,
+        include_matched_workloads: bool = False,
     ) -> dict:
         """Validate whether one runtime-configuration page covered a truncated plan target.
         Pass direct workload identities or the query's source_imports entries. It returns
         whether another page is useful; it reads only persisted plan facts and never calls
-        a model or scans source."""
+        a model or scans source. Set include_matched_workloads for detailed audit output."""
         with closing(_conn()) as conn:
             return queries.validate_runtime_configuration_follow_up(
                 conn, plan_id, change_unit_id, returned_workloads, source_import_truncated, current_offset, current_limit,
-                previous_page_fingerprint,
+                previous_page_fingerprint, include_matched_workloads,
             )
 
     @mcp.tool()

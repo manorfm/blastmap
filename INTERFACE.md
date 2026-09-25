@@ -201,6 +201,9 @@ When it recommends another page, it returns `page_fingerprint`; pass that as
 `previous_page_fingerprint` for the next validation. An identical page without the
 target is reported as `stalled`, not another pagination instruction. The marker is a
 complete SHA-256 digest encoded as 43-character URL-safe Base64 without padding.
+By default, progress contains `matched_workload_count` and the remaining
+`missing_workloads`; set `include_matched_workloads=true` only for an audit that needs
+the detailed matched scopes.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.
