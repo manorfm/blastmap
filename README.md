@@ -177,6 +177,10 @@ For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific
 mappings.
+For a primary service, a source-proven timeout mapping to HTTP 500 creates a
+`timeout-error-mapping` review. It asks whether a documented unavailable or
+gateway-timeout contract is appropriate, while allowing an intentional 500
+translation to be documented.
 When an affected SQL table has an exactly matching indexed migration fact,
 `plan_change` adds a schema-review unit. A destructive operation requires deployment,
 backup and rollback validation; it never asserts that the migration needs to run.

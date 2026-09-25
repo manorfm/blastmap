@@ -989,6 +989,15 @@ def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings(
                 "evidence": [{"file": "handler.py", "start_line": 4, "end_line": 4}],
             },
         },
+        {
+            "kind": "possible_timeout_mapped_as_internal_server_error",
+            "services": ["payments-service"],
+            "confidence": 0.8,
+            "detail": {
+                "mapping": {"symbol": "ApiExceptionHandler.timeout", "error_type": "TimeoutException", "status": "503"},
+                "evidence": [{"file": "handler.py", "start_line": 6, "end_line": 6}],
+            },
+        },
     ], {"payments-service"}) == []
 
 
@@ -1198,6 +1207,40 @@ def test_error_mapping_units_include_a_broad_exception_handler_review():
         ],
         "confidence": 0.75,
         "evidence": [{"file": "ApiExceptionHandler.java", "start_line": 45, "end_line": 49}],
+    }]
+
+
+def test_error_mapping_units_include_a_timeout_mapped_to_internal_server_error():
+    assert derive_error_mapping_review_units([
+        {
+            "kind": "possible_timeout_mapped_as_internal_server_error",
+            "services": ["orders-service"],
+            "reason": "ApiExceptionHandler.timeout maps TimeoutException to HTTP 500.",
+            "confidence": 0.8,
+            "detail": {
+                "mapping": {
+                    "symbol": "ApiExceptionHandler.timeout", "error_type": "TimeoutException", "status": "500",
+                },
+                "evidence": [{"file": "ApiExceptionHandler.java", "start_line": 55, "end_line": 58}],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "timeout-error-mapping:orders-service:ApiExceptionHandler.timeout:TimeoutException:500",
+        "service": "orders-service",
+        "target": {
+            "role": "error_mapping", "symbol": "ApiExceptionHandler.timeout",
+            "evidence": [{"file": "ApiExceptionHandler.java", "start_line": 55, "end_line": 58}],
+        },
+        "action": "review",
+        "reason": "ApiExceptionHandler.timeout maps TimeoutException to HTTP 500.",
+        "preconditions": [],
+        "related_contracts": ["error:TimeoutException", "HTTP 500"],
+        "dependencies": [],
+        "validation": [
+            "verify TimeoutException uses the documented unavailable or gateway-timeout contract, or document the HTTP 500 translation",
+        ],
+        "confidence": 0.8,
+        "evidence": [{"file": "ApiExceptionHandler.java", "start_line": 55, "end_line": 58}],
     }]
 
 

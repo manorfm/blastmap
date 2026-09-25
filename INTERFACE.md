@@ -187,7 +187,10 @@ non-retryable local error share a symbol; it asks to validate the retry predicat
 does not claim that the branch is retried at runtime. A primary service can receive a
 `broad-error-handler` review for an explicit broad exception mapping; it preserves the
 handler as a potential final fallback and asks whether expected client/domain errors
-have specific mappings. `ready` means a
+have specific mappings. A primary service can receive a `timeout-error-mapping`
+review only for a source-proven timeout mapping to HTTP 500; it asks to verify the
+documented unavailable/gateway-timeout semantics or document an intentional 500.
+`ready` means a
 relevant indexed surface exists without a blocking decision; `needs_decision` means the
 compatibility choice is required; and `insufficient_evidence` means no indexed service
 matched the task. The audit record links to a surface synthesis when one exists and does

@@ -122,6 +122,7 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
             "possible_error_semantics_lost", "possible_internal_error_exposure",
             "possible_unhandled_endpoint_error", "possible_unmapped_downstream_error",
             "possible_overbroad_exception_handler",
+            "possible_timeout_mapped_as_internal_server_error",
         }:
             continue
         services = finding.get("services")
@@ -171,6 +172,38 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
                 "dependencies": [],
                 "validation": [
                     "verify the response returns a stable public error code/message and keeps diagnostic detail internal",
+                ],
+                "confidence": float(confidence),
+                "evidence": evidence,
+            })
+            continue
+        if kind == "possible_timeout_mapped_as_internal_server_error":
+            mapping = detail.get("mapping")
+            evidence = detail.get("evidence")
+            if (
+                not isinstance(mapping, dict) or not isinstance(evidence, list) or not evidence
+                or not isinstance(mapping.get("symbol"), str) or not isinstance(mapping.get("error_type"), str)
+                or mapping.get("status") != "500"
+            ):
+                continue
+            mapping_symbol = mapping["symbol"]
+            error_type = mapping["error_type"]
+            key = service, "timeout-mapping", mapping_symbol, error_type
+            if key in seen:
+                continue
+            seen.add(key)
+            units.append({
+                "id": f"timeout-error-mapping:{service}:{mapping_symbol}:{error_type}:500",
+                "service": service,
+                "target": {"role": "error_mapping", "symbol": mapping_symbol, "evidence": evidence},
+                "action": "review",
+                "reason": finding.get("reason", "review the indexed timeout-to-HTTP-500 mapping"),
+                "preconditions": [],
+                "related_contracts": [f"error:{error_type}", "HTTP 500"],
+                "dependencies": [],
+                "validation": [
+                    f"verify {error_type} uses the documented unavailable or gateway-timeout contract, "
+                    "or document the HTTP 500 translation",
                 ],
                 "confidence": float(confidence),
                 "evidence": evidence,
