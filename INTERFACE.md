@@ -238,6 +238,9 @@ read source files.
 When filters are active, `filter_summary` reports compact `indexed_total` and
 `selected_total` values only for the filtered surfaces; it does not repeat filter
 arguments.
+Each surface accepts at most four active filter dimensions. Split a more specific
+investigation into separate queries rather than treating an empty intersection as a
+fact about the architecture.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.

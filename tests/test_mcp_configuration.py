@@ -298,6 +298,24 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         "bindings": {"indexed_total": 2, "selected_total": 1},
         "source_imports": {"indexed_total": 2, "selected_total": 1},
     }
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_workloads=[{"kind": "Deployment", "name": "orders", "container": "api"}],
+        binding_declaration_statuses=["key_not_declared"],
+        binding_source_kinds=["config_map"],
+        binding_evidence_files=["deploy/api.yaml"],
+        binding_evidence_ranges=[{"file": "deploy/api.yaml", "start_line": 5, "end_line": 8}],
+    ) == {"error": "binding filters must use at most 4 dimensions"}
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        source_import_workloads=[{"kind": "Deployment", "name": "orders", "container": "api"}],
+        source_import_declaration_statuses=["not_declared_locally"],
+        source_import_availabilities=["optional"],
+        source_import_source_kinds=["config_map"],
+        source_import_container_roles=["initialization"],
+    ) == {"error": "source import filters must use at most 4 dimensions"}
     range_selected = queries.describe_runtime_configuration(
         conn,
         "orders",

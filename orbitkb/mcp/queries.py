@@ -65,6 +65,7 @@ from orbitkb.generation.verification import (
 DEFAULT_LIST_LIMIT = 50
 MAX_RUNTIME_SOURCES_PER_CONFIGURATION_BINDING = 3
 MAX_LIST_LIMIT = 500
+MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS = 4
 MAX_INLINE_WORKLOAD_EVIDENCE = 5
 DEFAULT_FLOW_EDGE_LIMIT = 50
 MAX_FLOW_EDGE_LIMIT = 200
@@ -802,6 +803,29 @@ def describe_runtime_configuration(
     )
     if source_import_evidence_ranges_error is not None:
         return {"error": source_import_evidence_ranges_error}
+    binding_filter_dimensions = sum((
+        selected_binding_scopes is not None,
+        selected_binding_declaration_statuses is not None,
+        selected_binding_source_kinds is not None,
+        selected_binding_evidence_files is not None,
+        selected_binding_evidence_ranges is not None,
+    ))
+    if binding_filter_dimensions > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
+        return {"error": f"binding filters must use at most {MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS} dimensions"}
+    source_import_filter_dimensions = sum((
+        selected_source_import_scopes is not None,
+        selected_declaration_statuses is not None,
+        selected_availabilities is not None,
+        selected_source_import_source_kinds is not None,
+        selected_source_import_container_roles is not None,
+        selected_prefixes is not None or source_import_include_unprefixed,
+        selected_source_import_evidence_files is not None,
+        selected_source_import_evidence_ranges is not None,
+    ))
+    if source_import_filter_dimensions > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
+        return {
+            "error": f"source import filters must use at most {MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS} dimensions",
+        }
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -811,24 +835,8 @@ def describe_runtime_configuration(
     )
     indexed_binding_total = len(all_bindings)
     indexed_source_import_total = len(all_source_imports)
-    binding_filters_applied = any((
-        selected_binding_scopes is not None,
-        selected_binding_declaration_statuses is not None,
-        selected_binding_source_kinds is not None,
-        selected_binding_evidence_files is not None,
-        selected_binding_evidence_ranges is not None,
-    ))
-    source_import_filters_applied = any((
-        selected_source_import_scopes is not None,
-        selected_declaration_statuses is not None,
-        selected_availabilities is not None,
-        selected_source_import_source_kinds is not None,
-        selected_source_import_container_roles is not None,
-        selected_prefixes is not None,
-        source_import_include_unprefixed,
-        selected_source_import_evidence_files is not None,
-        selected_source_import_evidence_ranges is not None,
-    ))
+    binding_filters_applied = binding_filter_dimensions > 0
+    source_import_filters_applied = source_import_filter_dimensions > 0
     if selected_binding_scopes is not None:
         all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_binding_scopes)
     if selected_source_import_scopes is not None:
