@@ -62,7 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "4"
+STATIC_ANALYSIS_INPUT_VERSION = "5"
 
 
 def _walk(node: Node):
@@ -2354,8 +2354,12 @@ def _nest_http_entrypoint_functions(
                 *controller_guards,
                 *_nest_route_guards(route_decorators, source, nest_imports, "handler"),
             ]
-            contract = {"route_guards": guards} if guards else None
-            entrypoints.append((function, method, _join_route(controller_prefix, path), contract))
+            contract: dict = {}
+            if guards:
+                contract["route_guards"] = guards
+            if request := _nest_body_dto_contract(child, source, nest_imports):
+                contract["request"] = request
+            entrypoints.append((function, method, _join_route(controller_prefix, path), contract or None))
     return entrypoints
 
 
@@ -2428,6 +2432,63 @@ def _nest_route_guards(
             if argument.type == "identifier"
         )
     return guards
+
+
+def _nest_body_dto_contract(
+    method: Node, source: bytes, imported_names: dict[str, str],
+) -> dict[str, str | bool] | None:
+    """Return one direct, whole-body Nest DTO declaration, when unambiguous.
+
+    ``@Body() input: CreateOrderDto`` names the body DTO without claiming its
+    fields or runtime validation. Property reads, decorator arguments, generics
+    and multiple whole-body parameters are intentionally unresolved.
+    """
+    parameters = method.child_by_field_name("parameters")
+    if parameters is None:
+        return None
+    body_parameters: list[dict[str, str | bool]] = []
+    for parameter in parameters.named_children:
+        decorators = [child for child in parameter.named_children if child.type == "decorator"]
+        body_decorator = next(
+            (
+                decorator
+                for decorator in decorators
+                if _nest_direct_decorator(decorator, source, imported_names, "Body")
+            ),
+            None,
+        )
+        if body_decorator is None:
+            continue
+        call = next(child for child in body_decorator.named_children if child.type == "call_expression")
+        arguments = call.child_by_field_name("arguments")
+        pattern = parameter.child_by_field_name("pattern")
+        annotation = parameter.child_by_field_name("type")
+        type_nodes = annotation.named_children if annotation is not None else []
+        if (
+            arguments is None
+            or arguments.named_children
+            or pattern is None
+            or annotation is None
+            or len(type_nodes) != 1
+            or type_nodes[0].type != "type_identifier"
+        ):
+            continue
+        body_parameters.append({
+            "name": _text(pattern, source),
+            "type": _text(type_nodes[0], source),
+            "required": parameter.type == "required_parameter",
+        })
+    return body_parameters[0] if len(body_parameters) == 1 else None
+
+
+def _nest_direct_decorator(
+    decorator: Node, source: bytes, imported_names: dict[str, str], expected: str,
+) -> bool:
+    call = next((child for child in decorator.named_children if child.type == "call_expression"), None)
+    if call is None:
+        return False
+    function = call.child_by_field_name("function")
+    return function is not None and imported_names.get(_text(function, source)) == expected
 
 
 class StaticAnalysisEngine:
