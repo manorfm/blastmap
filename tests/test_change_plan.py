@@ -588,7 +588,8 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
         "service": "checkout-service",
         "purpose": (
             "confirm the owner of the unresolved Kubernetes configuration source and inspect "
-            "Deployment checkout container migrate and Deployment checkout container api"
+            "Deployment checkout container migrate (deploy/checkout.yaml:12-15) and Deployment checkout container api "
+            "(deploy/checkout.yaml:20-23)"
         ),
         "recommended_query": {"tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"}},
     }]
@@ -614,6 +615,16 @@ def test_env_from_source_import_review_requires_availability_confirmation_when_u
         "purpose": "confirm the owner of the unresolved Kubernetes configuration source",
         "recommended_query": {"tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"}},
     }]
+
+
+def test_workload_evidence_locations_are_bounded_and_deduplicated():
+    assert queries._workload_evidence_locations([
+        {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15},
+        {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15},
+        {"file": "deploy/orders.yaml", "start_line": 20, "end_line": 23},
+        {"file": "deploy/orders.yaml", "start_line": 28, "end_line": 30},
+        {"file": "deploy/orders.yaml", "start_line": "invalid", "end_line": 31},
+    ]) == ["deploy/orders.yaml:12-15", "deploy/orders.yaml:20-23"]
 
 
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():

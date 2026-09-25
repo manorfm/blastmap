@@ -179,7 +179,8 @@ unresolved source-ownership review, including an `envFrom` source. The latter is
 grouped by source because its imported keys remain unknown; initialization-container
 imports add an ordering validation, and its target identifies proven workloads and
 containers when available. Its reading purpose repeats that scope without scanning
-source, rerunning retrieval or calling a model.
+source, rerunning retrieval or calling a model, with up to two file/line locations
+per workload.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

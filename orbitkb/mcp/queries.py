@@ -1507,9 +1507,31 @@ def _kubernetes_workload_reading_scope(target: dict) -> str | None:
         if not all(isinstance(value, str) and value for value in (kind, name, container)):
             continue
         scope = f"{kind} {name} container {container}"
+        locations = _workload_evidence_locations(workload.get("evidence"))
+        if locations:
+            scope = f"{scope} ({', '.join(locations)})"
         if scope not in scopes:
             scopes.append(scope)
     return " and ".join(scopes) or None
+
+
+def _workload_evidence_locations(evidence: object) -> list[str]:
+    """Return a bounded set of manifest locations for a workload-reading prompt."""
+    if not isinstance(evidence, list):
+        return []
+    locations: list[str] = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        file_path, start_line, end_line = (item.get(field) for field in ("file", "start_line", "end_line"))
+        if not isinstance(file_path, str) or not isinstance(start_line, int) or not isinstance(end_line, int):
+            continue
+        location = f"{file_path}:{start_line}-{end_line}"
+        if location not in locations:
+            locations.append(location)
+        if len(locations) == 2:
+            break
+    return locations
 
 
 def get_change_context(
