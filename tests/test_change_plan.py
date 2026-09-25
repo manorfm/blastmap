@@ -29,6 +29,7 @@ from orbitkb.generation.change_plan import (
     derive_persistence_migration_review_units,
     derive_public_object_storage_review_units,
     derive_read_entrypoint_side_effect_review_units,
+    derive_retry_delivery_review_units,
     derive_retry_policy_review_units,
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
@@ -1408,6 +1409,67 @@ def test_public_object_storage_units_exclude_low_confidence_findings():
             },
         },
     ], {"media-service"}) == []
+
+
+def test_retry_delivery_units_include_persistent_message_consumers():
+    assert derive_retry_delivery_review_units([
+        {
+            "kind": "possible_retry_write_publish_reaches_persistent_consumer",
+            "services": ["orders-service", "billing-service"],
+            "reason": "OrderService.create retries publication to a state-writing billing consumer.",
+            "confidence": 0.8,
+            "detail": {
+                "flow": {"symbol": "OrderService.create"},
+                "channel": "order.created",
+                "retry_policies": [{"mechanism": "reactor.retry", "value": 3, "unit": "attempts"}],
+                "writes": [{"target": "orders"}], "write_count": 1,
+                "consumers": [{
+                    "service": "billing-service", "symbol": "BillingConsumer.onOrderCreated",
+                    "writes": [{"target": "invoices"}], "write_count": 1,
+                }],
+                "consumer_count": 1,
+                "evidence": [
+                    {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+                    {"file": "BillingConsumer.java", "start_line": 12, "end_line": 12},
+                ],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "retry-delivery:orders-service:OrderService.create:order.created",
+        "service": "orders-service",
+        "target": {
+            "role": "application_flow", "symbol": "OrderService.create",
+            "evidence": [
+                {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+                {"file": "BillingConsumer.java", "start_line": 12, "end_line": 12},
+            ],
+        },
+        "action": "review",
+        "reason": "OrderService.create retries publication to a state-writing billing consumer.",
+        "preconditions": [],
+        "related_contracts": ["message:order.created"],
+        "dependencies": ["billing-service"],
+        "validation": [
+            "verify OrderService.create uses an outbox or idempotency strategy before retrying order.created",
+            "verify billing-service de-duplicates persistent effects for order.created",
+        ],
+        "confidence": 0.8,
+        "evidence": [
+            {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+            {"file": "BillingConsumer.java", "start_line": 12, "end_line": 12},
+        ],
+    }]
+
+
+def test_retry_delivery_units_exclude_low_confidence_findings():
+    assert derive_retry_delivery_review_units([
+        {
+            "kind": "possible_retry_write_publish_reaches_persistent_consumer",
+            "services": ["orders-service", "billing-service"],
+            "confidence": 0.79,
+            "detail": {},
+        },
+    ], {"orders-service"}) == []
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():

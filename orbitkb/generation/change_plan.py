@@ -415,6 +415,71 @@ def derive_retry_policy_review_units(findings: list[dict], primary_services: set
     return units
 
 
+def derive_retry_delivery_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
+    """Create duplicate-effect reviews for retrying producers and persistent consumers.
+
+    The static facts prove local writes, a literal channel and consumer writes, but
+    never broker delivery or duplicate execution. The resulting unit remains a review.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_write_publish_reaches_persistent_consumer":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) < 2 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.8
+        ):
+            continue
+        flow = detail.get("flow")
+        channel = detail.get("channel")
+        retry_policies = detail.get("retry_policies")
+        producer_writes = detail.get("writes")
+        consumers = detail.get("consumers")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(flow, dict) or not isinstance(flow.get("symbol"), str) or not isinstance(channel, str)
+            or not isinstance(retry_policies, list) or not retry_policies or not isinstance(producer_writes, list)
+            or not producer_writes or not isinstance(consumers, list) or not consumers or not isinstance(evidence, list)
+            or not evidence
+            or not all(isinstance(policy, dict) and isinstance(policy.get("mechanism"), str) for policy in retry_policies)
+            or not all(
+                isinstance(consumer, dict) and isinstance(consumer.get("service"), str)
+                and consumer["service"] in services[1:] and isinstance(consumer.get("writes"), list)
+                and consumer["writes"]
+                for consumer in consumers
+            )
+        ):
+            continue
+        service = services[0]
+        symbol = flow["symbol"]
+        key = service, symbol, channel
+        if key in seen:
+            continue
+        seen.add(key)
+        dependencies = sorted({consumer["service"] for consumer in consumers})
+        units.append({
+            "id": f"retry-delivery:{service}:{symbol}:{channel}",
+            "service": service,
+            "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed retry and persistent-delivery boundary"),
+            "preconditions": [],
+            "related_contracts": [f"message:{channel}"],
+            "dependencies": dependencies,
+            "validation": [
+                f"verify {symbol} uses an outbox or idempotency strategy before retrying {channel}",
+                *[f"verify {dependency} de-duplicates persistent effects for {channel}" for dependency in dependencies],
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_timeout_fallback_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
     """Create endpoint reviews for source-proven successful timeout fallbacks.
 

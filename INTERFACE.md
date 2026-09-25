@@ -185,6 +185,11 @@ dependency and asks for an explicit boundary translation review. A primary servi
 can receive a `retry-policy` review when a literal retry and a source-proven
 non-retryable local error share a symbol; it asks to validate the retry predicate and
 does not claim that the branch is retried at runtime. A primary service can receive a
+`retry-delivery` review when its retrying, state-writing publisher has a literal
+channel consumed by another source-proven state-writing service. The consumers are
+dependencies and validation asks for producer outbox/idempotency plus consumer
+de-duplication; broker delivery and duplicate execution remain unknown. A primary
+service can receive a
 `broad-error-handler` review for an explicit broad exception mapping; it preserves the
 handler as a potential final fallback and asks whether expected client/domain errors
 have specific mappings. A primary service can receive a `timeout-error-mapping`

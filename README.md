@@ -173,6 +173,11 @@ For a primary service, a literal retry policy in the same symbol as a source-pro
 non-retryable local error creates a `retry-policy` review. It asks to verify that the
 retry predicate excludes the permanent error, without assuming the recorded branch is
 actually retried at runtime.
+For a primary producer that writes, retries a literal message publication and reaches
+a state-writing consumer through the same literal channel, `plan_change` creates a
+`retry-delivery` review. It links the persistent consumers as dependencies and asks
+for outbox/idempotency and consumer de-duplication checks; broker delivery remains an
+explicit runtime unknown.
 For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific
