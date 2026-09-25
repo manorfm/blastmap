@@ -199,6 +199,10 @@ When exactly one primary service participates in a source-proven aggregate owner
 overlap, `plan_change` creates an `aggregate-ownership` review. It links the other
 declarants as dependencies and asks for one write owner or an explicit
 replication/read-model contract; multiple primary candidates remain a human decision.
+For a primary service whose code names a cloud resource without matching local IaC,
+`plan_change` creates a `cloud-dependency-iac` review. It asks to confirm an IaC
+declaration or documented external provisioning, without assuming the resource is
+missing at runtime.
 For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific

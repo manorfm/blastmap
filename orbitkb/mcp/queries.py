@@ -40,6 +40,7 @@ from orbitkb.generation.change_context import MAX_CONTEXT_SERVICES, build_change
 from orbitkb.generation.change_plan import (
     derive_aggregate_ownership_review_units,
     derive_change_units,
+    derive_cloud_dependency_iac_review_units,
     derive_decision_points,
     derive_error_mapping_review_units,
     derive_feature_flag_review_units,
@@ -1794,6 +1795,7 @@ def plan_change(
         change_units = [
             *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
             *derive_aggregate_ownership_review_units(architecture_findings, error_mapping_services),
+            *derive_cloud_dependency_iac_review_units(architecture_findings, error_mapping_services),
             *derive_error_mapping_review_units(architecture_findings, error_mapping_services),
             *derive_retry_policy_review_units(architecture_findings, error_mapping_services),
             *derive_retry_delivery_review_units(architecture_findings, error_mapping_services),

@@ -26,6 +26,7 @@ from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.change_plan import (
     derive_aggregate_ownership_review_units,
+    derive_cloud_dependency_iac_review_units,
     derive_error_mapping_review_units,
     derive_partial_write_resilience_review_units,
     derive_persistence_migration_review_units,
@@ -1772,6 +1773,49 @@ def test_aggregate_ownership_units_exclude_multiple_primary_candidates():
             "detail": {},
         },
     ], {"inventory-service", "orders-service"}) == []
+
+
+def test_cloud_dependency_iac_units_include_named_code_resources_without_iac():
+    assert derive_cloud_dependency_iac_review_units([
+        {
+            "kind": "cloud_dependency_without_iac",
+            "services": ["media-service"],
+            "reason": "media-service code reads 'uploads' without matching IaC.",
+            "confidence": 0.7,
+            "detail": {
+                "target_name": "uploads", "provider": "aws", "resource_type": "object_storage",
+                "evidence": [{"file": "src/storage.py", "start_line": 14, "end_line": 14}],
+            },
+        },
+    ], {"media-service"}) == [{
+        "id": "cloud-dependency-iac:media-service:aws:object_storage:uploads",
+        "service": "media-service",
+        "target": {
+            "role": "deployment", "symbol": "cloud:aws:object_storage:uploads",
+            "evidence": [{"file": "src/storage.py", "start_line": 14, "end_line": 14}],
+        },
+        "action": "review",
+        "reason": "media-service code reads 'uploads' without matching IaC.",
+        "preconditions": [],
+        "related_contracts": ["cloud:aws:object_storage:uploads"],
+        "dependencies": [],
+        "validation": [
+            "verify cloud resource uploads is declared in IaC or has documented external provisioning",
+        ],
+        "confidence": 0.7,
+        "evidence": [{"file": "src/storage.py", "start_line": 14, "end_line": 14}],
+    }]
+
+
+def test_cloud_dependency_iac_units_exclude_low_confidence_findings():
+    assert derive_cloud_dependency_iac_review_units([
+        {
+            "kind": "cloud_dependency_without_iac",
+            "services": ["media-service"],
+            "confidence": 0.69,
+            "detail": {},
+        },
+    ], {"media-service"}) == []
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():

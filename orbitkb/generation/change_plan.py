@@ -115,6 +115,58 @@ def derive_aggregate_ownership_review_units(
     return units
 
 
+def derive_cloud_dependency_iac_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
+    """Create deployment reviews for literal code resources absent from local IaC.
+
+    The resource may be managed by another repository or provisioned manually, so
+    the unit asks for confirmation rather than asserting deployment is broken.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "cloud_dependency_without_iac":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.7
+        ):
+            continue
+        target_name = detail.get("target_name")
+        provider = detail.get("provider")
+        resource_type = detail.get("resource_type")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(target_name, str) or not isinstance(provider, str) or not isinstance(resource_type, str)
+            or not isinstance(evidence, list) or not evidence
+        ):
+            continue
+        service = services[0]
+        key = service, provider, resource_type, target_name
+        if key in seen:
+            continue
+        seen.add(key)
+        contract = f"cloud:{provider}:{resource_type}:{target_name}"
+        units.append({
+            "id": f"cloud-dependency-iac:{service}:{provider}:{resource_type}:{target_name}",
+            "service": service,
+            "target": {"role": "deployment", "symbol": contract, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed cloud dependency without local IaC"),
+            "preconditions": [],
+            "related_contracts": [contract],
+            "dependencies": [],
+            "validation": [
+                f"verify cloud resource {target_name} is declared in IaC or has documented external provisioning",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def validate_decision_selections(
     decision_points: list[dict], selections: object,
 ) -> tuple[list[dict] | None, str | None]:
