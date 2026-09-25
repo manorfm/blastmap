@@ -306,7 +306,20 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         binding_source_kinds=["config_map"],
         binding_evidence_files=["deploy/api.yaml"],
         binding_evidence_ranges=[{"file": "deploy/api.yaml", "start_line": 5, "end_line": 8}],
-    ) == {"error": "binding filters must use at most 4 dimensions"}
+    ) == {
+        "error": "binding filters must use at most 4 dimensions",
+        "split_guidance": {
+            "recommended_next_step": "split_filter_dimensions",
+            "max_dimensions": 4,
+            "query_groups": [
+                [
+                    "binding_workloads", "binding_declaration_statuses", "binding_source_kinds",
+                    "binding_evidence_files",
+                ],
+                ["binding_evidence_ranges"],
+            ],
+        },
+    }
     assert queries.describe_runtime_configuration(
         conn,
         "orders",
@@ -315,7 +328,17 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         source_import_availabilities=["optional"],
         source_import_source_kinds=["config_map"],
         source_import_container_roles=["initialization"],
-    ) == {"error": "source import filters must use at most 4 dimensions"}
+    ) == {
+        "error": "source import filters must use at most 4 dimensions",
+        "split_guidance": {
+            "recommended_next_step": "split_filter_dimensions",
+            "max_dimensions": 4,
+            "query_groups": [[
+                "source_import_workloads", "source_import_declaration_statuses",
+                "source_import_availabilities", "source_import_source_kinds",
+            ], ["source_import_container_roles"]],
+        },
+    }
     range_selected = queries.describe_runtime_configuration(
         conn,
         "orders",

@@ -803,29 +803,31 @@ def describe_runtime_configuration(
     )
     if source_import_evidence_ranges_error is not None:
         return {"error": source_import_evidence_ranges_error}
-    binding_filter_dimensions = sum((
-        selected_binding_scopes is not None,
-        selected_binding_declaration_statuses is not None,
-        selected_binding_source_kinds is not None,
-        selected_binding_evidence_files is not None,
-        selected_binding_evidence_ranges is not None,
-    ))
-    if binding_filter_dimensions > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
-        return {"error": f"binding filters must use at most {MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS} dimensions"}
-    source_import_filter_dimensions = sum((
-        selected_source_import_scopes is not None,
-        selected_declaration_statuses is not None,
-        selected_availabilities is not None,
-        selected_source_import_source_kinds is not None,
-        selected_source_import_container_roles is not None,
-        selected_prefixes is not None or source_import_include_unprefixed,
-        selected_source_import_evidence_files is not None,
-        selected_source_import_evidence_ranges is not None,
-    ))
-    if source_import_filter_dimensions > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
-        return {
-            "error": f"source import filters must use at most {MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS} dimensions",
-        }
+    binding_filter_dimensions = [
+        name for name, enabled in (
+            ("binding_workloads", selected_binding_scopes is not None),
+            ("binding_declaration_statuses", selected_binding_declaration_statuses is not None),
+            ("binding_source_kinds", selected_binding_source_kinds is not None),
+            ("binding_evidence_files", selected_binding_evidence_files is not None),
+            ("binding_evidence_ranges", selected_binding_evidence_ranges is not None),
+        ) if enabled
+    ]
+    if len(binding_filter_dimensions) > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
+        return _runtime_configuration_filter_complexity_error("binding", binding_filter_dimensions)
+    source_import_filter_dimensions = [
+        name for name, enabled in (
+            ("source_import_workloads", selected_source_import_scopes is not None),
+            ("source_import_declaration_statuses", selected_declaration_statuses is not None),
+            ("source_import_availabilities", selected_availabilities is not None),
+            ("source_import_source_kinds", selected_source_import_source_kinds is not None),
+            ("source_import_container_roles", selected_source_import_container_roles is not None),
+            ("source_import_prefixes", selected_prefixes is not None or source_import_include_unprefixed),
+            ("source_import_evidence_files", selected_source_import_evidence_files is not None),
+            ("source_import_evidence_ranges", selected_source_import_evidence_ranges is not None),
+        ) if enabled
+    ]
+    if len(source_import_filter_dimensions) > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
+        return _runtime_configuration_filter_complexity_error("source import", source_import_filter_dimensions)
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -835,8 +837,8 @@ def describe_runtime_configuration(
     )
     indexed_binding_total = len(all_bindings)
     indexed_source_import_total = len(all_source_imports)
-    binding_filters_applied = binding_filter_dimensions > 0
-    source_import_filters_applied = source_import_filter_dimensions > 0
+    binding_filters_applied = bool(binding_filter_dimensions)
+    source_import_filters_applied = bool(source_import_filter_dimensions)
     if selected_binding_scopes is not None:
         all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_binding_scopes)
     if selected_source_import_scopes is not None:
@@ -998,6 +1000,21 @@ def _runtime_configuration_workload_scopes(
             return None, f"{argument_name} must be a non-empty list of workload identities"
         scopes.add(scope)
     return scopes, None
+
+
+def _runtime_configuration_filter_complexity_error(surface: str, dimensions: list[str]) -> dict:
+    """Provide deterministic query groups when active filters exceed the safe bound."""
+    return {
+        "error": f"{surface} filters must use at most {MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS} dimensions",
+        "split_guidance": {
+            "recommended_next_step": "split_filter_dimensions",
+            "max_dimensions": MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS,
+            "query_groups": [
+                dimensions[index : index + MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS]
+                for index in range(0, len(dimensions), MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS)
+            ],
+        },
+    }
 
 
 def _filter_runtime_configuration_workloads(

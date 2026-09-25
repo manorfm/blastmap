@@ -237,7 +237,9 @@ When any filter is active, `filter_summary` reports only indexed and selected to
 for each filtered surface, so an agent can verify context reduction without receiving
 the filter values a second time.
 Each surface accepts at most four active filter dimensions. Split an overly specific
-query instead of interpreting an empty intersection as an architectural fact.
+query instead of interpreting an empty intersection as an architectural fact. The
+structured `split_guidance.query_groups` response lists the filter dimensions to use
+in each follow-up query.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset
