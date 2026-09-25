@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from orbitkb.analysis.depth import DepthProvider, NoopDepthProvider
-from orbitkb.analysis.engine import StaticAnalysisEngine
+from orbitkb.analysis.engine import STATIC_ANALYSIS_INPUT_VERSION, StaticAnalysisEngine
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import cloud_iac as cloud_iac_repo
 from orbitkb.db.repositories import components as components_repo
@@ -25,6 +25,7 @@ from orbitkb.db.repositories import search as search_repo
 from orbitkb.db.repositories import security_findings as security_findings_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
+from orbitkb.db.repositories import static_analysis as static_analysis_repo
 from orbitkb.discovery.base import (
     CodeExcerpt,
     EndpointHint,
@@ -544,9 +545,24 @@ def _index_service_unlocked(
         existing = services_repo.get_service_by_root_path(conn, str(root), repository_id)
     is_new = existing is None
     service_id = services_repo.ensure_service(conn, name, str(root), detector.id, repository_id=repository_id)
-    flows_repo.replace_analysis(
-        conn, service_id, StaticAnalysisEngine(depth_provider or NoopDepthProvider()).analyze(root, detector.id)
+    static_engine = StaticAnalysisEngine(depth_provider or NoopDepthProvider())
+    static_digest = static_engine.input_digest(root, detector.id)
+    snapshot = static_analysis_repo.get_snapshot(conn, service_id)
+    cacheable_static_analysis = depth_provider is None or isinstance(depth_provider, NoopDepthProvider)
+    static_analysis_is_current = (
+        cacheable_static_analysis and not force and static_digest is not None and snapshot is not None
+        and snapshot["input_digest"] == static_digest
+        and snapshot["analysis_version"] == STATIC_ANALYSIS_INPUT_VERSION
     )
+    if not static_analysis_is_current:
+        if not cacheable_static_analysis:
+            static_analysis_repo.delete_snapshot(conn, service_id)
+        flows_repo.replace_analysis(conn, service_id, static_engine.analyze(root, detector.id))
+        if cacheable_static_analysis and static_digest is not None:
+            if static_engine.input_digest(root, detector.id) == static_digest:
+                static_analysis_repo.replace_snapshot(
+                    conn, service_id, static_digest, STATIC_ANALYSIS_INPUT_VERSION,
+                )
     security_findings_repo.replace_findings(conn, service_id, find_security_findings(root))
 
     old_hashes = indexed_files_repo.get_indexed_file_hashes(conn, service_id)

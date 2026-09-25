@@ -19,6 +19,7 @@ from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.discovery.registry import detector_for
 from orbitkb.discovery.walker import discover_services
+from orbitkb.generation import orchestrator
 from orbitkb.generation.backend_base import GenerationError, GenerationOutcome
 from orbitkb.generation.orchestrator import DiscoveryError, index_path, index_service
 
@@ -212,6 +213,69 @@ def test_reindexing_unchanged_files_skips_generation(tmp_path: Path):
     assert all(r.status == "ok" for r in results)
     assert all(r.llm_calls == 0 for r in results)
     assert calls_after_first_run > 0  # sanity: the first run did do real work
+
+
+def test_reindexing_unchanged_static_inputs_skips_ast_analysis(tmp_path: Path, monkeypatch):
+    conn = open_db(tmp_path / "static-incremental.db")
+    original_analyze = orchestrator.StaticAnalysisEngine.analyze
+    analyzed: list[tuple[Path, str]] = []
+
+    def record_analyze(self, root: Path, stack: str):
+        analyzed.append((root, stack))
+        return original_analyze(self, root, stack)
+
+    monkeypatch.setattr(orchestrator.StaticAnalysisEngine, "analyze", record_analyze)
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend())
+    first_run_count = len(analyzed)
+
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend())
+
+    assert first_run_count > 0
+    assert len(analyzed) == first_run_count
+
+
+def test_reindexing_changed_static_inputs_reanalyzes_only_the_affected_service(tmp_path: Path, monkeypatch):
+    root = tmp_path / "sample-project"
+    shutil.copytree(SAMPLE_ROOT, root)
+    conn = open_db(tmp_path / "changed-static-input.db")
+    original_analyze = orchestrator.StaticAnalysisEngine.analyze
+    analyzed: list[Path] = []
+
+    def record_analyze(self, service_root: Path, stack: str):
+        analyzed.append(service_root)
+        return original_analyze(self, service_root, stack)
+
+    monkeypatch.setattr(orchestrator.StaticAnalysisEngine, "analyze", record_analyze)
+    index_path(conn, root, FakeOrchestratorBackend())
+    analyzed.clear()
+    (root / "payments-service" / "static-only.ts").write_text("export const retries = 3;\n", encoding="utf-8")
+
+    index_path(conn, root, FakeOrchestratorBackend())
+
+    assert analyzed == [root / "payments-service"]
+
+
+def test_reindexing_with_an_external_depth_provider_does_not_reuse_static_snapshot(tmp_path: Path, monkeypatch):
+    class ExternalDepthProvider:
+        def enrich(self, root: Path, analysis):
+            return []
+
+    conn = open_db(tmp_path / "external-depth-static-analysis.db")
+    original_analyze = orchestrator.StaticAnalysisEngine.analyze
+    analyzed: list[Path] = []
+
+    def record_analyze(self, root: Path, stack: str):
+        analyzed.append(root)
+        return original_analyze(self, root, stack)
+
+    monkeypatch.setattr(orchestrator.StaticAnalysisEngine, "analyze", record_analyze)
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend(), depth_provider=ExternalDepthProvider())
+    first_run_count = len(analyzed)
+
+    index_path(conn, SAMPLE_ROOT, FakeOrchestratorBackend(), depth_provider=ExternalDepthProvider())
+
+    assert first_run_count > 0
+    assert len(analyzed) == first_run_count * 2
 
 
 def test_force_reindex_regenerates_everything(tmp_path: Path):

@@ -33,6 +33,12 @@ Use a stable `--repository-name` when a checkout moves. Repository deletion is
 explicit through `orbitkb remove --repository <name>`; an unavailable path is not
 treated as deletion.
 
+For local static analysis, each service retains only a versioned digest of its
+analyzer inputs, never source content. An unchanged digest skips AST parsing and flow
+replacement; `--force` and any external depth provider disable reuse. If inputs change
+while analysis is running, no new snapshot is recorded, so the next index safely
+reanalyzes the service.
+
 ## Agent workflow
 
 1. Call `plan_change(task, repository?, token_budget?)` for the stable planning

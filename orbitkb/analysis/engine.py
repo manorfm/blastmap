@@ -7,6 +7,7 @@ calls, persistence operations and messages reachable from their declared handler
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
 from dataclasses import dataclass, replace
@@ -61,6 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+STATIC_ANALYSIS_INPUT_VERSION = "1"
 
 
 def _walk(node: Node):
@@ -2387,12 +2389,7 @@ class StaticAnalysisEngine:
             return AnalysisResult()
         analyzer, patterns = configured
         result = AnalysisResult()
-        files = sorted({
-            path
-            for pattern in patterns
-            for path in root.rglob(pattern)
-            if not any(part in SKIP_DIRS for part in path.relative_to(root).parts)
-        })
+        files = self._source_files(root, patterns)
         for path in files:
             result.extend(analyzer.analyze(path, root))
         if stack in {"node-ts", "node-js"}:
@@ -2419,6 +2416,36 @@ class StaticAnalysisEngine:
             result.static_service_calls.extend(_spring_feign_service_calls(result, files))
         result.edges.extend(self._depth_provider.enrich(root, result))
         return result
+
+    def input_digest(self, root: Path, stack: str) -> str | None:
+        """Return a versioned digest of every local artifact this analyzer reads."""
+        configured = self._analyzers.get(stack)
+        if configured is None:
+            return None
+        _analyzer, patterns = configured
+        files = {
+            *self._source_files(root, patterns),
+            *_openapi_files(root),
+            *_protobuf_files(root),
+            *_migration_files(root),
+        }
+        digest = hashlib.sha256(f"{STATIC_ANALYSIS_INPUT_VERSION}:{stack}\0".encode("utf-8"))
+        for path in sorted(files):
+            relative_path = path.relative_to(root).as_posix()
+            digest.update(relative_path.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+    @staticmethod
+    def _source_files(root: Path, patterns: tuple[str, ...]) -> list[Path]:
+        return sorted({
+            path
+            for pattern in patterns
+            for path in root.rglob(pattern)
+            if not any(part in SKIP_DIRS for part in path.relative_to(root).parts)
+        })
 
 
 _FEIGN_CLIENT_PATTERN = re.compile(

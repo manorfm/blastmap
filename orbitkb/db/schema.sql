@@ -589,6 +589,15 @@ CREATE TABLE IF NOT EXISTS change_plan_runs (
 
 CREATE INDEX IF NOT EXISTS idx_change_plan_runs_surface ON change_plan_runs(change_surface_run_id);
 
+-- A static snapshot is valid only for the exact analyzer input digest and parser
+-- version. It stores no source content and is invalidated by external depth facts.
+CREATE TABLE IF NOT EXISTS static_analysis_snapshots (
+    service_id       INTEGER PRIMARY KEY REFERENCES services(id) ON DELETE CASCADE,
+    input_digest     TEXT NOT NULL,
+    analysis_version TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
 -- Privacy-safe calibration data for get_change_context. These rows deliberately
 -- contain no task/prompt text, source/code excerpts or generated card text: only
 -- response measurements, service IDs and bounded tool metadata.

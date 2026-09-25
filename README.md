@@ -649,9 +649,12 @@ generated Go handler corpora. For a comparable local baseline, change its inputs
 make benchmark-scale SCALE_FILES="5000" SCALE_REPEAT=5
 ```
 
-Current incremental indexing skips unchanged LLM-derived units by file hash. Static
-analysis still scans the service on each index/update, so profile a real repository
-before adding cache or parallelism.
+Incremental indexing skips unchanged LLM-derived units by file hash. Static analysis
+also stores a versioned digest of every local artifact it reads (stack source files,
+OpenAPI, Protobuf and supported migrations) and skips AST parsing, flow replacement
+and reconstruction when that digest is unchanged. It still reads those inputs to
+calculate the digest. `--force`, external depth enrichment, or a source change during
+analysis bypasses or withholds snapshot reuse, preserving correctness over speed.
 
 Architecture rules have fact-mutation tests for cycles, fan-out, shared storage,
 read-entrypoint side effects, RabbitMQ recovery-policy hypotheses, cloud
