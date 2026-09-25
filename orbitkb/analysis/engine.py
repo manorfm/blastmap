@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "26"
+STATIC_ANALYSIS_INPUT_VERSION = "27"
 
 
 def _walk(node: Node):
@@ -817,7 +817,8 @@ class _KotlinSpringAnalyzer(_FileAnalyzer):
                     _spring_kafka_publish_contracts(_text(function_node, source), kafka_publishers, path, root, function_node, kotlin=True)
                 )
                 result.error_contracts.extend(_spring_error_contracts(
-                    symbol, modifier_text, _evidence(path, root, modifiers or function_node), kotlin=True,
+                    symbol, _text(function_node, source), modifier_text,
+                    _evidence(path, root, modifiers or function_node), kotlin=True,
                 ))
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
                 if match:
@@ -929,7 +930,8 @@ class _JavaSpringAnalyzer(_FileAnalyzer):
                     _spring_kafka_publish_contracts(_text(method_node, source), kafka_publishers, path, root, method_node)
                 )
                 result.error_contracts.extend(_spring_error_contracts(
-                    symbol, modifier_text, _evidence(path, root, modifiers or method_node), kotlin=False,
+                    symbol, _text(method_node, source), modifier_text,
+                    _evidence(path, root, modifiers or method_node), kotlin=False,
                 ))
                 match = re.search(r"@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\s*\(\s*\"([^\"]+)\"", modifier_text)
                 if match:
@@ -2310,7 +2312,7 @@ _ERROR_KIND_BY_HTTP_STATUS = {
 
 
 def _spring_error_contracts(
-    symbol: str, annotations: str, evidence: Evidence, *, kotlin: bool,
+    symbol: str, declaration: str, annotations: str, evidence: Evidence, *, kotlin: bool,
 ) -> list[ErrorContract]:
     """Extract only explicit Spring exception-to-status mappings.
 
@@ -2328,6 +2330,7 @@ def _spring_error_contracts(
     status = statuses[0]
     code = status["code"]
     internal_type = match.group(1).rsplit(".", 1)[-1]
+    exception_parameter = _spring_error_handler_parameter_name(declaration, internal_type, kotlin=kotlin)
     return [ErrorContract(
         source=symbol,
         role="maps",
@@ -2336,10 +2339,38 @@ def _spring_error_contracts(
         protocol="http",
         transport_code=str(code),
         public_code=None,
-        exposes_internal_detail=False,
+        exposes_internal_detail=_spring_problem_detail_exposes_internal_detail(declaration, exception_parameter),
         retryability="retryable" if code == 429 else "not_retryable",
         evidence=evidence,
     )]
+
+
+def _spring_error_handler_parameter_name(
+    declaration: str, error_type: str, *, kotlin: bool,
+) -> str | None:
+    """Return the handler parameter only when its declared type matches the annotation."""
+    pattern = (
+        rf"\b(?P<name>\w+)\s*:\s*{re.escape(error_type)}\b"
+        if kotlin
+        else rf"\b{re.escape(error_type)}\s+(?P<name>\w+)\b"
+    )
+    match = re.search(pattern, declaration)
+    return match.group("name") if match is not None else None
+
+
+def _spring_problem_detail_exposes_internal_detail(declaration: str, exception_parameter: str | None) -> bool:
+    """Recognize a handler returning its error detail directly through ProblemDetail."""
+    if exception_parameter is None:
+        return False
+    direct_detail = (
+        rf"{re.escape(exception_parameter)}\s*\.\s*"
+        r"(?:getMessage|getCause|getStackTrace)\s*\(\s*\)"
+        rf"|{re.escape(exception_parameter)}\s*\.\s*(?:message|cause|stackTrace)\b"
+    )
+    return re.search(
+        rf"\breturn\s+ProblemDetail\s*\.\s*forStatusAndDetail\s*\(\s*[^,]+,\s*(?:{direct_detail})\s*\)",
+        declaration,
+    ) is not None
 
 
 def _spring_raised_error_contracts(

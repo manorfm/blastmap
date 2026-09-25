@@ -318,8 +318,11 @@ For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven e
 contracts (raised or explicitly mapped exception types and explicit local timeout
 fallbacks). Timeout fallbacks require a typed `catch`, `onErrorResume` or
 `onErrorReturn`; generic callbacks are not guessed. Error messages and stack traces
-are never indexed. Dynamic global handlers, proxies and gateways remain explicit
-unknowns rather than inferred behavior.
+are never indexed. For an explicit `@ExceptionHandler` with a literal status,
+`return ProblemDetail.forStatusAndDetail(..., error.getMessage())` records only an
+internal-detail exposure boolean and source location; wrapped or sanitized values,
+dynamic global handlers, proxies and gateways remain explicit unknowns rather than
+inferred behavior.
 
 When a conventional `openapi`/`swagger` JSON or YAML file declares the exact method
 and path of an AST-proven HTTP entrypoint, its `contract.formal_contract` adds the

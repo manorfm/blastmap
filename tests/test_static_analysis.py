@@ -1899,7 +1899,14 @@ def test_spring_exception_handler_emits_a_static_error_contract(tmp_path: Path):
 class ApiExceptionHandler {
   @ExceptionHandler(InsufficientStockException.class)
   @ResponseStatus(HttpStatus.CONFLICT)
-  ApiError handleStock(InsufficientStockException error) { return new ApiError(); }
+  ProblemDetail handleStock(InsufficientStockException error) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, error.getMessage());
+  }
+  @ExceptionHandler(InvalidOrderException.class)
+  @ResponseStatus(HttpStatus.BAD_REQUEST)
+  ProblemDetail handleInvalid(InvalidOrderException error) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, redact(error.getMessage()));
+  }
 }
 ''',
         encoding="utf-8",
@@ -1912,7 +1919,9 @@ class ApiExceptionHandler {
              contract.exposes_internal_detail, contract.retryability)
             for contract in result.error_contracts] == [
         ("ApiExceptionHandler.handleStock", "maps", "conflict", "InsufficientStockException",
-         "http", "409", None, False, "not_retryable"),
+         "http", "409", None, True, "not_retryable"),
+        ("ApiExceptionHandler.handleInvalid", "maps", "validation", "InvalidOrderException",
+         "http", "400", None, False, "not_retryable"),
     ]
 
 
