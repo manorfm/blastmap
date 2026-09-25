@@ -109,7 +109,7 @@ class StaticServiceCall:
 
 @dataclass(frozen=True)
 class GrpcHandler:
-    """A Nest handler explicitly bound to a literal Protobuf service/RPC name."""
+    """A static handler explicitly bound to a literal Protobuf service/RPC name."""
 
     service: str
     rpc: str

@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "15"
+STATIC_ANALYSIS_INPUT_VERSION = "16"
 
 
 def _walk(node: Node):
@@ -951,10 +951,13 @@ class _JvmSpringAnalyzer:
 
 
 _JVM_GRPC_SERVICE_IMPORT = re.compile(
-    r"^\s*import\s+net\.devh\.boot\.grpc\.server\.service\.GrpcService\s*;", re.MULTILINE,
+    r"^\s*import\s+net\.devh\.boot\.grpc\.server\.service\.GrpcService(?=\s|;|$)\s*;?", re.MULTILINE,
 )
 _JVM_GRPC_IMPL_BASE = re.compile(
     r"\bextends\s+(?:[\w.]+\.)?(?P<service>[A-Za-z_]\w*)Grpc\.\w*ImplBase\b",
+)
+_KOTLIN_GRPC_IMPL_BASE = re.compile(
+    r":\s+(?:[\w.]+\.)?(?P<service>[A-Za-z_]\w*)GrpcKt\.\w*CoroutineImplBase\s*\(",
 )
 _JVM_GRPC_STUB_FIELD = re.compile(
     r"\b(?P<service>[A-Za-z_]\w*)Grpc\.[A-Za-z_]\w*Stub\s+(?P<member>[A-Za-z_]\w*)\b",
@@ -982,6 +985,41 @@ def _jvm_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
             service = base.group("service")
             for method in class_body.named_children:
                 if method.type != "method_declaration" or "@Override" not in _class_annotations(method, source):
+                    continue
+                method_name = method.child_by_field_name("name")
+                if method_name is None:
+                    continue
+                handlers.append(GrpcHandler(
+                    service, _text(method_name, source),
+                    f"{_text(class_name, source)}.{_text(method_name, source)}", _evidence(path, root, method),
+                ))
+    return handlers
+
+
+def _kotlin_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
+    """Return direct Kotlin ``@GrpcService`` coroutine implementations."""
+    parser = Parser(Language(tree_sitter_kotlin.language()))
+    handlers: list[GrpcHandler] = []
+    for path in files:
+        if path.suffix != ".kt":
+            continue
+        source = path.read_bytes()
+        if _JVM_GRPC_SERVICE_IMPORT.search(source.decode("utf-8", errors="ignore")) is None:
+            continue
+        tree = parser.parse(source)
+        for class_node in (node for node in _walk(tree.root_node) if node.type == "class_declaration"):
+            annotations = _class_annotations(class_node, source)
+            base = _KOTLIN_GRPC_IMPL_BASE.search(_text(class_node, source))
+            class_name = class_node.child_by_field_name("name")
+            class_body = next((node for node in class_node.named_children if node.type == "class_body"), None)
+            if "@GrpcService" not in annotations or base is None or class_name is None or class_body is None:
+                continue
+            service = base.group("service")
+            for method in class_body.named_children:
+                if method.type != "function_declaration":
+                    continue
+                modifiers = next((node for node in method.named_children if node.type == "modifiers"), None)
+                if modifiers is None or "override" not in _text(modifiers, source):
                     continue
                 method_name = method.child_by_field_name("name")
                 if method_name is None:
@@ -2968,6 +3006,7 @@ class StaticAnalysisEngine:
                 result.edges, result.injections, _spring_data_query_methods(files),
             )
             result.grpc_handlers.extend(_jvm_grpc_handlers(files, root))
+            result.grpc_handlers.extend(_kotlin_grpc_handlers(files, root))
             result.grpc_client_bindings.extend(_jvm_grpc_client_bindings(files, root))
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)

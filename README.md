@@ -336,7 +336,9 @@ describe the declared wire contract only. When one uniquely declared RPC has one
 the entrypoint flow links to that method. This is code-level intent, not proof of a
 server, generated stub or runtime registration. The same link is available for Java
 classes imported from `net.devh.boot.grpc.server.service.GrpcService` that extend a
-generated `ServiceGrpc.*ImplBase` and implement one `@Override` method. A Nest
+generated `ServiceGrpc.*ImplBase` and implement one `@Override` method, and Kotlin
+classes with the same import that extend `ServiceGrpcKt.*CoroutineImplBase` and
+override one method. A Nest
 `ClientGrpc` imported from the same package can also link a direct
 `this.client.getService<T>("Service")` assignment and subsequent literal RPC method
 call to one unique declared RPC. Java calls through a direct generated
