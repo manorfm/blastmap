@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "18"
+STATIC_ANALYSIS_INPUT_VERSION = "19"
 
 
 def _walk(node: Node):
@@ -1066,6 +1066,7 @@ def _kotlin_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClie
     """Return direct Kotlin properties typed as generated gRPC coroutine stubs."""
     parser = Parser(Language(tree_sitter_kotlin.language()))
     bindings: list[GrpcClientBinding] = []
+    inheritances: list[tuple[str, str, Evidence]] = []
     for path in files:
         if path.suffix != ".kt":
             continue
@@ -1076,6 +1077,10 @@ def _kotlin_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClie
             class_body = next((node for node in class_node.named_children if node.type == "class_body"), None)
             if class_name is None:
                 continue
+            class_name_text = _text(class_name, source)
+            superclass = _kotlin_direct_superclass(class_node, source)
+            if superclass is not None:
+                inheritances.append((class_name_text, superclass, _evidence(path, root, class_node)))
             declarations = []
             if class_body is not None:
                 declarations.extend(
@@ -1094,10 +1099,33 @@ def _kotlin_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClie
                     continue
                 match = matches[0]
                 bindings.append(GrpcClientBinding(
-                    _text(class_name, source), match.group("member"), match.group("service"),
+                    class_name_text, match.group("member"), match.group("service"),
                     _evidence(path, root, declaration),
                 ))
+    parent_members: dict[tuple[str, str], list[GrpcClientBinding]] = {}
+    for binding in bindings:
+        parent_members.setdefault((binding.owner, binding.member), []).append(binding)
+    direct_members = set(parent_members)
+    for child, parent, evidence in inheritances:
+        for (owner, member), candidates in parent_members.items():
+            if owner == parent and (child, member) not in direct_members and len(candidates) == 1:
+                binding = candidates[0]
+                bindings.append(GrpcClientBinding(child, member, binding.service, evidence))
     return bindings
+
+
+def _kotlin_direct_superclass(class_node: Node, source: bytes) -> str | None:
+    """Return one unqualified superclass invoked directly by a Kotlin class."""
+    delegations = next(
+        (node for node in class_node.named_children if node.type == "delegation_specifiers"), None,
+    )
+    if delegations is None:
+        return None
+    specifications = [node for node in delegations.named_children if node.type == "delegation_specifier"]
+    if len(specifications) != 1:
+        return None
+    match = re.fullmatch(r"\s*(?P<name>[A-Za-z_]\w*)\s*\([^()]*\)\s*", _text(specifications[0], source))
+    return match.group("name") if match else None
 
 
 class _NodeGraphqlAnalyzer(_FileAnalyzer):

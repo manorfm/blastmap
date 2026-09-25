@@ -344,9 +344,10 @@ override one method. A Nest
 call to one unique declared RPC. Java calls through a direct generated
 `ServiceGrpc.*Stub` field, and Kotlin calls through a direct generated
 `ServiceGrpcKt.*Stub` property (including a primary-constructor property), receive the
-same link. Host, channel, token, stub generation, dynamic bindings and non-unique
-service/RPC names remain unknown. An exact RPC method name has high confidence; a
-unique case-only match such as
+same link. A direct, unqualified local superclass can also expose one uniquely typed
+stub property to its subclass. Host, channel, token, stub generation, dynamic
+bindings, inheritance chains and non-unique service/RPC names remain unknown. An exact
+RPC method name has high confidence; a unique case-only match such as
 `ReserveStock` → `reserveStock` has medium confidence. Duplicate declarations or
 handlers are omitted rather than arbitrarily selecting one.
 
