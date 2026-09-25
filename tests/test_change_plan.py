@@ -30,6 +30,7 @@ from orbitkb.generation.change_plan import (
     derive_retry_policy_review_units,
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
+    derive_timeout_fallback_review_units,
 )
 from orbitkb.generation.llm_harness import load_schema
 from orbitkb.generation.token_budget import TokenMeasurement
@@ -1242,6 +1243,67 @@ def test_error_mapping_units_include_a_timeout_mapped_to_internal_server_error()
         "confidence": 0.8,
         "evidence": [{"file": "ApiExceptionHandler.java", "start_line": 55, "end_line": 58}],
     }]
+
+
+def test_timeout_fallback_units_include_a_successful_endpoint_fallback():
+    assert derive_timeout_fallback_review_units([
+        {
+            "kind": "possible_timeout_fallback_masks_failure",
+            "services": ["checkout-service"],
+            "reason": "POST /checkout handles TimeoutException from inventory with HTTP 200.",
+            "confidence": 0.8,
+            "detail": {
+                "entrypoint": {
+                    "method": "POST", "path": "/checkout", "symbol": "CheckoutController.reserve",
+                },
+                "target": {"service": "inventory-service", "method": "POST", "path": "/reservations"},
+                "fallback": {"error_type": "TimeoutException", "status": "200"},
+                "evidence": [
+                    {"file": "CheckoutController.java", "start_line": 22, "end_line": 22},
+                    {"file": "CheckoutController.java", "start_line": 27, "end_line": 30},
+                ],
+            },
+        },
+    ], {"checkout-service"}) == [{
+        "id": "timeout-fallback:checkout-service:CheckoutController.reserve:TimeoutException:200",
+        "service": "checkout-service",
+        "target": {
+            "role": "entrypoint", "symbol": "CheckoutController.reserve",
+            "evidence": [
+                {"file": "CheckoutController.java", "start_line": 22, "end_line": 22},
+                {"file": "CheckoutController.java", "start_line": 27, "end_line": 30},
+            ],
+        },
+        "action": "review",
+        "reason": "POST /checkout handles TimeoutException from inventory with HTTP 200.",
+        "preconditions": [],
+        "related_contracts": ["POST /checkout", "HTTP 200", "error:TimeoutException"],
+        "dependencies": ["inventory-service"],
+        "validation": [
+            "verify POST /checkout exposes an explicit degraded-result signal or returns the documented timeout/unavailable contract",
+        ],
+        "confidence": 0.8,
+        "evidence": [
+            {"file": "CheckoutController.java", "start_line": 22, "end_line": 22},
+            {"file": "CheckoutController.java", "start_line": 27, "end_line": 30},
+        ],
+    }]
+
+
+def test_timeout_fallback_units_exclude_non_successful_timeout_translations():
+    assert derive_timeout_fallback_review_units([
+        {
+            "kind": "possible_timeout_fallback_masks_failure",
+            "services": ["checkout-service"],
+            "confidence": 0.8,
+            "detail": {
+                "entrypoint": {"method": "POST", "path": "/checkout", "symbol": "CheckoutController.reserve"},
+                "target": {"service": "inventory-service"},
+                "fallback": {"error_type": "TimeoutException", "status": "503"},
+                "evidence": [{"file": "CheckoutController.java", "start_line": 27, "end_line": 30}],
+            },
+        },
+    ], {"checkout-service"}) == []
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():

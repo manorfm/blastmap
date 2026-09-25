@@ -415,6 +415,68 @@ def derive_retry_policy_review_units(findings: list[dict], primary_services: set
     return units
 
 
+def derive_timeout_fallback_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
+    """Create endpoint reviews for source-proven successful timeout fallbacks.
+
+    A 2xx fallback can be intentional for a cached or partial result, so the unit
+    asks for an explicit degradation contract instead of prescribing an error status.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_timeout_fallback_masks_failure":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.8
+        ):
+            continue
+        entrypoint = detail.get("entrypoint")
+        target = detail.get("target")
+        fallback = detail.get("fallback")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(entrypoint, dict) or not isinstance(target, dict) or not isinstance(fallback, dict)
+            or not isinstance(evidence, list) or not evidence or not isinstance(entrypoint.get("method"), str)
+            or not isinstance(entrypoint.get("path"), str) or not isinstance(entrypoint.get("symbol"), str)
+            or not isinstance(target.get("service"), str) or not isinstance(fallback.get("error_type"), str)
+            or not isinstance(fallback.get("status"), str) or not fallback["status"].isdigit()
+            or not 200 <= int(fallback["status"]) <= 299
+        ):
+            continue
+        service = services[0]
+        method = entrypoint["method"]
+        path = entrypoint["path"]
+        symbol = entrypoint["symbol"]
+        error_type = fallback["error_type"]
+        status = fallback["status"]
+        dependency = target["service"]
+        key = service, symbol, error_type, status
+        if key in seen:
+            continue
+        seen.add(key)
+        units.append({
+            "id": f"timeout-fallback:{service}:{symbol}:{error_type}:{status}",
+            "service": service,
+            "target": {"role": "entrypoint", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed successful timeout fallback"),
+            "preconditions": [],
+            "related_contracts": [f"{method} {path}", f"HTTP {status}", f"error:{error_type}"],
+            "dependencies": [dependency],
+            "validation": [
+                f"verify {method} {path} exposes an explicit degraded-result signal or returns the documented "
+                "timeout/unavailable contract",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_persistence_migration_review_units(
     persistence_affected: list[dict], migration_facts_by_service: dict[str, list[dict]], primary_services: set[str],
 ) -> list[dict]:

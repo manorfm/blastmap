@@ -48,6 +48,7 @@ from orbitkb.generation.change_plan import (
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
     derive_runtime_configuration_source_unknown_review_units,
+    derive_timeout_fallback_review_units,
     validate_decision_selections,
 )
 from orbitkb.generation.freshness import compute_freshness
@@ -1786,6 +1787,7 @@ def plan_change(
             *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
             *derive_error_mapping_review_units(architecture_findings, error_mapping_services),
             *derive_retry_policy_review_units(architecture_findings, error_mapping_services),
+            *derive_timeout_fallback_review_units(architecture_findings, error_mapping_services),
             *derive_persistence_migration_review_units(
                 change_surface_result["persistence_affected"], migration_facts_by_service, primary_services,
             ),

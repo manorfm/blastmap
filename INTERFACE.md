@@ -190,7 +190,10 @@ handler as a potential final fallback and asks whether expected client/domain er
 have specific mappings. A primary service can receive a `timeout-error-mapping`
 review only for a source-proven timeout mapping to HTTP 500; it asks to verify the
 documented unavailable/gateway-timeout semantics or document an intentional 500.
-`ready` means a
+A primary endpoint can receive a `timeout-fallback` review only when a source-proven
+timeout handler returns 2xx after an internal HTTP call; it asks to validate the
+degraded-result signal or timeout contract and does not reject an intentional cached
+or partial response. `ready` means a
 relevant indexed surface exists without a blocking decision; `needs_decision` means the
 compatibility choice is required; and `insufficient_evidence` means no indexed service
 matched the task. The audit record links to a surface synthesis when one exists and does
