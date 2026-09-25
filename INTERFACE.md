@@ -512,6 +512,11 @@ the precise retry policies and both policy/call evidence. It is a repeat-safety 
 not proof that an operation lacks an idempotency key or server-side de-duplication;
 those controls may be configured or implemented outside indexed source.
 
+`possible_retry_on_non_retryable_error` combines a literal retry policy with a
+source-proven local `raises` contract for validation, conflict, authorization,
+not-found or rate-limit error in the same symbol. It is a review signal: the retry
+predicate may exclude that error or it may be raised outside the retried branch.
+
 `possible_retry_on_downstream_client_error` combines a literal retry, an unambiguous
 static HTTP target and a source-proven downstream 4xx contract. It scopes to the target
 endpoint's reachable flow when its literal route is indexed (`scope: endpoint_flow`),

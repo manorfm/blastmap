@@ -1306,6 +1306,57 @@ def _retry_policies_by_source(conn: sqlite3.Connection) -> dict[tuple[int, str],
     return _resilience_policies_by_source(conn, "retry")
 
 
+def find_retries_on_non_retryable_errors(conn: sqlite3.Connection) -> list[dict]:
+    """Flag a local retry declaration next to a source-proven permanent client error."""
+    names = _service_names(conn)
+    contracts = conn.execute(
+        """SELECT service_id, source, error_kind, internal_type, transport_code,
+                  file_path, start_line, end_line
+           FROM static_error_contracts
+           WHERE role = 'raises'
+             AND retryability = 'not_retryable'
+             AND error_kind IN ('authorization', 'conflict', 'not_found', 'rate_limit', 'validation')
+           ORDER BY service_id, source, error_kind, internal_type, transport_code""",
+    ).fetchall()
+    policies_by_source = _retry_policies_by_source(conn)
+    findings: list[dict] = []
+    for contract in contracts:
+        policies = policies_by_source.get((contract["service_id"], contract["source"]))
+        if not policies:
+            continue
+        service = names[contract["service_id"]]
+        findings.append({
+            "kind": "possible_retry_on_non_retryable_error", "severity": "warning",
+            "services": [service],
+            "reason": (
+                f"{contract['source']} declares retry and raises the non-retryable "
+                f"{contract['error_kind']} error '{contract['internal_type']}'."
+            ),
+            "detail": {
+                "error": {
+                    "symbol": contract["source"], "type": contract["internal_type"],
+                    "kind": contract["error_kind"], "status": contract["transport_code"],
+                },
+                "retry_policies": [
+                    {"mechanism": policy["mechanism"], "value": policy["value"], "unit": policy["unit"]}
+                    for policy in policies
+                ],
+                "confidence": 0.8,
+                "evidence": [
+                    _edge_evidence(contract),
+                    *[_edge_evidence(policy) for policy in policies],
+                ],
+                "unknowns": [
+                    "The retry predicate may exclude this error, or the error may be raised outside the retried branch.",
+                ],
+                "remediation": [
+                    "Exclude permanent client/domain errors from retry predicates and preserve retries for documented transient failures only.",
+                ],
+            },
+        })
+    return findings
+
+
 def _resilience_policies_by_source(
     conn: sqlite3.Connection, kind: str | None,
 ) -> dict[tuple[int, str], list[sqlite3.Row]]:
@@ -2380,6 +2431,7 @@ _DETECTORS = (
     find_unhandled_endpoint_errors, find_internal_error_exposures,
     find_static_http_calls_without_resilience_policy,
     find_retries_on_potentially_non_idempotent_http_calls,
+    find_retries_on_non_retryable_errors,
     find_retries_on_downstream_client_errors,
     find_timeout_fallbacks_masking_failures,
     find_timeouts_mapped_as_internal_server_errors,

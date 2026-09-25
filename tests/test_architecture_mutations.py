@@ -36,6 +36,7 @@ from orbitkb.generation.architecture import (
     find_read_entrypoint_side_effects,
     find_resilience_policies_on_write_flows,
     find_retries_on_downstream_client_errors,
+    find_retries_on_non_retryable_errors,
     find_retries_on_potentially_non_idempotent_http_calls,
     find_retries_on_write_publish_flows,
     find_retry_write_publish_flows_with_consumers,
@@ -406,6 +407,40 @@ def test_retry_risk_finding_disappears_when_the_http_method_is_idempotent(tmp_pa
     )
 
     assert find_retries_on_potentially_non_idempotent_http_calls(conn) == []
+
+
+def test_retry_on_non_retryable_error_disappears_without_the_retry_policy(tmp_path: Path):
+    conn = open_db(tmp_path / "retry-non-retryable-error.db")
+    service = services_repo.ensure_service(conn, "orders", "/tmp/orders", "jvm-spring")
+    retry = ResiliencePolicy(
+        source="OrderService.create", kind="retry", mechanism="spring_annotation",
+        value=3, unit="attempts", evidence=STATIC_EVIDENCE,
+    )
+    conflict = ErrorContract(
+        source="OrderService.create", role="raises", error_kind="conflict",
+        internal_type="InsufficientStockException", protocol="http", transport_code="409",
+        public_code="OUT_OF_STOCK", exposes_internal_detail=False, retryability="not_retryable",
+        evidence=STATIC_EVIDENCE,
+    )
+    flows_repo.replace_analysis(
+        conn, service, AnalysisResult(error_contracts=[conflict], resilience_policies=[retry]),
+    )
+
+    findings = find_retries_on_non_retryable_errors(conn)
+
+    assert _kinds(findings) == {"possible_retry_on_non_retryable_error"}
+    assert findings[0]["detail"]["error"] == {
+        "symbol": "OrderService.create", "type": "InsufficientStockException",
+        "kind": "conflict", "status": "409",
+    }
+    run_id = recompute_architecture_view(conn)
+    assert "possible_retry_on_non_retryable_error" in {
+        row["kind"] for row in architecture_repo.list_findings(conn, run_id)
+    }
+
+    flows_repo.replace_analysis(conn, service, AnalysisResult(error_contracts=[conflict]))
+
+    assert find_retries_on_non_retryable_errors(conn) == []
 
 
 def test_retry_on_downstream_client_error_disappears_without_a_retry_policy(tmp_path: Path):

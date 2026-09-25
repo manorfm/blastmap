@@ -511,6 +511,10 @@ the same Spring symbol, OrbitKB also emits a retry/idempotency review signal. It
 not assume the request is unsafe: an idempotency key or server-side deduplication may
 exist outside indexed source. It instead directs the agent to validate repeat safety
 before preserving or expanding retries.
+It separately reports `possible_retry_on_non_retryable_error` when that same symbol
+also raises a source-proven validation, conflict, authorization, not-found or rate-
+limit error marked non-retryable. This is a review signal, not proof that the runtime
+predicate retries that branch.
 
 OrbitKB also correlates retry declarations with source-proven downstream 4xx
 contracts. When the target route is indexed, the signal is limited to errors reachable
