@@ -44,6 +44,77 @@ def derive_decision_points(contracts_at_risk: list[dict], primary_services: set[
     return decisions
 
 
+def derive_aggregate_ownership_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create bounded reviews for competing persistence ownership declarations.
+
+    The caller must have one primary candidate in the overlap. More than one would
+    make selecting a target owner arbitrary, so that case remains an architecture
+    finding for a human decision rather than a misleading change unit.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_aggregate_ownership_overlap":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) < 2 or not isinstance(detail, dict)
+            or not isinstance(confidence, (int, float)) or confidence < 0.65
+        ):
+            continue
+        primary_candidates = sorted({service for service in services if service in primary_services})
+        if len(primary_candidates) != 1:
+            continue
+        aggregate = detail.get("aggregate")
+        persistence_kind = detail.get("persistence_kind")
+        owners = detail.get("owners")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(aggregate, str) or not isinstance(persistence_kind, str) or not isinstance(owners, list)
+            or not owners or not isinstance(evidence, list) or not evidence
+            or not all(
+                isinstance(owner, dict) and isinstance(owner.get("service"), str)
+                and isinstance(owner.get("owner"), str) and owner["service"] in services
+                for owner in owners
+            )
+        ):
+            continue
+        service = primary_candidates[0]
+        dependencies = sorted({candidate for candidate in services if candidate != service})
+        if not dependencies:
+            continue
+        key = service, persistence_kind, aggregate
+        if key in seen:
+            continue
+        seen.add(key)
+        contract = (
+            f"database:{aggregate}"
+            if persistence_kind == "sql_table"
+            else f"persistence:{persistence_kind}:{aggregate}"
+        )
+        units.append({
+            "id": f"aggregate-ownership:{service}:{persistence_kind}:{aggregate}",
+            "service": service,
+            "target": {"role": "persistence", "symbol": f"{persistence_kind}:{aggregate}", "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed aggregate ownership overlap"),
+            "preconditions": [],
+            "related_contracts": [contract],
+            "dependencies": dependencies,
+            "validation": [
+                f"verify {aggregate} has one write owner or a documented replication/read-model contract with {dependency}"
+                for dependency in dependencies
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def validate_decision_selections(
     decision_points: list[dict], selections: object,
 ) -> tuple[list[dict] | None, str | None]:

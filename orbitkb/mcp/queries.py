@@ -38,6 +38,7 @@ from orbitkb.generation.backend_base import LLMBackend
 from orbitkb.generation.change_assessment import assess_change_units
 from orbitkb.generation.change_context import MAX_CONTEXT_SERVICES, build_change_context
 from orbitkb.generation.change_plan import (
+    derive_aggregate_ownership_review_units,
     derive_change_units,
     derive_decision_points,
     derive_error_mapping_review_units,
@@ -1792,6 +1793,7 @@ def plan_change(
         architecture_findings = find_architecture_smells(conn)["findings"]
         change_units = [
             *_derive_http_contract_review_units(conn, sorted(primary_services), repository_id),
+            *derive_aggregate_ownership_review_units(architecture_findings, error_mapping_services),
             *derive_error_mapping_review_units(architecture_findings, error_mapping_services),
             *derive_retry_policy_review_units(architecture_findings, error_mapping_services),
             *derive_retry_delivery_review_units(architecture_findings, error_mapping_services),

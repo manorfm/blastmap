@@ -25,6 +25,7 @@ from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.change_plan import (
+    derive_aggregate_ownership_review_units,
     derive_error_mapping_review_units,
     derive_partial_write_resilience_review_units,
     derive_persistence_migration_review_units,
@@ -1715,6 +1716,62 @@ def test_retry_consumer_delivery_units_yield_to_persistent_consumer_evidence():
     }
 
     assert derive_retry_consumer_delivery_review_units([consumer, persistent], {"orders-service"}) == []
+
+
+def test_aggregate_ownership_units_include_the_single_primary_owner_candidate():
+    assert derive_aggregate_ownership_review_units([
+        {
+            "kind": "possible_aggregate_ownership_overlap",
+            "services": ["inventory-service", "orders-service"],
+            "reason": "inventory-service and orders-service each declare order ownership.",
+            "confidence": 0.65,
+            "detail": {
+                "aggregate": "order", "persistence_kind": "sql_table",
+                "owners": [
+                    {"service": "inventory-service", "owner": "InventoryRecord"},
+                    {"service": "orders-service", "owner": "OrderRecord"},
+                ],
+                "evidence": [
+                    {"file": "inventory/models.py", "start_line": 8, "end_line": 12},
+                    {"file": "orders/models.py", "start_line": 10, "end_line": 14},
+                ],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "aggregate-ownership:orders-service:sql_table:order",
+        "service": "orders-service",
+        "target": {
+            "role": "persistence", "symbol": "sql_table:order",
+            "evidence": [
+                {"file": "inventory/models.py", "start_line": 8, "end_line": 12},
+                {"file": "orders/models.py", "start_line": 10, "end_line": 14},
+            ],
+        },
+        "action": "review",
+        "reason": "inventory-service and orders-service each declare order ownership.",
+        "preconditions": [],
+        "related_contracts": ["database:order"],
+        "dependencies": ["inventory-service"],
+        "validation": [
+            "verify order has one write owner or a documented replication/read-model contract with inventory-service",
+        ],
+        "confidence": 0.65,
+        "evidence": [
+            {"file": "inventory/models.py", "start_line": 8, "end_line": 12},
+            {"file": "orders/models.py", "start_line": 10, "end_line": 14},
+        ],
+    }]
+
+
+def test_aggregate_ownership_units_exclude_multiple_primary_candidates():
+    assert derive_aggregate_ownership_review_units([
+        {
+            "kind": "possible_aggregate_ownership_overlap",
+            "services": ["inventory-service", "orders-service"],
+            "confidence": 0.65,
+            "detail": {},
+        },
+    ], {"inventory-service", "orders-service"}) == []
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():

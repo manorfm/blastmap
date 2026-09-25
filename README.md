@@ -195,6 +195,10 @@ When a literal cross-service consumer is indexed but its persistent write is not
 proven, `plan_change` creates a `retry-consumer-delivery` review. It asks for
 producer outbox/idempotency and consumer idempotent handling; the persistent-consumer
 review supersedes it when stronger evidence is available.
+When exactly one primary service participates in a source-proven aggregate ownership
+overlap, `plan_change` creates an `aggregate-ownership` review. It links the other
+declarants as dependencies and asks for one write owner or an explicit
+replication/read-model contract; multiple primary candidates remain a human decision.
 For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific

@@ -197,6 +197,11 @@ the same producer/symbol/channel. A primary producer can receive a
 does not have persistent-write proof. It asks for producer outbox/idempotency and
 consumer idempotent handling; the persistent-consumer review supersedes the same
 producer/symbol/channel. A primary
+service can receive an `aggregate-ownership` review when it is the only primary
+candidate in a source-proven persistence ownership overlap. The other declarants are
+dependencies and validation asks for one write owner or a documented
+replication/read-model contract; multiple primary candidates remain an explicit human
+decision. A primary
 caller can receive a `retry-downstream-error` review when a literal retry shares a
 source with a resolved downstream endpoint flow exposing 4xx. It asks to exclude that
 response unless its remote contract explicitly marks it transient; service-wide
