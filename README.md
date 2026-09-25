@@ -173,6 +173,10 @@ For a primary service, a literal retry policy in the same symbol as a source-pro
 non-retryable local error creates a `retry-policy` review. It asks to verify that the
 retry predicate excludes the permanent error, without assuming the recorded branch is
 actually retried at runtime.
+For a primary service, an explicit mapping of a broad exception type creates a
+`broad-error-handler` review. It preserves the generic handler as a possible safe
+fallback and asks only whether expected client and domain errors have specific
+mappings.
 When an affected SQL table has an exactly matching indexed migration fact,
 `plan_change` adds a schema-review unit. A destructive operation requires deployment,
 backup and rollback validation; it never asserts that the migration needs to run.

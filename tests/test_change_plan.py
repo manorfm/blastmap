@@ -979,6 +979,16 @@ def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings(
                 "evidence": [{"file": "handler.py", "start_line": 1, "end_line": 1}],
             },
         },
+        {
+            "kind": "possible_overbroad_exception_handler",
+            "services": ["payments-service"],
+            "confidence": 0.74,
+            "detail": {
+                "handler": "ApiExceptionHandler.fallback", "internal_type": "Exception",
+                "transport": {"protocol": "http", "code": "500"},
+                "evidence": [{"file": "handler.py", "start_line": 4, "end_line": 4}],
+            },
+        },
     ], {"payments-service"}) == []
 
 
@@ -1154,6 +1164,40 @@ def test_retry_policy_units_include_a_non_retryable_error_in_the_same_symbol():
             {"file": "OrderService.java", "start_line": 17, "end_line": 17},
             {"file": "OrderService.java", "start_line": 22, "end_line": 22},
         ],
+    }]
+
+
+def test_error_mapping_units_include_a_broad_exception_handler_review():
+    assert derive_error_mapping_review_units([
+        {
+            "kind": "possible_overbroad_exception_handler",
+            "services": ["orders-service"],
+            "reason": "ApiExceptionHandler.fallback maps broad Exception to HTTP 500.",
+            "confidence": 0.75,
+            "detail": {
+                "handler": "ApiExceptionHandler.fallback",
+                "internal_type": "Exception",
+                "transport": {"protocol": "http", "code": "500"},
+                "evidence": [{"file": "ApiExceptionHandler.java", "start_line": 45, "end_line": 49}],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "broad-error-handler:orders-service:ApiExceptionHandler.fallback:Exception:http:500",
+        "service": "orders-service",
+        "target": {
+            "role": "error_mapping", "symbol": "ApiExceptionHandler.fallback",
+            "evidence": [{"file": "ApiExceptionHandler.java", "start_line": 45, "end_line": 49}],
+        },
+        "action": "review",
+        "reason": "ApiExceptionHandler.fallback maps broad Exception to HTTP 500.",
+        "preconditions": [],
+        "related_contracts": ["error:Exception", "HTTP 500"],
+        "dependencies": [],
+        "validation": [
+            "verify ApiExceptionHandler.fallback remains a safe fallback and expected client/domain errors have explicit mappings",
+        ],
+        "confidence": 0.75,
+        "evidence": [{"file": "ApiExceptionHandler.java", "start_line": 45, "end_line": 49}],
     }]
 
 

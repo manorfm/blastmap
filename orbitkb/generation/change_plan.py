@@ -121,6 +121,7 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
         if kind not in {
             "possible_error_semantics_lost", "possible_internal_error_exposure",
             "possible_unhandled_endpoint_error", "possible_unmapped_downstream_error",
+            "possible_overbroad_exception_handler",
         }:
             continue
         services = finding.get("services")
@@ -136,7 +137,9 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
                 continue
         elif (
             not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
-            or confidence < (0.75 if kind == "possible_unhandled_endpoint_error" else 0.8)
+            or confidence < (
+                0.75 if kind in {"possible_unhandled_endpoint_error", "possible_overbroad_exception_handler"} else 0.8
+            )
         ):
             continue
         service = services[0]
@@ -168,6 +171,38 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
                 "dependencies": [],
                 "validation": [
                     "verify the response returns a stable public error code/message and keeps diagnostic detail internal",
+                ],
+                "confidence": float(confidence),
+                "evidence": evidence,
+            })
+            continue
+        if kind == "possible_overbroad_exception_handler":
+            handler = detail.get("handler")
+            error_type = detail.get("internal_type")
+            transport = detail.get("transport")
+            evidence = detail.get("evidence")
+            if (
+                not isinstance(handler, str) or not isinstance(error_type, str) or not isinstance(transport, dict)
+                or not isinstance(transport.get("protocol"), str) or not isinstance(evidence, list) or not evidence
+            ):
+                continue
+            protocol = transport["protocol"]
+            code = transport.get("code") if isinstance(transport.get("code"), str) else "unknown"
+            key = service, "broad-handler", handler, f"{error_type}:{protocol}:{code}"
+            if key in seen:
+                continue
+            seen.add(key)
+            units.append({
+                "id": f"broad-error-handler:{service}:{handler}:{error_type}:{protocol}:{code}",
+                "service": service,
+                "target": {"role": "error_mapping", "symbol": handler, "evidence": evidence},
+                "action": "review",
+                "reason": finding.get("reason", "review the indexed broad exception fallback"),
+                "preconditions": [],
+                "related_contracts": [f"error:{error_type}", f"{protocol.upper()} {code}"],
+                "dependencies": [],
+                "validation": [
+                    f"verify {handler} remains a safe fallback and expected client/domain errors have explicit mappings",
                 ],
                 "confidence": float(confidence),
                 "evidence": evidence,

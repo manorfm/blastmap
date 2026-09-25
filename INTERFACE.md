@@ -184,7 +184,10 @@ ambiguous contracts are excluded. The unit keeps the downstream service as a
 dependency and asks for an explicit boundary translation review. A primary service
 can receive a `retry-policy` review when a literal retry and a source-proven
 non-retryable local error share a symbol; it asks to validate the retry predicate and
-does not claim that the branch is retried at runtime. `ready` means a
+does not claim that the branch is retried at runtime. A primary service can receive a
+`broad-error-handler` review for an explicit broad exception mapping; it preserves the
+handler as a potential final fallback and asks whether expected client/domain errors
+have specific mappings. `ready` means a
 relevant indexed surface exists without a blocking decision; `needs_decision` means the
 compatibility choice is required; and `insufficient_evidence` means no indexed service
 matched the task. The audit record links to a surface synthesis when one exists and does
