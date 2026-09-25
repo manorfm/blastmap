@@ -1059,6 +1059,49 @@ export class OrdersController {
     )
 
 
+def test_node_analyzer_resolves_constructor_dependencies_of_nest_injectables(tmp_path: Path):
+    (tmp_path / "orders.controller.ts").write_text(
+        '''import { Controller, Injectable, Post } from "@nestjs/common";
+
+@Injectable()
+export class PaymentsService {
+  charge(input: CreateOrder) { return input; }
+}
+
+@Injectable()
+export class OrdersService {
+  constructor(private readonly paymentsService: PaymentsService) {}
+
+  create(input: CreateOrder) {
+    return this.paymentsService.charge(input);
+  }
+}
+
+@Controller("/orders")
+export class OrdersController {
+  constructor(private readonly ordersService: OrdersService) {}
+
+  @Post()
+  create(input: CreateOrder) {
+    return this.ordersService.create(input);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(item.consumer, item.contract) for item in result.injections] == [
+        ("OrdersService.paymentsService", "PaymentsService"),
+        ("OrdersController.ordersService", "OrdersService"),
+    ]
+    assert any(
+        edge.source == "OrdersService.create" and edge.target == "PaymentsService.charge"
+        for edge in result.edges
+    )
+
+
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
     source = tmp_path / "consumer.go"
     source.write_text(

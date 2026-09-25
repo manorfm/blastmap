@@ -62,7 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "9"
+STATIC_ANALYSIS_INPUT_VERSION = "10"
 
 
 def _walk(node: Node):
@@ -2346,7 +2346,7 @@ _NEST_RATE_LIMIT_DECORATORS = {"throttler.Throttle": "Throttle"}
 def _node_nest_constructor_injections(
     tree: Node, source: bytes, path: Path, root: Path, imports: tuple[tuple[str, str], ...],
 ) -> list[Injection]:
-    """Return direct typed constructor members on literal Nest controllers.
+    """Return direct typed constructor members on literal Nest controllers/services.
 
     The member must be declared through a TypeScript accessibility modifier and a
     nominal type. Tokens, factories and ordinary constructor locals remain outside
@@ -2367,7 +2367,13 @@ def _node_nest_constructor_injections(
         class_body = class_node.child_by_field_name("body")
         if class_name is None or class_body is None:
             continue
-        if _nest_decorator_path(_preceding_decorators(class_node), source, nest_imports, "Controller") is None:
+        class_decorators = _preceding_decorators(class_node)
+        is_controller = _nest_decorator_path(class_decorators, source, nest_imports, "Controller") is not None
+        is_injectable = any(
+            _nest_direct_decorator(decorator, source, nest_imports, "Injectable")
+            for decorator in class_decorators
+        )
+        if not is_controller and not is_injectable:
             continue
         for method in class_body.named_children:
             name = method.child_by_field_name("name") if method.type == "method_definition" else None

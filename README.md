@@ -307,11 +307,12 @@ decorators imported from `@nestjs/cache-manager` (`CacheKey`, `CacheTTL`) or
 `@nestjs/throttler` (`Throttle`), again with controller or handler scope. Their
 arguments, global policy and runtime behavior remain unknown; same-named local
 decorators are not classified.
-For Nest controllers, direct typed constructor members declared with `private`,
-`protected` or `public` are indexed as dependencies. Calls through `this.member`
-then resolve to a locally indexed class method when there is one exact type/method
-match. Injection tokens, factories, undecorated classes, generic/compound types and
-ordinary constructor locals remain unresolved.
+For Nest controllers and `@Injectable()` services, direct typed constructor members
+declared with `private`, `protected` or `public` are indexed as dependencies. Calls
+through `this.member` then resolve to a locally indexed class method when there is one
+exact type/method match, including chains between services. Injection tokens, factories,
+undecorated classes, generic/compound types and ordinary constructor locals remain
+unresolved.
 
 For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven error
 contracts (raised or explicitly mapped exception types and explicit local timeout
