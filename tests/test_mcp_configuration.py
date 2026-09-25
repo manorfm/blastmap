@@ -294,6 +294,14 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     )
     assert [item["environment_key"] for item in evidence_selected["bindings"]] == ["API_TOKEN"]
     assert [item["source"]["name"] for item in evidence_selected["source_imports"]] == ["worker-secrets"]
+    range_selected = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_evidence_ranges=[{"file": "deploy/api.yaml", "start_line": 6, "end_line": 6}],
+        source_import_evidence_ranges=[{"file": "deploy/worker.yaml", "start_line": 21, "end_line": 21}],
+    )
+    assert [item["environment_key"] for item in range_selected["bindings"]] == ["API_TOKEN"]
+    assert [item["source"]["name"] for item in range_selected["source_imports"]] == ["worker-secrets"]
     assert queries.describe_runtime_configuration(conn, "orders", workloads=[]) == {
         "error": "workloads must be a non-empty list of workload identities",
     }
@@ -333,6 +341,11 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         "orders",
         binding_evidence_files=[""],
     ) == {"error": "binding_evidence_files must be a non-empty list of non-empty strings"}
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_evidence_ranges=[{"file": "deploy/api.yaml", "start_line": 8, "end_line": 7}],
+    ) == {"error": "binding_evidence_ranges must be a non-empty list of valid evidence ranges"}
     assert queries.describe_runtime_configuration(
         conn,
         "orders",

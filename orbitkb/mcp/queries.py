@@ -711,7 +711,8 @@ def describe_runtime_configuration(
     binding_source_kinds: object = None, source_import_source_kinds: object = None,
     source_import_container_roles: object = None, source_import_prefixes: object = None,
     source_import_include_unprefixed: object = False, binding_evidence_files: object = None,
-    source_import_evidence_files: object = None,
+    source_import_evidence_files: object = None, binding_evidence_ranges: object = None,
+    source_import_evidence_ranges: object = None,
 ) -> dict:
     """Return source-proven Kubernetes configuration references without values."""
     error = _validate_pagination(limit, offset)
@@ -791,6 +792,16 @@ def describe_runtime_configuration(
     )
     if source_import_evidence_files_error is not None:
         return {"error": source_import_evidence_files_error}
+    selected_binding_evidence_ranges, binding_evidence_ranges_error = _runtime_configuration_evidence_ranges(
+        binding_evidence_ranges, "binding_evidence_ranges",
+    )
+    if binding_evidence_ranges_error is not None:
+        return {"error": binding_evidence_ranges_error}
+    selected_source_import_evidence_ranges, source_import_evidence_ranges_error = _runtime_configuration_evidence_ranges(
+        source_import_evidence_ranges, "source_import_evidence_ranges",
+    )
+    if source_import_evidence_ranges_error is not None:
+        return {"error": source_import_evidence_ranges_error}
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -807,6 +818,14 @@ def describe_runtime_configuration(
     if selected_source_import_evidence_files is not None:
         all_source_imports = _filter_runtime_configuration_evidence_files(
             all_source_imports, selected_source_import_evidence_files,
+        )
+    if selected_binding_evidence_ranges is not None:
+        all_bindings = _filter_runtime_configuration_evidence_ranges(
+            all_bindings, selected_binding_evidence_ranges,
+        )
+    if selected_source_import_evidence_ranges is not None:
+        all_source_imports = _filter_runtime_configuration_evidence_ranges(
+            all_source_imports, selected_source_import_evidence_ranges,
         )
     if selected_binding_source_kinds is not None:
         all_bindings = _filter_runtime_configuration_source_kinds(all_bindings, selected_binding_source_kinds)
@@ -962,6 +981,52 @@ def _filter_runtime_configuration_evidence_files(
 ) -> list[sqlite3.Row]:
     """Keep only records with an exact persisted evidence file path."""
     return [record for record in records if record["file_path"] in evidence_files]
+
+
+def _runtime_configuration_evidence_ranges(
+    values: object, argument_name: str,
+) -> tuple[list[tuple[str, int, int]] | None, str | None]:
+    """Validate bounded exact evidence ranges without reading source files."""
+    error = f"{argument_name} must be a non-empty list of valid evidence ranges"
+    if values is None:
+        return None, None
+    if not isinstance(values, list) or not values or len(values) > MAX_LIST_LIMIT:
+        return None, error
+    ranges: list[tuple[str, int, int]] = []
+    for value in values:
+        if not isinstance(value, dict):
+            return None, error
+        file_path = value.get("file")
+        start_line = value.get("start_line")
+        end_line = value.get("end_line")
+        if (
+            not isinstance(file_path, str)
+            or not file_path
+            or not isinstance(start_line, int)
+            or isinstance(start_line, bool)
+            or not isinstance(end_line, int)
+            or isinstance(end_line, bool)
+            or start_line < 1
+            or end_line < start_line
+        ):
+            return None, error
+        ranges.append((file_path, start_line, end_line))
+    return ranges, None
+
+
+def _filter_runtime_configuration_evidence_ranges(
+    records: list[sqlite3.Row], evidence_ranges: list[tuple[str, int, int]],
+) -> list[sqlite3.Row]:
+    """Keep records whose persisted evidence overlaps one requested exact range."""
+    return [
+        record for record in records
+        if any(
+            record["file_path"] == file_path
+            and record["start_line"] <= end_line
+            and start_line <= record["end_line"]
+            for file_path, start_line, end_line in evidence_ranges
+        )
+    ]
 
 
 def _filter_runtime_configuration_source_import_container_roles(
