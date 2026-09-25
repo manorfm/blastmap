@@ -289,7 +289,11 @@ produces one endpoint per supported verb (`GET`, `POST`, `PUT`, `PATCH`, `DELETE
 scope.
 NestJS controllers are also indexed when `@Controller` and an HTTP method decorator
 from `@nestjs/common` use literal paths; the combined route is linked to its controller
-method. Dynamic decorator arguments remain explicit unknowns.
+method. `describe_entrypoint` includes `contract.route_guards` for direct identifiers
+registered through Nest's imported `@UseGuards`, preserving whether registration is at
+controller or handler scope. This is registration context only: factories, expressions,
+global guards and guard policy remain unknown. Dynamic decorator arguments remain
+explicit unknowns.
 
 For Java/Kotlin Spring flows, `describe_entrypoint` also returns source-proven error
 contracts (raised or explicitly mapped exception types and explicit local timeout
@@ -525,7 +529,7 @@ The supported deterministic subset is intentionally focused:
 | --- | --- | --- |
 | Go | HTTP handlers, calls, GORM and `database/sql`, RabbitMQ, Kafka (`segmentio/kafka-go`) | Dynamic routing and types remain unknown. |
 | Java and Kotlin with Spring | HTTP, injection, repositories, JDBC, Mongo, RabbitMQ, Kafka (`KafkaTemplate`/`@KafkaListener`), scheduled jobs; Feign and injected `RestTemplate`/`WebClient` calls with literal internal service/route mappings; explicit method-level retry/timeout limits | Only unambiguous local wiring and literal limits are resolved; dynamic URLs, policies and values, IPs, localhost and external domains are not inferred. |
-| Node and TypeScript | Express literal routes and direct route middleware registration, Fastify routes, NestJS controllers, GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
+| Node and TypeScript | Express literal routes and direct route middleware registration, Fastify routes, NestJS controllers and direct `@UseGuards` registrations, GraphQL, Mongoose, Prisma, RabbitMQ, Kafka (`kafkajs`) | Dynamic imports and runtime composition remain unknown. |
 | GraphQL | Operations, local schema contracts, input/output shapes | Remote composition, directives and federation behavior are not inferred. |
 | Persistence and messaging | Postgres/Mongo evidence, RabbitMQ bindings and contracts, Kafka producer/consumer contracts | Only literal, source-proven configuration is exposed; Kafka consumer detection is Go/JVM/Node only, no Python. |
 | Cloud/infra | AWS (SQS, SNS, S3, EventBridge, Kinesis), Azure (Blob Storage, Service Bus, Event Hub) and GCP (Pub/Sub) call sites (Go, Java, Kotlin, Node/TS; Python is AWS-only via `boto3`), plus Terraform/CloudFormation/plain Kubernetes declarations, parsed with real grammars (`python-hcl2`, `cfn-flip`) — never keyword matching. A cloud call also produces a `FlowEdge`, visible in `trace_flow`/`describe_entrypoint`, for every language except Python. | GCS, Dockerfile, and unrendered Helm templates are not resolved; Azure Service Bus code facts can't distinguish queue from topic (defaults to queue — see `describe_cloud_dependencies`). |

@@ -859,6 +859,33 @@ export class OrdersController {
     )
 
 
+def test_node_analyzer_records_literal_nest_guards_per_entrypoint(tmp_path: Path):
+    (tmp_path / "orders.controller.ts").write_text(
+        '''import { Controller, Post, UseGuards } from "@nestjs/common";
+
+@Controller("/orders")
+@UseGuards(AuthenticationGuard)
+export class OrdersController {
+  @Post()
+  @UseGuards(OrdersPermissionGuard)
+  create(input: CreateOrder) {
+    return this.orderService.create(input);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert result.entrypoints[0].contract == {
+        "route_guards": [
+            {"symbol": "AuthenticationGuard", "scope": "controller"},
+            {"symbol": "OrdersPermissionGuard", "scope": "handler"},
+        ],
+    }
+
+
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
     source = tmp_path / "consumer.go"
     source.write_text(

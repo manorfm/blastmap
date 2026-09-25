@@ -62,7 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "3"
+STATIC_ANALYSIS_INPUT_VERSION = "4"
 
 
 def _walk(node: Node):
@@ -977,13 +977,16 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
                 client_declarations, command_imports, launchdarkly_clients,
             )
-        for function, method, route in _nest_http_entrypoint_functions(tree, source, imports):
+        for function, method, route, contract in _nest_http_entrypoint_functions(tree, source, imports):
             self._record_function(
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
                 client_declarations, command_imports, launchdarkly_clients,
             )
             result.entrypoints.append(
-                EntryPoint("http", method, route, function.symbol, _evidence(path, root, function.declaration))
+                EntryPoint(
+                    "http", method, route, function.symbol, _evidence(path, root, function.declaration),
+                    contract=contract,
+                )
             )
         express_route_prefixes = _express_route_prefixes(source_text)
         fastify_receivers = _fastify_route_receivers(source_text)
@@ -2301,7 +2304,7 @@ _NEST_HTTP_DECORATORS = {
 
 def _nest_http_entrypoint_functions(
     tree: Node, source: bytes, imports: tuple[tuple[str, str], ...],
-) -> list[tuple[_Function, str, str]]:
+) -> list[tuple[_Function, str, str, dict | None]]:
     """Extract literal Nest controller routes using imported decorator identities."""
     source_text = source.decode("utf-8", errors="ignore")
     if re.search(r"\bfrom\s*[\"']@nestjs/common[\"']", source_text) is None:
@@ -2313,13 +2316,12 @@ def _nest_http_entrypoint_functions(
     }
     if "Controller" not in nest_imports.values():
         return []
-    entrypoints: list[tuple[_Function, str, str]] = []
+    entrypoints: list[tuple[_Function, str, str, dict | None]] = []
     for class_node in _walk(tree):
         if class_node.type != "class_declaration":
             continue
-        controller_prefix = _nest_decorator_path(
-            _preceding_decorators(class_node), source, nest_imports, "Controller",
-        )
+        class_decorators = _preceding_decorators(class_node)
+        controller_prefix = _nest_decorator_path(class_decorators, source, nest_imports, "Controller")
         if controller_prefix is None:
             continue
         class_name_node = class_node.child_by_field_name("name")
@@ -2327,6 +2329,7 @@ def _nest_http_entrypoint_functions(
         if class_name_node is None or class_body is None:
             continue
         class_name = _text(class_name_node, source)
+        controller_guards = _nest_route_guards(class_decorators, source, nest_imports, "controller")
         decorators: list[Node] = []
         for child in class_body.named_children:
             if child.type == "decorator":
@@ -2335,7 +2338,8 @@ def _nest_http_entrypoint_functions(
             if child.type != "method_definition":
                 decorators.clear()
                 continue
-            route = _nest_method_route(decorators, source, nest_imports)
+            route_decorators = list(decorators)
+            route = _nest_method_route(route_decorators, source, nest_imports)
             decorators.clear()
             if route is None:
                 continue
@@ -2346,7 +2350,12 @@ def _nest_http_entrypoint_functions(
             name = _text(method_name, source)
             function = _Function(name, f"{class_name}.{name}", body, child)
             method, path = route
-            entrypoints.append((function, method, _join_route(controller_prefix, path)))
+            guards = [
+                *controller_guards,
+                *_nest_route_guards(route_decorators, source, nest_imports, "handler"),
+            ]
+            contract = {"route_guards": guards} if guards else None
+            entrypoints.append((function, method, _join_route(controller_prefix, path), contract))
     return entrypoints
 
 
@@ -2393,6 +2402,32 @@ def _nest_method_route(
         if path is not None:
             return method, path
     return None
+
+
+def _nest_route_guards(
+    decorators: list[Node], source: bytes, imported_names: dict[str, str], scope: str,
+) -> list[dict[str, str]]:
+    """Return direct identifiers registered by Nest's imported ``@UseGuards``.
+
+    A literal registration is useful route context but does not prove the guard's
+    policy. Guard factories, inline expressions and indirect decorators are left
+    out, so static output never invents security behavior.
+    """
+    guards: list[dict[str, str]] = []
+    for decorator in decorators:
+        call = next((child for child in decorator.named_children if child.type == "call_expression"), None)
+        if call is None:
+            continue
+        function = call.child_by_field_name("function")
+        arguments = call.child_by_field_name("arguments")
+        if function is None or arguments is None or imported_names.get(_text(function, source)) != "UseGuards":
+            continue
+        guards.extend(
+            {"symbol": _text(argument, source), "scope": scope}
+            for argument in arguments.named_children
+            if argument.type == "identifier"
+        )
+    return guards
 
 
 class StaticAnalysisEngine:
