@@ -1455,16 +1455,20 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
         }]
     if change_unit["target"]["role"] == "configuration":
         if change_unit["target"]["symbol"].startswith("kubernetes:"):
+            is_unresolved_import = change_unit["id"].startswith("runtime-configuration-source-import-unknown:")
+            purpose = (
+                "confirm the owner of the unresolved Kubernetes configuration source"
+                if change_unit["id"].startswith((
+                    "runtime-configuration-source-unknown:",
+                    "runtime-configuration-source-import-unknown:",
+                ))
+                else "confirm the indexed Kubernetes configuration mismatch"
+            )
+            if is_unresolved_import and (scope := _kubernetes_workload_reading_scope(change_unit["target"])):
+                purpose = f"{purpose} and inspect {scope}"
             return [{
                 "service": producer,
-                "purpose": (
-                    "confirm the owner of the unresolved Kubernetes configuration source"
-                    if change_unit["id"].startswith((
-                        "runtime-configuration-source-unknown:",
-                        "runtime-configuration-source-import-unknown:",
-                    ))
-                    else "confirm the indexed Kubernetes configuration mismatch"
-                ),
+                "purpose": purpose,
                 "recommended_query": {
                     "tool": "describe_runtime_configuration", "arguments": {"service": producer},
                 },
@@ -1488,6 +1492,24 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
             "recommended_query": {"tool": "describe_messages", "arguments": {"service": consumer}},
         })
     return reading
+
+
+def _kubernetes_workload_reading_scope(target: dict) -> str | None:
+    """Format only persisted, source-proven workload scopes for a reading prompt."""
+    workloads = target.get("workloads")
+    if not isinstance(workloads, list):
+        return None
+    scopes: list[str] = []
+    for workload in workloads:
+        if not isinstance(workload, dict):
+            continue
+        kind, name, container = (workload.get(field) for field in ("kind", "name", "container"))
+        if not all(isinstance(value, str) and value for value in (kind, name, container)):
+            continue
+        scope = f"{kind} {name} container {container}"
+        if scope not in scopes:
+            scopes.append(scope)
+    return " and ".join(scopes) or None
 
 
 def get_change_context(

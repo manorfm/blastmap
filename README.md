@@ -177,6 +177,8 @@ primary service, grouping its references even when prefixes differ. It does not
 infer which keys the imported source supplies. For an optional source, it validates
 safe behavior when absent rather than requiring its keys before rollout. When indexed,
 the change target also names the affected Kubernetes workloads and containers.
+Its `describe_change_unit` reading purpose repeats that proven scope, without adding
+another retrieval or model call.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

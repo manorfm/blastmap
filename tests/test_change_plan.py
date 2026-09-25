@@ -584,7 +584,10 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
     )
     assert detail["minimal_reading"] == [{
         "service": "checkout-service",
-        "purpose": "confirm the owner of the unresolved Kubernetes configuration source",
+        "purpose": (
+            "confirm the owner of the unresolved Kubernetes configuration source and inspect "
+            "Deployment checkout container migrate and Deployment checkout container api"
+        ),
         "recommended_query": {"tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"}},
     }]
     validate(detail, load_schema("describe_change_unit"))
@@ -604,6 +607,11 @@ def test_env_from_source_import_review_requires_availability_confirmation_when_u
         "confirm source availability before relying on imported configuration during rollout",
     ]
     assert "workloads" not in units[0]["target"]
+    assert queries._minimal_unit_reading(units[0]) == [{
+        "service": "checkout-service",
+        "purpose": "confirm the owner of the unresolved Kubernetes configuration source",
+        "recommended_query": {"tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"}},
+    }]
 
 
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():

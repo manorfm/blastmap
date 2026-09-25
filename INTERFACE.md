@@ -178,7 +178,8 @@ resolved HTTP boundary, `describe_persistence` for a schema/migration review, or
 unresolved source-ownership review, including an `envFrom` source. The latter is
 grouped by source because its imported keys remain unknown; initialization-container
 imports add an ordering validation, and its target identifies proven workloads and
-containers when available. It does not scan source, rerun retrieval or call a model.
+containers when available. Its reading purpose repeats that scope without scanning
+source, rerunning retrieval or calling a model.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)
