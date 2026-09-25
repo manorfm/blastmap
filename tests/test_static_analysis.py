@@ -2300,6 +2300,39 @@ public class InventoryGrpcService extends InventoryGrpc.InventoryImplBase {
     )
 
 
+def test_static_analysis_links_a_literal_java_grpc_stub_call_to_a_unique_proto_rpc(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "CheckoutService.java").write_text(
+        '''class CheckoutService {
+  private final InventoryGrpc.InventoryBlockingStub inventoryStub;
+
+  Receipt checkout(ReserveRequest request) {
+    return inventoryStub.reserve(request);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert any(
+        edge.source == "CheckoutService.checkout"
+        and edge.target == "proto.inventory.v1.Inventory.Reserve"
+        and edge.confidence == "medium"
+        for edge in result.edges
+    )
+
+
 def test_static_analysis_ignores_ambiguous_protobuf_rpc_declarations(tmp_path: Path):
     for name in ("inventory.proto", "inventory-duplicate.proto"):
         (tmp_path / name).write_text(

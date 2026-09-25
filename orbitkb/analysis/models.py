@@ -119,7 +119,7 @@ class GrpcHandler:
 
 @dataclass(frozen=True)
 class GrpcClientBinding:
-    """A direct Nest ClientGrpc service-stub assignment."""
+    """A direct generated or Nest gRPC service-stub binding."""
 
     owner: str
     member: str

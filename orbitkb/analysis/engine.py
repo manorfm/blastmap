@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "14"
+STATIC_ANALYSIS_INPUT_VERSION = "15"
 
 
 def _walk(node: Node):
@@ -956,6 +956,9 @@ _JVM_GRPC_SERVICE_IMPORT = re.compile(
 _JVM_GRPC_IMPL_BASE = re.compile(
     r"\bextends\s+(?:[\w.]+\.)?(?P<service>[A-Za-z_]\w*)Grpc\.\w*ImplBase\b",
 )
+_JVM_GRPC_STUB_FIELD = re.compile(
+    r"\b(?P<service>[A-Za-z_]\w*)Grpc\.[A-Za-z_]\w*Stub\s+(?P<member>[A-Za-z_]\w*)\b",
+)
 
 
 def _jvm_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
@@ -988,6 +991,33 @@ def _jvm_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
                     f"{_text(class_name, source)}.{_text(method_name, source)}", _evidence(path, root, method),
                 ))
     return handlers
+
+
+def _jvm_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClientBinding]:
+    """Return direct Java fields typed as generated gRPC stubs."""
+    parser = Parser(Language(tree_sitter_java.language()))
+    bindings: list[GrpcClientBinding] = []
+    for path in files:
+        if path.suffix != ".java":
+            continue
+        source = path.read_bytes()
+        tree = parser.parse(source)
+        for class_node in (node for node in _walk(tree.root_node) if node.type == "class_declaration"):
+            class_name = class_node.child_by_field_name("name")
+            class_body = class_node.child_by_field_name("body")
+            if class_name is None or class_body is None:
+                continue
+            for field in class_body.named_children:
+                if field.type != "field_declaration":
+                    continue
+                matches = list(_JVM_GRPC_STUB_FIELD.finditer(_text(field, source)))
+                if len(matches) != 1:
+                    continue
+                match = matches[0]
+                bindings.append(GrpcClientBinding(
+                    _text(class_name, source), match.group("member"), match.group("service"), _evidence(path, root, field),
+                ))
+    return bindings
 
 
 class _NodeGraphqlAnalyzer(_FileAnalyzer):
@@ -2938,12 +2968,13 @@ class StaticAnalysisEngine:
                 result.edges, result.injections, _spring_data_query_methods(files),
             )
             result.grpc_handlers.extend(_jvm_grpc_handlers(files, root))
+            result.grpc_client_bindings.extend(_jvm_grpc_client_bindings(files, root))
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)
         _enrich_openapi_contracts(result, root)
         _enrich_protobuf_contracts(result, root)
         _link_grpc_handlers(result)
-        _link_nest_grpc_client_calls(result)
+        _link_grpc_client_calls(result)
         result.configuration_bindings.extend(_literal_configuration_bindings(result.symbols, root))
         _extract_scheduled_jobs(result, files, root)
         result.persistence_facts.extend(_persistence_facts(files, root))
@@ -3451,8 +3482,8 @@ def _link_grpc_handlers(result: AnalysisResult) -> None:
         result.edges.append(FlowEdge(entrypoint.symbol, handler.symbol, "invokes", handler.evidence, confidence))
 
 
-def _link_nest_grpc_client_calls(result: AnalysisResult) -> None:
-    """Replace an unambiguous literal Nest stub call with its declared RPC symbol."""
+def _link_grpc_client_calls(result: AnalysisResult) -> None:
+    """Replace an unambiguous static gRPC stub call with its declared RPC symbol."""
     bindings: dict[tuple[str, str], list[GrpcClientBinding]] = {}
     for binding in result.grpc_client_bindings:
         bindings.setdefault((binding.owner, binding.member), []).append(binding)
