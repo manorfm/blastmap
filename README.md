@@ -265,7 +265,9 @@ low-confidence `possible_kubernetes_configuration_source_import_not_declared_loc
 It groups repeated imports of the same source per service, retaining evidence and
 prefixes while imported environment keys remain unknown. Its availability is
 `optional`, `required`, `mixed` or `unknown`; optional sources prompt a behavioral
-absence review instead of an assertion that rollout must provision the source.
+absence review instead of an assertion that rollout must provision the source. When
+an initialization container imports the source, the review also checks that it
+completes before application containers start.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and

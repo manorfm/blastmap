@@ -517,13 +517,20 @@ def derive_runtime_configuration_source_import_unknown_review_units(
                 all(isinstance(value, str) and value for value in (source_kind, source_name))
                 and _unique_evidence([reference])
             ):
-                grouped.setdefault((source_kind, source_name), []).append((reference, unknown.get("optional")))
+                grouped.setdefault((source_kind, source_name), []).append((
+                    reference, unknown.get("optional"), unknown.get("container_role"),
+                ))
         for (source_kind, source_name), records in sorted(grouped.items()):
-            evidence = _sorted_evidence([reference for reference, _optional in records])
+            evidence = _sorted_evidence([reference for reference, _optional, _container_role in records])
             source_label = "ConfigMap" if source_kind == "config_map" else "Secret"
             availability_values = {
                 None if optional is None else bool(optional)
-                for _reference, optional in records
+                for _reference, optional, _container_role in records
+            }
+            container_roles = {
+                container_role
+                for _reference, _optional, container_role in records
+                if container_role in {"application", "initialization"}
             }
             availability = (
                 "optional" if availability_values == {True}
@@ -538,6 +545,12 @@ def derive_runtime_configuration_source_import_unknown_review_units(
                 if availability == "required"
                 else "confirm source availability before relying on imported configuration during rollout"
             )
+            validation = [
+                f"confirm the owning repository, chart, controller, or deployment process for {source_label} {source_name}",
+                availability_validation,
+            ]
+            if "initialization" in container_roles:
+                validation.append("verify initialization completes before application containers start")
             units.append({
                 "id": f"runtime-configuration-source-import-unknown:{service}:{source_kind}:{source_name}",
                 "service": service,
@@ -553,10 +566,7 @@ def derive_runtime_configuration_source_import_unknown_review_units(
                 "preconditions": [],
                 "related_contracts": [f"configuration:{source_kind}:{source_name}"],
                 "dependencies": [],
-                "validation": [
-                    f"confirm the owning repository, chart, controller, or deployment process for {source_label} {source_name}",
-                    availability_validation,
-                ],
+                "validation": validation,
                 "confidence": 0.4,
                 "evidence": evidence,
             })

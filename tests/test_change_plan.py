@@ -521,12 +521,12 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
         KubernetesConfigurationSourceImportUnknown(
             source_kind="config_map", source_name="external-config", prefix="ORDERS_",
             reference_file_path="deploy/checkout.yaml", reference_start_line=12, reference_end_line=15,
-            optional=True, matched_service_name="checkout-service",
+            container_role="initialization", optional=True, matched_service_name="checkout-service",
         ),
         KubernetesConfigurationSourceImportUnknown(
             source_kind="config_map", source_name="external-config", prefix="PAYMENTS_",
             reference_file_path="deploy/checkout.yaml", reference_start_line=20, reference_end_line=23,
-            optional=True, matched_service_name="checkout-service",
+            container_role="initialization", optional=True, matched_service_name="checkout-service",
         ),
     ])
 
@@ -557,6 +557,7 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
         "validation": [
             "confirm the owning repository, chart, controller, or deployment process for ConfigMap external-config",
             "verify requested behavior remains safe when the optional ConfigMap external-config is unavailable",
+            "verify initialization completes before application containers start",
         ],
         "confidence": 0.4,
         "evidence": [

@@ -1948,7 +1948,7 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
     """Return low-confidence possible external ``envFrom`` dependencies."""
     names = _service_names(conn)
     rows = conn.execute(
-        """SELECT service_id, source_kind, source_name, prefix, optional, reference_file_path,
+        """SELECT service_id, source_kind, source_name, prefix, container_role, optional, reference_file_path,
                   reference_start_line, reference_end_line
            FROM kubernetes_configuration_source_import_unknowns
            WHERE service_id IS NOT NULL
@@ -1966,6 +1966,11 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
             for row in imports
         })
         prefixes = sorted({row["prefix"] for row in imports if row["prefix"] is not None})
+        container_roles = sorted({
+            row["container_role"]
+            for row in imports
+            if row["container_role"] in {"application", "initialization"}
+        })
         availability_values = {None if row["optional"] is None else bool(row["optional"]) for row in imports}
         availability = (
             "optional" if availability_values == {True}
@@ -1991,6 +1996,8 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
             detail["prefixes"] = prefixes
         if any(row["prefix"] is None for row in imports):
             detail["includes_unprefixed_import"] = True
+        if container_roles:
+            detail["container_roles"] = container_roles
         if availability == "optional":
             detail["unknowns"].append("The source is optional and may be absent at runtime.")
             detail["remediation"].append(
@@ -1999,6 +2006,11 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
         elif availability in {"mixed", "unknown"}:
             detail["unknowns"].append("The imports do not establish one unambiguous source-availability requirement.")
             detail["remediation"].append("Confirm source availability before relying on imported configuration during rollout.")
+        if "initialization" in container_roles:
+            detail["unknowns"].append(
+                "An initialization container using this source must complete before application containers start.",
+            )
+            detail["remediation"].append("Verify initialization completes before application containers start.")
         findings.append({
             "kind": "possible_kubernetes_configuration_source_import_not_declared_locally", "severity": "info",
             "services": [service],
