@@ -183,7 +183,8 @@ source, rerunning retrieval or calling a model, with up to two file/line locatio
 per workload. The structured workload target uses the same bound and sets
 `evidence_truncated` when more evidence exists in the unit.
 `describe_change_unit` adds `evidence_follow_up` only in that case, directing the
-agent to complete runtime-configuration context.
+agent to complete runtime-configuration context and listing the affected
+workloads/containers.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

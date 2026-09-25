@@ -1382,9 +1382,11 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
         "minimal_reading": _minimal_unit_reading(change_unit),
         "validation": change_unit["validation"],
     }
-    if _has_truncated_workload_evidence(change_unit):
+    truncated_workloads = _truncated_workload_scopes(change_unit)
+    if truncated_workloads:
         response["evidence_follow_up"] = {
             "reason": "workload evidence is truncated",
+            "workloads": truncated_workloads,
             "recommended_query": {
                 "tool": "describe_runtime_configuration", "arguments": {"service": change_unit["service"]},
             },
@@ -1502,15 +1504,22 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
     return reading
 
 
-def _has_truncated_workload_evidence(change_unit: dict) -> bool:
-    """Identify a persisted workload target whose compact evidence was bounded."""
+def _truncated_workload_scopes(change_unit: dict) -> list[dict]:
+    """Return unique, valid workload scopes whose compact evidence was bounded."""
     target = change_unit.get("target")
     if not isinstance(target, dict) or not isinstance(target.get("workloads"), list):
-        return False
-    return any(
-        isinstance(workload, dict) and workload.get("evidence_truncated") is True
-        for workload in target["workloads"]
-    )
+        return []
+    scopes: list[dict] = []
+    for workload in target["workloads"]:
+        if not isinstance(workload, dict) or workload.get("evidence_truncated") is not True:
+            continue
+        kind, name, container = (workload.get(field) for field in ("kind", "name", "container"))
+        if not all(isinstance(value, str) and value for value in (kind, name, container)):
+            continue
+        scope = {"kind": kind, "name": name, "container": container}
+        if scope not in scopes:
+            scopes.append(scope)
+    return scopes
 
 
 def _kubernetes_workload_reading_scope(target: dict) -> str | None:

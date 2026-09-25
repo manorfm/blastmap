@@ -699,11 +699,29 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
 
     assert detail["evidence_follow_up"] == {
         "reason": "workload evidence is truncated",
+        "workloads": [{"kind": "Deployment", "name": "checkout", "container": "api"}],
         "recommended_query": {
             "tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"},
         },
     }
     validate(detail, load_schema("describe_change_unit"))
+
+
+def test_truncated_workload_scopes_are_grouped_and_validated():
+    assert queries._truncated_workload_scopes({
+        "target": {
+            "workloads": [
+                {"kind": "Deployment", "name": "checkout", "container": "api", "evidence_truncated": True},
+                {"kind": "Deployment", "name": "checkout", "container": "api", "evidence_truncated": True},
+                {"kind": "Deployment", "name": "checkout", "container": "worker", "evidence_truncated": True},
+                {"kind": "Deployment", "name": "checkout", "evidence_truncated": True},
+                {"kind": "Deployment", "name": "checkout", "container": "cron", "evidence_truncated": False},
+            ],
+        },
+    }) == [
+        {"kind": "Deployment", "name": "checkout", "container": "api"},
+        {"kind": "Deployment", "name": "checkout", "container": "worker"},
+    ]
 
 
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():

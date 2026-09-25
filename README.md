@@ -182,7 +182,8 @@ another retrieval or model call, with up to two file/line locations per workload
 The structured workload target uses the same bound and flags `evidence_truncated`
 when the complete unit-level evidence should be consulted.
 When that flag is present, `describe_change_unit` returns an `evidence_follow_up`
-query for the complete runtime-configuration context.
+query for the complete runtime-configuration context, scoped to the affected
+workloads and containers.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

@@ -33,10 +33,24 @@
     },
     "evidence_follow_up": {
       "type": "object",
-      "required": ["reason", "recommended_query"],
+      "required": ["reason", "workloads", "recommended_query"],
       "additionalProperties": false,
       "properties": {
         "reason": {"type": "string"},
+        "workloads": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["kind", "name", "container"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {"type": "string"},
+              "name": {"type": "string"},
+              "container": {"type": "string"}
+            }
+          }
+        },
         "recommended_query": {
           "type": "object",
           "required": ["tool", "arguments"],
