@@ -463,6 +463,10 @@ It does not infer error semantics from `throw`, promise rejection, global middle
 or dynamic statuses. When the reply AST directly contains `err`, `error` or
 `exception`'s `message`, `stack` or `cause`, it retains only an exposure boolean and
 the source location—never the potentially sensitive value.
+A named Express error middleware is also recognized only when a proven Express
+receiver registers it literally with `app.use(handler)` and it has the conventional
+`(error, req, res, next)` signature. Dynamic registration and other middleware forms
+remain unknown.
 
 For Go HTTP, OrbitKB indexes only literal 4xx/5xx `http.Error` and
 `http.ResponseWriter.WriteHeader` replies when the local source imports `net/http`

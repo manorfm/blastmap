@@ -69,7 +69,11 @@ reanalyzes the service.
    It needs a literal call, a reachable downstream HTTP contract and a matching reachable
    caller mapping; otherwise it returns explicit unknowns rather than inventing a failure.
    Node REST mappings currently require a literal 4xx/5xx Express/Fastify reply through
-   `res`, `response` or `reply`; global middleware, throws and dynamic statuses remain unknown.
+   `res`, `response` or `reply`; unsupported global middleware, throws and dynamic
+   statuses remain unknown.
+   A named Express error middleware is included only with a literal `app.use(handler)`
+   registration on a proven receiver and the conventional `(error, req, res, next)`
+   signature; dynamic registration remains unknown.
    Go mappings currently require literal `net/http` `http.Error` or `WriteHeader` calls
    on a declared `http.ResponseWriter`; dynamic statuses, custom writers and returned
    errors remain unknown. A direct `http.Error(w, err.Error(), ...)` or

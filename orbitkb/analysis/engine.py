@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "28"
+STATIC_ANALYSIS_INPUT_VERSION = "29"
 
 
 def _walk(node: Node):
@@ -1328,6 +1328,10 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         prisma_clients = _prisma_client_variables(source_text)
         client_declarations = node_stateful_client_declarations(source_text)
         command_imports = node_command_imports(source_text)
+        express_route_prefixes = _express_route_prefixes(source_text)
+        express_error_middleware_names = _express_error_middleware_names(
+            source_text, frozenset(express_route_prefixes),
+        )
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
         result.grpc_handlers.extend(_node_nest_grpc_handlers(tree, source, path, root, imports))
         result.grpc_client_bindings.extend(_node_nest_grpc_client_bindings(tree, source, path, root, imports))
@@ -1340,6 +1344,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             self._record_function(
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
                 client_declarations, command_imports, launchdarkly_clients,
+                error_middleware_names=express_error_middleware_names,
             )
         for function in _node_class_functions(tree, source):
             self._record_function(
@@ -1357,7 +1362,6 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                     contract=contract,
                 )
             )
-        express_route_prefixes = _express_route_prefixes(source_text)
         fastify_receivers = _fastify_route_receivers(source_text)
         route_prefixes = {
             **express_route_prefixes,
@@ -1507,6 +1511,8 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         client_declarations: dict,
         command_imports: dict[str, tuple[str, str]],
         launchdarkly_clients: frozenset[str],
+        *,
+        error_middleware_names: frozenset[str] = frozenset(),
     ) -> None:
         """Store one Node handler and every bounded fact derived from it."""
         if any(symbol.name == function.symbol for symbol in result.symbols):
@@ -1518,7 +1524,10 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         result.edges.extend(function_edges)
         result.cloud_facts.extend(function_cloud_facts)
         result.boundaries.extend(self._boundaries_for(function, path, root, source))
-        result.error_contracts.extend(_node_http_error_contracts(function, path, root, source))
+        result.error_contracts.extend(_node_http_error_contracts(
+            function, path, root, source,
+            is_registered_error_middleware=function.name in error_middleware_names,
+        ))
         result.feature_flags.extend(
             _node_launchdarkly_feature_flags(function, path, root, source, launchdarkly_clients)
         )
@@ -1585,6 +1594,8 @@ _NODE_INTERNAL_DETAIL_PROPERTIES = frozenset({"message", "stack", "cause"})
 
 def _node_http_error_contracts(
     function: _Function, path: Path, root: Path, source: bytes,
+    *,
+    is_registered_error_middleware: bool = False,
 ) -> list[ErrorContract]:
     """Extract explicit Express/Fastify error replies from a handler parameter.
 
@@ -1592,7 +1603,9 @@ def _node_http_error_contracts(
     The receiver must be the conventional second handler parameter and the status
     must be immediately followed by an explicit response send operation.
     """
-    receiver = _node_response_receiver(function, source)
+    receiver = _node_response_receiver(
+        function, source, is_registered_error_middleware=is_registered_error_middleware,
+    )
     if receiver is None:
         return []
     patterns = (
@@ -1665,19 +1678,31 @@ def _node_member_root_identifier(member: Node, source: bytes) -> str | None:
     return _text(object_node, source)
 
 
-def _node_response_receiver(function: _Function, source: bytes) -> str | None:
+def _node_response_receiver(
+    function: _Function, source: bytes, *, is_registered_error_middleware: bool = False,
+) -> str | None:
     declaration = function.declaration
     if declaration.type == "variable_declarator":
         declaration = declaration.child_by_field_name("value") or declaration
     parameters = declaration.child_by_field_name("parameters")
     if parameters is None or len(parameters.named_children) < 2:
         return None
-    response_parameter = parameters.named_children[1]
-    identifier = next((node for node in _walk(response_parameter) if node.type == "identifier"), None)
-    if identifier is None:
-        return None
-    receiver = _text(identifier, source)
-    return receiver if receiver in _NODE_RESPONSE_PARAMETER_NAMES else None
+    parameter_names = [
+        _text(identifier, source)
+        for parameter in parameters.named_children
+        if (identifier := next((node for node in _walk(parameter) if node.type == "identifier"), None)) is not None
+    ]
+    if len(parameter_names) >= 2 and parameter_names[1] in _NODE_RESPONSE_PARAMETER_NAMES:
+        return parameter_names[1]
+    if (
+        is_registered_error_middleware
+        and len(parameter_names) == 4
+        and parameter_names[0] in _NODE_ERROR_IDENTIFIERS
+        and parameter_names[2] in _NODE_RESPONSE_PARAMETER_NAMES
+        and parameter_names[3] == "next"
+    ):
+        return parameter_names[2]
+    return None
 
 
 _LAUNCHDARKLY_INITIALIZERS = frozenset({
@@ -2624,6 +2649,15 @@ def _express_route_prefixes(source: str) -> dict[str, str]:
         **{application: "" for application in applications},
         **{router: prefixes[0] for router, prefixes in mounts.items() if len(prefixes) == 1},
     }
+
+
+def _express_error_middleware_names(source: str, receivers: frozenset[str]) -> frozenset[str]:
+    """Return named middleware registered directly through a proven Express receiver."""
+    return frozenset(
+        handler
+        for receiver, handler in re.findall(r"\b(\w+)\.use\s*\(\s*(\w+)\s*\)", source)
+        if receiver in receivers
+    )
 
 
 def _express_literal_chained_route(

@@ -790,6 +790,33 @@ app.post("/orders/cause", exposeCause);
     }
 
 
+def test_node_analyzer_extracts_conventional_express_error_middleware(tmp_path: Path):
+    (tmp_path / "errors.ts").write_text(
+        '''import express from "express";
+const app = express();
+
+function handleError(error: Error, req: Request, res: Response, next: NextFunction) {
+  return res.status(500).json({ message: error.message });
+}
+
+function orphanError(error: Error, req: Request, res: Response, next: NextFunction) {
+  return res.status(500).json({ message: error.message });
+}
+
+app.use(handleError);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(contract.source, contract.role, contract.error_kind, contract.protocol,
+             contract.transport_code, contract.exposes_internal_detail)
+            for contract in result.error_contracts] == [
+        ("errors.handleError", "maps", "unexpected", "http", "500", True),
+    ]
+
+
 def test_node_analyzer_skips_fastify_like_route_without_a_local_factory(tmp_path: Path):
     (tmp_path / "orders.ts").write_text(
         '''const app = makeTestServer();
