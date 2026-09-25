@@ -74,6 +74,9 @@ reanalyzes the service.
    A named Express error middleware is included only with a literal `app.use(handler)`
    registration on a proven receiver and the conventional `(error, req, res, next)`
    signature; dynamic registration remains unknown.
+   A named Fastify error handler is included only with literal
+   `app.setErrorHandler(handler)` registration on a proven receiver and the
+   conventional `(error, request, reply)` signature.
    Go mappings currently require literal `net/http` `http.Error` or `WriteHeader` calls
    on a declared `http.ResponseWriter`; dynamic statuses, custom writers and returned
    errors remain unknown. A direct `http.Error(w, err.Error(), ...)` or

@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "29"
+STATIC_ANALYSIS_INPUT_VERSION = "30"
 
 
 def _walk(node: Node):
@@ -1329,9 +1329,13 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         client_declarations = node_stateful_client_declarations(source_text)
         command_imports = node_command_imports(source_text)
         express_route_prefixes = _express_route_prefixes(source_text)
-        express_error_middleware_names = _express_error_middleware_names(
-            source_text, frozenset(express_route_prefixes),
-        )
+        fastify_receivers = _fastify_route_receivers(source_text)
+        error_handler_parameter_counts = {
+            name: 4
+            for name in _express_error_middleware_names(source_text, frozenset(express_route_prefixes))
+        }
+        for name in _fastify_error_handler_names(source_text, fastify_receivers):
+            error_handler_parameter_counts.setdefault(name, 3)
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
         result.grpc_handlers.extend(_node_nest_grpc_handlers(tree, source, path, root, imports))
         result.grpc_client_bindings.extend(_node_nest_grpc_client_bindings(tree, source, path, root, imports))
@@ -1344,7 +1348,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
             self._record_function(
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
                 client_declarations, command_imports, launchdarkly_clients,
-                error_middleware_names=express_error_middleware_names,
+                error_handler_parameter_counts=error_handler_parameter_counts,
             )
         for function in _node_class_functions(tree, source):
             self._record_function(
@@ -1362,7 +1366,6 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
                     contract=contract,
                 )
             )
-        fastify_receivers = _fastify_route_receivers(source_text)
         route_prefixes = {
             **express_route_prefixes,
             **{receiver: "" for receiver in fastify_receivers},
@@ -1512,7 +1515,7 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         command_imports: dict[str, tuple[str, str]],
         launchdarkly_clients: frozenset[str],
         *,
-        error_middleware_names: frozenset[str] = frozenset(),
+        error_handler_parameter_counts: dict[str, int] | None = None,
     ) -> None:
         """Store one Node handler and every bounded fact derived from it."""
         if any(symbol.name == function.symbol for symbol in result.symbols):
@@ -1526,7 +1529,10 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         result.boundaries.extend(self._boundaries_for(function, path, root, source))
         result.error_contracts.extend(_node_http_error_contracts(
             function, path, root, source,
-            is_registered_error_middleware=function.name in error_middleware_names,
+            error_handler_parameter_count=(
+                error_handler_parameter_counts.get(function.name)
+                if error_handler_parameter_counts is not None else None
+            ),
         ))
         result.feature_flags.extend(
             _node_launchdarkly_feature_flags(function, path, root, source, launchdarkly_clients)
@@ -1595,7 +1601,7 @@ _NODE_INTERNAL_DETAIL_PROPERTIES = frozenset({"message", "stack", "cause"})
 def _node_http_error_contracts(
     function: _Function, path: Path, root: Path, source: bytes,
     *,
-    is_registered_error_middleware: bool = False,
+    error_handler_parameter_count: int | None = None,
 ) -> list[ErrorContract]:
     """Extract explicit Express/Fastify error replies from a handler parameter.
 
@@ -1604,7 +1610,7 @@ def _node_http_error_contracts(
     must be immediately followed by an explicit response send operation.
     """
     receiver = _node_response_receiver(
-        function, source, is_registered_error_middleware=is_registered_error_middleware,
+        function, source, error_handler_parameter_count=error_handler_parameter_count,
     )
     if receiver is None:
         return []
@@ -1679,7 +1685,7 @@ def _node_member_root_identifier(member: Node, source: bytes) -> str | None:
 
 
 def _node_response_receiver(
-    function: _Function, source: bytes, *, is_registered_error_middleware: bool = False,
+    function: _Function, source: bytes, *, error_handler_parameter_count: int | None = None,
 ) -> str | None:
     declaration = function.declaration
     if declaration.type == "variable_declarator":
@@ -1695,11 +1701,11 @@ def _node_response_receiver(
     if len(parameter_names) >= 2 and parameter_names[1] in _NODE_RESPONSE_PARAMETER_NAMES:
         return parameter_names[1]
     if (
-        is_registered_error_middleware
-        and len(parameter_names) == 4
+        error_handler_parameter_count is not None
+        and len(parameter_names) == error_handler_parameter_count
         and parameter_names[0] in _NODE_ERROR_IDENTIFIERS
         and parameter_names[2] in _NODE_RESPONSE_PARAMETER_NAMES
-        and parameter_names[3] == "next"
+        and (error_handler_parameter_count == 3 or parameter_names[3] == "next")
     ):
         return parameter_names[2]
     return None
@@ -2718,6 +2724,15 @@ def _fastify_route_receivers(source: str) -> frozenset[str]:
             rf"\b(?:const|let|var)\s+(\w+)\s*=\s*{re.escape(factory)}\s*\(", source,
         ))
     return frozenset(receivers)
+
+
+def _fastify_error_handler_names(source: str, receivers: frozenset[str]) -> frozenset[str]:
+    """Return named handlers registered directly through a proven Fastify receiver."""
+    return frozenset(
+        handler
+        for receiver, handler in re.findall(r"\b(\w+)\.setErrorHandler\s*\(\s*(\w+)\s*\)", source)
+        if receiver in receivers
+    )
 
 
 def _fastify_literal_route_definition(args: list[Node], source: bytes) -> tuple[tuple[str, ...], str, Node] | None:

@@ -467,6 +467,9 @@ A named Express error middleware is also recognized only when a proven Express
 receiver registers it literally with `app.use(handler)` and it has the conventional
 `(error, req, res, next)` signature. Dynamic registration and other middleware forms
 remain unknown.
+A named Fastify error handler is likewise recognized only with literal
+`app.setErrorHandler(handler)` registration on a proven Fastify receiver and the
+conventional `(error, request, reply)` signature.
 
 For Go HTTP, OrbitKB indexes only literal 4xx/5xx `http.Error` and
 `http.ResponseWriter.WriteHeader` replies when the local source imports `net/http`

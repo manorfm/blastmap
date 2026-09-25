@@ -817,6 +817,33 @@ app.use(handleError);
     ]
 
 
+def test_node_analyzer_extracts_conventional_fastify_error_handler(tmp_path: Path):
+    (tmp_path / "errors.ts").write_text(
+        '''import Fastify from "fastify";
+const app = Fastify();
+
+function handleError(error: Error, request: FastifyRequest, reply: FastifyReply) {
+  return reply.code(500).send({ message: error.message });
+}
+
+function orphanError(error: Error, request: FastifyRequest, reply: FastifyReply) {
+  return reply.code(500).send({ message: error.message });
+}
+
+app.setErrorHandler(handleError);
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(contract.source, contract.role, contract.error_kind, contract.protocol,
+             contract.transport_code, contract.exposes_internal_detail)
+            for contract in result.error_contracts] == [
+        ("errors.handleError", "maps", "unexpected", "http", "500", True),
+    ]
+
+
 def test_node_analyzer_skips_fastify_like_route_without_a_local_factory(tmp_path: Path):
     (tmp_path / "orders.ts").write_text(
         '''const app = makeTestServer();
