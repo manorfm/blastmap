@@ -30,6 +30,7 @@ from orbitkb.generation.change_plan import (
     derive_persistence_migration_review_units,
     derive_public_object_storage_review_units,
     derive_read_entrypoint_side_effect_review_units,
+    derive_retry_consumer_delivery_review_units,
     derive_retry_delivery_review_units,
     derive_retry_downstream_error_review_units,
     derive_retry_policy_review_units,
@@ -1647,6 +1648,73 @@ def test_retry_write_publish_units_yield_to_a_consumer_aware_finding_for_the_sam
     }
 
     assert derive_retry_write_publish_review_units([generic, consumer_aware], {"orders-service"}) == []
+
+
+def test_retry_consumer_delivery_units_include_literal_cross_service_consumers():
+    assert derive_retry_consumer_delivery_review_units([
+        {
+            "kind": "possible_retry_write_publish_reaches_consumer",
+            "services": ["orders-service", "notification-service"],
+            "reason": "OrderService.create retries a channel consumed by notification-service.",
+            "confidence": 0.75,
+            "detail": {
+                "flow": {"symbol": "OrderService.create"}, "channel": "order.created",
+                "retry_policies": [{"mechanism": "reactor.retry", "value": 3, "unit": "attempts"}],
+                "writes": [{"target": "orders"}], "write_count": 1,
+                "consumers": [{"service": "notification-service", "channel": "order.created"}],
+                "consumer_count": 1,
+                "evidence": [
+                    {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+                    {"file": "NotificationConsumer.java", "start_line": 12, "end_line": 12},
+                ],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "retry-consumer-delivery:orders-service:OrderService.create:order.created",
+        "service": "orders-service",
+        "target": {
+            "role": "application_flow", "symbol": "OrderService.create",
+            "evidence": [
+                {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+                {"file": "NotificationConsumer.java", "start_line": 12, "end_line": 12},
+            ],
+        },
+        "action": "review",
+        "reason": "OrderService.create retries a channel consumed by notification-service.",
+        "preconditions": [],
+        "related_contracts": ["message:order.created"],
+        "dependencies": ["notification-service"],
+        "validation": [
+            "verify OrderService.create uses an outbox or idempotency strategy before retrying order.created",
+            "verify notification-service has idempotent handling for order.created",
+        ],
+        "confidence": 0.75,
+        "evidence": [
+            {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+            {"file": "NotificationConsumer.java", "start_line": 12, "end_line": 12},
+        ],
+    }]
+
+
+def test_retry_consumer_delivery_units_yield_to_persistent_consumer_evidence():
+    consumer = {
+        "kind": "possible_retry_write_publish_reaches_consumer",
+        "services": ["orders-service", "billing-service"],
+        "confidence": 0.75,
+        "detail": {
+            "flow": {"symbol": "OrderService.create"}, "channel": "order.created",
+            "retry_policies": [{"mechanism": "reactor.retry"}], "writes": [{"target": "orders"}],
+            "consumers": [{"service": "billing-service", "channel": "order.created"}],
+            "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 22}],
+        },
+    }
+    persistent = {
+        "kind": "possible_retry_write_publish_reaches_persistent_consumer",
+        "services": ["orders-service", "billing-service"],
+        "detail": {"flow": {"symbol": "OrderService.create"}, "channel": "order.created"},
+    }
+
+    assert derive_retry_consumer_delivery_review_units([consumer, persistent], {"orders-service"}) == []
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():

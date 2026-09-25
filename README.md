@@ -191,6 +191,10 @@ For a primary producer that writes and retries a literal event publication witho
 more specific indexed consumer finding, `plan_change` creates one
 `retry-write-publish` review per channel. It asks for outbox/idempotency and
 duplicate-event handling; a consumer-aware review supersedes it for the same channel.
+When a literal cross-service consumer is indexed but its persistent write is not
+proven, `plan_change` creates a `retry-consumer-delivery` review. It asks for
+producer outbox/idempotency and consumer idempotent handling; the persistent-consumer
+review supersedes it when stronger evidence is available.
 For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific

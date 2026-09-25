@@ -192,7 +192,11 @@ de-duplication; broker delivery and duplicate execution remain unknown. A primar
 producer without a more specific consumer finding can receive one
 `retry-write-publish` review per literal published channel. It asks for
 outbox/idempotency and duplicate-event handling; a consumer-aware review supersedes
-the same producer/symbol/channel. A primary
+the same producer/symbol/channel. A primary producer can receive a
+`retry-consumer-delivery` review when a literal cross-service consumer is indexed but
+does not have persistent-write proof. It asks for producer outbox/idempotency and
+consumer idempotent handling; the persistent-consumer review supersedes the same
+producer/symbol/channel. A primary
 caller can receive a `retry-downstream-error` review when a literal retry shares a
 source with a resolved downstream endpoint flow exposing 4xx. It asks to exclude that
 response unless its remote contract explicitly marks it transient; service-wide

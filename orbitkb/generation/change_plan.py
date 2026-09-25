@@ -480,6 +480,85 @@ def derive_retry_delivery_review_units(findings: list[dict], primary_services: s
     return units
 
 
+def derive_retry_consumer_delivery_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create delivery reviews for literal consumers without persistent-write proof."""
+    persistent = _retry_publish_channels_with_persistent_consumers(findings)
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_write_publish_reaches_consumer":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) < 2 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.75
+        ):
+            continue
+        flow = detail.get("flow")
+        channel = detail.get("channel")
+        retry_policies = detail.get("retry_policies")
+        writes = detail.get("writes")
+        consumers = detail.get("consumers")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(flow, dict) or not isinstance(flow.get("symbol"), str) or not isinstance(channel, str)
+            or not isinstance(retry_policies, list) or not retry_policies or not isinstance(writes, list) or not writes
+            or not isinstance(consumers, list) or not consumers or not isinstance(evidence, list) or not evidence
+            or not all(isinstance(policy, dict) and isinstance(policy.get("mechanism"), str) for policy in retry_policies)
+            or not all(
+                isinstance(consumer, dict) and isinstance(consumer.get("service"), str)
+                and consumer["service"] in services[1:]
+                for consumer in consumers
+            )
+        ):
+            continue
+        service = services[0]
+        symbol = flow["symbol"]
+        key = service, symbol, channel
+        if key in seen or key in persistent:
+            continue
+        seen.add(key)
+        dependencies = sorted({consumer["service"] for consumer in consumers})
+        units.append({
+            "id": f"retry-consumer-delivery:{service}:{symbol}:{channel}",
+            "service": service,
+            "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed retrying producer and message consumers"),
+            "preconditions": [],
+            "related_contracts": [f"message:{channel}"],
+            "dependencies": dependencies,
+            "validation": [
+                f"verify {symbol} uses an outbox or idempotency strategy before retrying {channel}",
+                *[f"verify {dependency} has idempotent handling for {channel}" for dependency in dependencies],
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
+def _retry_publish_channels_with_persistent_consumers(findings: list[dict]) -> set[tuple[str, str, str]]:
+    """Identify channels for which persistent-consumer evidence supersedes a general review."""
+    covered: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_write_publish_reaches_persistent_consumer":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        if not isinstance(services, list) or not services or not isinstance(detail, dict):
+            continue
+        flow = detail.get("flow")
+        channel = detail.get("channel")
+        if isinstance(flow, dict) and isinstance(flow.get("symbol"), str) and isinstance(channel, str):
+            covered.add((services[0], flow["symbol"], channel))
+    return covered
+
+
 def derive_retry_write_publish_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
     """Create producer-only retry reviews for channels without richer consumer findings."""
     covered = _retry_publish_channels_with_consumers(findings)
