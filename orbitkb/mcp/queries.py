@@ -1422,9 +1422,9 @@ def validate_runtime_configuration_follow_up(
     expected_workloads = _truncated_workload_scopes(change_unit)
     if not expected_workloads:
         return {"error": "change unit has no truncated workload evidence"}
-    returned_keys = {
-        scope for workload in returned_workloads if (scope := _workload_scope_key(workload)) is not None
-    }
+    returned_keys, returned_workloads_error = _returned_workload_scope_keys(returned_workloads)
+    if returned_workloads_error is not None:
+        return {"error": returned_workloads_error}
     matched_workloads = [
         workload for workload in expected_workloads if _workload_scope_key(workload) in returned_keys
     ]
@@ -1594,6 +1594,25 @@ def _workload_scope_key(workload: object) -> tuple[str, str, str] | None:
     if not all(isinstance(value, str) and value for value in (kind, name, container)):
         return None
     return kind, name, container
+
+
+def _returned_workload_scope_keys(workloads: list[object]) -> tuple[set[tuple[str, str, str]], str | None]:
+    """Normalize direct workload identities or native runtime-configuration entries."""
+    scopes: set[tuple[str, str, str]] = set()
+    for workload in workloads:
+        direct_scope = _workload_scope_key(workload)
+        nested_scope = None
+        if isinstance(workload, dict) and "workload" in workload:
+            nested_scope = _workload_scope_key(workload["workload"])
+            if nested_scope is None:
+                return set(), "each returned workload must have non-empty kind, name, and container"
+        if direct_scope is not None and nested_scope is not None and direct_scope != nested_scope:
+            return set(), "returned workload identity conflicts with nested workload"
+        scope = nested_scope or direct_scope
+        if scope is None:
+            return set(), "each returned workload must have non-empty kind, name, and container"
+        scopes.add(scope)
+    return scopes, None
 
 
 def _truncated_workload_evidence_next_step(workloads: list[dict]) -> str:

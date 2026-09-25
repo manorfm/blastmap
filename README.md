@@ -194,6 +194,9 @@ returned, stopping as soon as all selected workloads are found.
 After each runtime-configuration page, `validate_runtime_configuration_follow_up`
 compares its returned workload identities with the persisted target and reports
 whether another page is useful.
+It accepts either direct workload identities or the `source_imports` entries returned
+by `describe_runtime_configuration`; contradictory direct and nested identities are
+rejected rather than continuing from ambiguous context.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset

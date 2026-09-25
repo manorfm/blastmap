@@ -729,6 +729,23 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         conn,
         plan["plan_id"],
         "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [{"workload": {"kind": "Deployment", "name": "checkout", "container": "api"}}],
+        source_import_truncated=True,
+    )["status"] == "complete"
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [{
+            "kind": "Deployment", "name": "checkout", "container": "api",
+            "workload": {"kind": "StatefulSet", "name": "checkout", "container": "api"},
+        }],
+        source_import_truncated=True,
+    ) == {"error": "returned workload identity conflicts with nested workload"}
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         [],
         source_import_truncated=True,
     ) == {

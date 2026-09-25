@@ -194,6 +194,9 @@ workload selection; stop when all selected workloads are found.
 Call `validate_runtime_configuration_follow_up` after a page with its returned
 workload identities and `source_import_truncated`; it deterministically reports
 whether a further page is useful.
+Its `returned_workloads` accepts direct identities or the `source_imports` entries
+from `describe_runtime_configuration`. A direct identity that conflicts with a nested
+`workload` is rejected rather than used for pagination.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.
