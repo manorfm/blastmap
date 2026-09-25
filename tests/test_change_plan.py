@@ -981,6 +981,40 @@ def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings(
     ], {"payments-service"}) == []
 
 
+def test_error_mapping_units_include_a_high_confidence_internal_exposure():
+    assert derive_error_mapping_review_units([
+        {
+            "kind": "possible_internal_error_exposure",
+            "services": ["payments-service"],
+            "reason": "payments-service exposes a direct internal error detail.",
+            "confidence": 0.9,
+            "detail": {
+                "mapping": {
+                    "symbol": "ApiExceptionHandler.handle", "protocol": "http", "code": "500",
+                },
+                "evidence": [{"file": "handler.py", "start_line": 8, "end_line": 8}],
+            },
+        },
+    ], {"payments-service"}) == [{
+        "id": "error-exposure:payments-service:ApiExceptionHandler.handle:http:500",
+        "service": "payments-service",
+        "target": {
+            "role": "error_mapping", "symbol": "ApiExceptionHandler.handle",
+            "evidence": [{"file": "handler.py", "start_line": 8, "end_line": 8}],
+        },
+        "action": "review",
+        "reason": "payments-service exposes a direct internal error detail.",
+        "preconditions": [],
+        "related_contracts": ["HTTP 500"],
+        "dependencies": [],
+        "validation": [
+            "verify the response returns a stable public error code/message and keeps diagnostic detail internal",
+        ],
+        "confidence": 0.9,
+        "evidence": [{"file": "handler.py", "start_line": 8, "end_line": 8}],
+    }]
+
+
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
     assert derive_runtime_configuration_review_units(
         {"checkout-service": [{

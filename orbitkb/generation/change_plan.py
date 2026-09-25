@@ -107,7 +107,7 @@ def derive_change_units(decision_points: list[dict], selections: list[dict]) -> 
 
 
 def derive_error_mapping_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
-    """Turn only a proven local 4xx-to-5xx degradation into a review unit.
+    """Turn proven error degradations or internal exposure into review units.
 
     Architecture findings use ``possible_`` because middleware and gateway behavior
     remain unknown. This function preserves that uncertainty by creating a review,
@@ -117,7 +117,8 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
     units: list[dict] = []
     seen: set[tuple[str, str, str, str]] = set()
     for finding in findings:
-        if finding.get("kind") != "possible_error_semantics_lost":
+        kind = finding.get("kind")
+        if kind not in {"possible_error_semantics_lost", "possible_internal_error_exposure"}:
             continue
         services = finding.get("services")
         detail = finding.get("detail")
@@ -126,6 +127,40 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
             not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
             or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.8
         ):
+            continue
+        service = services[0]
+        if kind == "possible_internal_error_exposure":
+            mapping = detail.get("mapping")
+            evidence = detail.get("evidence")
+            if (
+                not isinstance(mapping, dict) or not isinstance(evidence, list)
+                or not isinstance(mapping.get("symbol"), str) or not isinstance(mapping.get("protocol"), str)
+                or not isinstance(mapping.get("code"), str) or not evidence
+            ):
+                continue
+            mapping_symbol = mapping["symbol"]
+            protocol = mapping["protocol"]
+            code = mapping["code"]
+            key = service, "internal-exposure", mapping_symbol, f"{protocol}:{code}"
+            if key in seen:
+                continue
+            seen.add(key)
+            contract_label = f"HTTP {code}" if protocol == "http" else f"GraphQL {code}"
+            units.append({
+                "id": f"error-exposure:{service}:{mapping_symbol}:{protocol}:{code}",
+                "service": service,
+                "target": {"role": "error_mapping", "symbol": mapping_symbol, "evidence": evidence},
+                "action": "review",
+                "reason": finding.get("reason", "review the indexed public error response"),
+                "preconditions": [],
+                "related_contracts": [contract_label],
+                "dependencies": [],
+                "validation": [
+                    "verify the response returns a stable public error code/message and keeps diagnostic detail internal",
+                ],
+                "confidence": float(confidence),
+                "evidence": evidence,
+            })
             continue
         error_type = detail.get("error_type")
         mapping = detail.get("mapping")
@@ -136,7 +171,6 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
             or not evidence
         ):
             continue
-        service = services[0]
         mapping_symbol = mapping["symbol"]
         code = mapping["code"]
         key = service, error_type, mapping_symbol, code

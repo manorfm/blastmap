@@ -160,6 +160,10 @@ route are indexed, `plan_change` also creates a contract-review unit for that bo
 It also adds an error-mapping review only for a high-confidence, source-proven local
 degradation of a known client/domain error into HTTP 5xx. This remains a review because
 middleware, gateways and external contracts can affect the runtime response.
+The same high-confidence threshold creates an `error-exposure` review when an indexed
+public error response directly includes an internal detail. Its validation asks for a
+stable public code/message and internal diagnostic logging; it never includes the
+detail itself in the plan.
 When an affected SQL table has an exactly matching indexed migration fact,
 `plan_change` adds a schema-review unit. A destructive operation requires deployment,
 backup and rollback validation; it never asserts that the migration needs to run.

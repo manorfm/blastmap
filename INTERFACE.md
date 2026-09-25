@@ -174,7 +174,10 @@ planned. When no decision blocks the plan, `change_units` may include a review u
 for a source-proven internal HTTP call only when its method, route and indexed remote
 endpoint all resolve. It may also include an `error_mapping` review unit only for a
 high-confidence static finding that a known local client/domain error maps to HTTP 5xx;
-this is advisory, since middleware and gateways are not proved. `ready` means a
+this is advisory, since middleware and gateways are not proved. It may include an
+`error-exposure` review unit for a high-confidence source-proven public response that
+directly includes an internal error detail; the unit contains only source evidence and
+safe-response validation, never the detail. `ready` means a
 relevant indexed surface exists without a blocking decision; `needs_decision` means the
 compatibility choice is required; and `insufficient_evidence` means no indexed service
 matched the task. The audit record links to a surface synthesis when one exists and does
