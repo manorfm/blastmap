@@ -194,6 +194,8 @@ workload selection; stop when all selected workloads are found.
 Call `validate_runtime_configuration_follow_up` after a page with its returned
 workload identities and `source_import_truncated`; it deterministically reports
 whether a further page is useful.
+Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
+with the correct offset.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

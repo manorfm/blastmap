@@ -212,14 +212,18 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
 
     @mcp.tool()
     def validate_runtime_configuration_follow_up(
-        plan_id: str, change_unit_id: str, returned_workloads: list[dict], source_import_truncated: bool,
+        plan_id: str,
+        change_unit_id: str,
+        returned_workloads: list[dict],
+        source_import_truncated: bool,
+        current_offset: int = 0,
     ) -> dict:
         """Validate whether one runtime-configuration page covered a truncated plan target.
         It returns whether another page is useful; it reads only persisted plan facts and
         never calls a model or scans source."""
         with closing(_conn()) as conn:
             return queries.validate_runtime_configuration_follow_up(
-                conn, plan_id, change_unit_id, returned_workloads, source_import_truncated,
+                conn, plan_id, change_unit_id, returned_workloads, source_import_truncated, current_offset,
             )
 
     @mcp.tool()

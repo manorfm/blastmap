@@ -731,7 +731,28 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         [],
         source_import_truncated=True,
-    )["status"] == "needs_next_page"
+    ) == {
+        "plan_id": plan["plan_id"],
+        "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        "status": "needs_next_page",
+        "matched_workloads": [],
+        "missing_workloads": [{
+            "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 3,
+        }],
+        "continue_pagination": True,
+        "next_query": {
+            "tool": "describe_runtime_configuration",
+            "arguments": {"service": "checkout-service", "limit": 50, "offset": 50},
+        },
+    }
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
+        source_import_truncated=True,
+        current_offset=50,
+    )["next_query"]["arguments"]["offset"] == 100
     assert queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],
