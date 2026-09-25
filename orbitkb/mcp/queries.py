@@ -1013,6 +1013,23 @@ def describe_runtime_configuration(
         }
     if filter_summary:
         response["filter_summary"] = filter_summary
+    filter_conflict_guidance = {}
+    if binding_filters_applied and not all_bindings:
+        filter_conflict_guidance["bindings"] = {
+            "recommended_next_step": "inspect_filter_dimensions_individually",
+            "dimension_selected_totals": _runtime_configuration_filter_dimension_selected_totals(
+                binding_filter_dimensions, indexed_bindings, binding_dimension_filters,
+            ),
+        }
+    if source_import_filters_applied and not all_source_imports:
+        filter_conflict_guidance["source_imports"] = {
+            "recommended_next_step": "inspect_filter_dimensions_individually",
+            "dimension_selected_totals": _runtime_configuration_filter_dimension_selected_totals(
+                source_import_filter_dimensions, indexed_source_imports, source_import_dimension_filters,
+            ),
+        }
+    if filter_conflict_guidance:
+        response["filter_conflict_guidance"] = filter_conflict_guidance
     if source_imports:
         response_source_imports = [
             _runtime_configuration_source_import(item, source_import_unknowns_by_reference)
@@ -1098,6 +1115,16 @@ def _runtime_configuration_filter_group_selected_totals(
             selected_records = dimension_filters[dimension](selected_records)
         selected_totals.append(len(selected_records))
     return selected_totals
+
+
+def _runtime_configuration_filter_dimension_selected_totals(
+    dimensions: list[str], indexed_records: list[sqlite3.Row], dimension_filters: dict,
+) -> list[dict]:
+    """Count each active filter independently to explain an empty intersection."""
+    return [
+        {"dimension": dimension, "selected_total": len(dimension_filters[dimension](indexed_records))}
+        for dimension in dimensions
+    ]
 
 
 def _runtime_configuration_filter_group_execution_order(

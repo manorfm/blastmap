@@ -238,6 +238,9 @@ read source files.
 When filters are active, `filter_summary` reports compact `indexed_total` and
 `selected_total` values only for the filtered surfaces; it does not repeat filter
 arguments.
+For an empty filtered surface, `filter_conflict_guidance` reports the indexed total
+selected by each active dimension independently. This separates an absent indexed
+fact from an incompatible intersection without returning additional records.
 Each surface accepts at most four active filter dimensions. Split a more specific
 investigation into separate queries rather than treating an empty intersection as a
 fact about the architecture. The structured `split_guidance.query_groups` lists the

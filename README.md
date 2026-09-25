@@ -236,6 +236,10 @@ They do not read source files.
 When any filter is active, `filter_summary` reports only indexed and selected totals
 for each filtered surface, so an agent can verify context reduction without receiving
 the filter values a second time.
+If a filtered surface has no selected records, `filter_conflict_guidance` reports the
+indexed total selected by each active filter dimension independently. It distinguishes
+an absent indexed fact from an incompatible filter intersection without returning
+additional records or invoking an LLM.
 Each surface accepts at most four active filter dimensions. Split an overly specific
 query instead of interpreting an empty intersection as an architectural fact. The
 structured `split_guidance.query_groups` response lists the filter dimensions to use

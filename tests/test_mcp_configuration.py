@@ -298,6 +298,34 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         "bindings": {"indexed_total": 2, "selected_total": 1},
         "source_imports": {"indexed_total": 2, "selected_total": 1},
     }
+    conflicting_filters = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_workloads=[{"kind": "Deployment", "name": "orders", "container": "api"}],
+        binding_source_kinds=["secret"],
+        source_import_workloads=[{"kind": "Deployment", "name": "orders", "container": "api"}],
+        source_import_source_kinds=["secret"],
+    )
+    assert conflicting_filters["filter_summary"] == {
+        "bindings": {"indexed_total": 2, "selected_total": 0},
+        "source_imports": {"indexed_total": 2, "selected_total": 0},
+    }
+    assert conflicting_filters["filter_conflict_guidance"] == {
+        "bindings": {
+            "recommended_next_step": "inspect_filter_dimensions_individually",
+            "dimension_selected_totals": [
+                {"dimension": "binding_workloads", "selected_total": 1},
+                {"dimension": "binding_source_kinds", "selected_total": 1},
+            ],
+        },
+        "source_imports": {
+            "recommended_next_step": "inspect_filter_dimensions_individually",
+            "dimension_selected_totals": [
+                {"dimension": "source_import_workloads", "selected_total": 1},
+                {"dimension": "source_import_source_kinds", "selected_total": 1},
+            ],
+        },
+    }
     assert queries.describe_runtime_configuration(
         conn,
         "orders",
