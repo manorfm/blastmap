@@ -62,7 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "6"
+STATIC_ANALYSIS_INPUT_VERSION = "7"
 
 
 def _walk(node: Node):
@@ -2329,7 +2329,12 @@ def _nest_http_entrypoint_functions(
         if class_name_node is None or class_body is None:
             continue
         class_name = _text(class_name_node, source)
-        controller_guards = _nest_route_guards(class_decorators, source, nest_imports, "controller")
+        controller_guards = _nest_route_decorator_registrations(
+            class_decorators, source, nest_imports, "UseGuards", "controller",
+        )
+        controller_pipes = _nest_route_decorator_registrations(
+            class_decorators, source, nest_imports, "UsePipes", "controller",
+        )
         decorators: list[Node] = []
         for child in class_body.named_children:
             if child.type == "decorator":
@@ -2352,11 +2357,21 @@ def _nest_http_entrypoint_functions(
             method, path = route
             guards = [
                 *controller_guards,
-                *_nest_route_guards(route_decorators, source, nest_imports, "handler"),
+                *_nest_route_decorator_registrations(
+                    route_decorators, source, nest_imports, "UseGuards", "handler",
+                ),
+            ]
+            pipes = [
+                *controller_pipes,
+                *_nest_route_decorator_registrations(
+                    route_decorators, source, nest_imports, "UsePipes", "handler",
+                ),
             ]
             contract: dict = {}
             if guards:
                 contract["route_guards"] = guards
+            if pipes:
+                contract["validation_pipes"] = pipes
             if request := _nest_body_dto_contract(child, source, nest_imports):
                 contract["request"] = request
             if parameters := _nest_bound_parameters(child, source, nest_imports):
@@ -2410,14 +2425,14 @@ def _nest_method_route(
     return None
 
 
-def _nest_route_guards(
-    decorators: list[Node], source: bytes, imported_names: dict[str, str], scope: str,
+def _nest_route_decorator_registrations(
+    decorators: list[Node], source: bytes, imported_names: dict[str, str], expected: str, scope: str,
 ) -> list[dict[str, str]]:
-    """Return direct identifiers registered by Nest's imported ``@UseGuards``.
+    """Return direct identifiers registered by one imported Nest decorator.
 
-    A literal registration is useful route context but does not prove the guard's
-    policy. Guard factories, inline expressions and indirect decorators are left
-    out, so static output never invents security behavior.
+    A literal registration is useful route context but does not prove behavior.
+    Factories, inline expressions and indirect decorators are left out, so static
+    output never invents security or validation semantics.
     """
     guards: list[dict[str, str]] = []
     for decorator in decorators:
@@ -2426,7 +2441,7 @@ def _nest_route_guards(
             continue
         function = call.child_by_field_name("function")
         arguments = call.child_by_field_name("arguments")
-        if function is None or arguments is None or imported_names.get(_text(function, source)) != "UseGuards":
+        if function is None or arguments is None or imported_names.get(_text(function, source)) != expected:
             continue
         guards.extend(
             {"symbol": _text(argument, source), "scope": scope}
