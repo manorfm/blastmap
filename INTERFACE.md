@@ -204,6 +204,9 @@ complete SHA-256 digest encoded as 43-character URL-safe Base64 without padding.
 By default, progress contains `matched_workload_count` and the remaining
 `missing_workloads`; set `include_matched_workloads=true` only for an audit that needs
 the detailed matched scopes.
+The default `trace_id` is a deterministic 128-bit correlator for the persisted plan
+and change unit, avoiding repeated long identifiers. Set `include_trace_details=true`
+to include `plan_id` and `change_unit_id` for audit or external correlation.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.

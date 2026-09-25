@@ -1395,6 +1395,7 @@ def validate_runtime_configuration_follow_up(
     source_import_truncated: object, current_offset: object = 0, current_limit: object = DEFAULT_LIST_LIMIT,
     previous_page_fingerprint: object = None,
     include_matched_workloads: object = False,
+    include_trace_details: object = False,
 ) -> dict:
     """Compare one runtime-configuration page with a truncated change-unit target."""
     if not isinstance(returned_workloads, list):
@@ -1403,6 +1404,8 @@ def validate_runtime_configuration_follow_up(
         return {"error": "source_import_truncated must be a boolean"}
     if not isinstance(include_matched_workloads, bool):
         return {"error": "include_matched_workloads must be a boolean"}
+    if not isinstance(include_trace_details, bool):
+        return {"error": "include_trace_details must be a boolean"}
     if not isinstance(current_offset, int) or isinstance(current_offset, bool) or current_offset < 0:
         return {"error": "current_offset must be a non-negative integer"}
     if (
@@ -1455,8 +1458,7 @@ def validate_runtime_configuration_follow_up(
         if previous_page_fingerprint == page_fingerprint:
             status = "stalled"
     response = {
-        "plan_id": plan_id,
-        "change_unit_id": change_unit_id,
+        "trace_id": _runtime_configuration_follow_up_trace_id(plan_id, change_unit_id),
         "status": status,
         "matched_workload_count": len(matched_workloads),
         "missing_workloads": missing_workloads,
@@ -1464,6 +1466,8 @@ def validate_runtime_configuration_follow_up(
     }
     if include_matched_workloads:
         response["matched_workloads"] = matched_workloads
+    if include_trace_details:
+        response.update({"plan_id": plan_id, "change_unit_id": change_unit_id})
     if status == "needs_next_page":
         response["page_fingerprint"] = page_fingerprint
         response["next_query"] = {
@@ -1646,6 +1650,12 @@ def _runtime_configuration_page_fingerprint(workloads: list[object]) -> tuple[st
         return None, "returned_workloads must contain JSON values"
     digest = hashlib.sha256(canonical_page.encode()).digest()
     return base64.urlsafe_b64encode(digest).decode().rstrip("="), None
+
+
+def _runtime_configuration_follow_up_trace_id(plan_id: str, change_unit_id: str) -> str:
+    """Return a compact deterministic correlator for one persisted plan unit."""
+    digest = hashlib.sha256(f"{plan_id}\0{change_unit_id}".encode()).digest()[:16]
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 
 
 def _truncated_workload_evidence_next_step(workloads: list[dict]) -> str:

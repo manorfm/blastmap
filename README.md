@@ -204,6 +204,9 @@ URL-safe Base64 (43 characters without padding), reducing the continuation paylo
 The default progress response returns `matched_workload_count` and keeps only the
 decision-relevant `missing_workloads` list. Pass `include_matched_workloads=true`
 only when an audit needs the detailed matched scopes.
+The default response uses a short deterministic `trace_id` instead of repeating the
+plan and change-unit identifiers. Set `include_trace_details=true` to return both
+original identifiers when audit or external correlation requires them.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset

@@ -709,20 +709,30 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         },
     }
     validate(detail, load_schema("describe_change_unit"))
+    completed_follow_up = queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [{"kind": "Deployment", "name": "checkout", "container": "api"}],
+        source_import_truncated=True,
+    )
+    assert len(completed_follow_up["trace_id"]) == 22
+    assert "plan_id" not in completed_follow_up
+    assert "change_unit_id" not in completed_follow_up
+    assert {key: value for key, value in completed_follow_up.items() if key != "trace_id"} == {
+        "status": "complete",
+        "matched_workload_count": 1,
+        "missing_workloads": [],
+        "continue_pagination": False,
+    }
     assert queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],
         "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         [{"kind": "Deployment", "name": "checkout", "container": "api"}],
         source_import_truncated=True,
-    ) == {
-        "plan_id": plan["plan_id"],
-        "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
-        "status": "complete",
-        "matched_workload_count": 1,
-        "missing_workloads": [],
-        "continue_pagination": False,
-    }
+        include_trace_details=True,
+    )["change_unit_id"] == "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config"
     assert queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],
@@ -759,9 +769,7 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
     )
     assert len(first_follow_up["page_fingerprint"]) == 43
     assert first_follow_up["page_fingerprint"].replace("-", "").replace("_", "").isalnum()
-    assert {key: value for key, value in first_follow_up.items() if key != "page_fingerprint"} == {
-        "plan_id": plan["plan_id"],
-        "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+    assert {key: value for key, value in first_follow_up.items() if key not in {"page_fingerprint", "trace_id"}} == {
         "status": "needs_next_page",
         "matched_workload_count": 0,
         "missing_workloads": [{
@@ -773,7 +781,7 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
             "arguments": {"service": "checkout-service", "limit": 50, "offset": 50},
         },
     }
-    assert queries.validate_runtime_configuration_follow_up(
+    stalled_follow_up = queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],
         "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
@@ -781,9 +789,9 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         source_import_truncated=True,
         current_offset=50,
         previous_page_fingerprint=first_follow_up["page_fingerprint"],
-    ) == {
-        "plan_id": plan["plan_id"],
-        "change_unit_id": "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+    )
+    assert stalled_follow_up["trace_id"] == first_follow_up["trace_id"]
+    assert {key: value for key, value in stalled_follow_up.items() if key != "trace_id"} == {
         "status": "stalled",
         "matched_workload_count": 0,
         "missing_workloads": [{
@@ -800,6 +808,14 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         source_import_truncated=True,
         previous_page_fingerprint="invalid",
     ) == {"error": "previous_page_fingerprint must be a URL-safe SHA-256 digest"}
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
+        source_import_truncated=True,
+        include_trace_details=1,
+    ) == {"error": "include_trace_details must be a boolean"}
     assert queries.validate_runtime_configuration_follow_up(
         conn,
         plan["plan_id"],
