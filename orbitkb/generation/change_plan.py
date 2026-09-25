@@ -477,6 +477,66 @@ def derive_timeout_fallback_review_units(findings: list[dict], primary_services:
     return units
 
 
+def derive_read_entrypoint_side_effect_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create review units for direct writes or publishes behind read contracts.
+
+    The unit is deliberately neutral about approved caches, metrics and legacy
+    behavior: it exposes the source-proven operation and asks for an explicit choice.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_read_entrypoint_side_effect":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.8
+        ):
+            continue
+        entrypoint = detail.get("entrypoint")
+        operations = detail.get("operations")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(entrypoint, dict) or not isinstance(operations, list) or not operations
+            or not isinstance(evidence, list) or not evidence or not isinstance(entrypoint.get("kind"), str)
+            or not isinstance(entrypoint.get("method"), str) or not isinstance(entrypoint.get("name"), str)
+            or not isinstance(entrypoint.get("symbol"), str)
+            or not all(isinstance(operation, dict) and operation.get("kind") in {"writes", "publishes"} for operation in operations)
+        ):
+            continue
+        service = services[0]
+        kind = entrypoint["kind"]
+        method = entrypoint["method"]
+        name = entrypoint["name"]
+        symbol = entrypoint["symbol"]
+        contract = f"{method} {name}" if kind == "http" else f"{kind.upper()} {method} {name}"
+        key = service, kind, method, symbol
+        if key in seen:
+            continue
+        seen.add(key)
+        units.append({
+            "id": f"read-entrypoint-side-effect:{service}:{kind}:{method}:{symbol}",
+            "service": service,
+            "target": {"role": "entrypoint", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed side effect behind a read entrypoint"),
+            "preconditions": [],
+            "related_contracts": [contract],
+            "dependencies": [],
+            "validation": [
+                f"verify {contract} has no externally observable side effect, or document its cache, metric, or legacy exception",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_persistence_migration_review_units(
     persistence_affected: list[dict], migration_facts_by_service: dict[str, list[dict]], primary_services: set[str],
 ) -> list[dict]:

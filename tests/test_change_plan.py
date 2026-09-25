@@ -27,6 +27,7 @@ from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.change_plan import (
     derive_error_mapping_review_units,
     derive_persistence_migration_review_units,
+    derive_read_entrypoint_side_effect_review_units,
     derive_retry_policy_review_units,
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
@@ -1304,6 +1305,62 @@ def test_timeout_fallback_units_exclude_non_successful_timeout_translations():
             },
         },
     ], {"checkout-service"}) == []
+
+
+def test_read_entrypoint_side_effect_units_include_a_static_get_write():
+    assert derive_read_entrypoint_side_effect_review_units([
+        {
+            "kind": "possible_read_entrypoint_side_effect",
+            "services": ["catalog-service"],
+            "reason": "GET /catalog/refresh writes state.",
+            "confidence": 0.8,
+            "detail": {
+                "entrypoint": {
+                    "kind": "http", "method": "GET", "name": "/catalog/refresh", "symbol": "Catalog.refresh",
+                },
+                "operations": [{"kind": "writes", "target": "repository.save"}],
+                "evidence": [{"file": "CatalogController.java", "start_line": 14, "end_line": 14}],
+            },
+        },
+    ], {"catalog-service"}) == [{
+        "id": "read-entrypoint-side-effect:catalog-service:http:GET:Catalog.refresh",
+        "service": "catalog-service",
+        "target": {
+            "role": "entrypoint", "symbol": "Catalog.refresh",
+            "evidence": [{"file": "CatalogController.java", "start_line": 14, "end_line": 14}],
+        },
+        "action": "review",
+        "reason": "GET /catalog/refresh writes state.",
+        "preconditions": [],
+        "related_contracts": ["GET /catalog/refresh"],
+        "dependencies": [],
+        "validation": [
+            "verify GET /catalog/refresh has no externally observable side effect, or document its cache, metric, or legacy exception",
+        ],
+        "confidence": 0.8,
+        "evidence": [{"file": "CatalogController.java", "start_line": 14, "end_line": 14}],
+    }]
+
+
+def test_read_entrypoint_side_effect_units_label_graphql_queries():
+    units = derive_read_entrypoint_side_effect_review_units([
+        {
+            "kind": "possible_read_entrypoint_side_effect",
+            "services": ["catalog-service"],
+            "confidence": 0.8,
+            "detail": {
+                "entrypoint": {"kind": "graphql", "method": "QUERY", "name": "catalog", "symbol": "Query.catalog"},
+                "operations": [{"kind": "publishes", "target": "events.publish"}],
+                "evidence": [{"file": "resolvers.ts", "start_line": 27, "end_line": 27}],
+            },
+        },
+    ], {"catalog-service"})
+
+    assert units[0]["id"] == "read-entrypoint-side-effect:catalog-service:graphql:QUERY:Query.catalog"
+    assert units[0]["related_contracts"] == ["GRAPHQL QUERY catalog"]
+    assert units[0]["validation"] == [
+        "verify GRAPHQL QUERY catalog has no externally observable side effect, or document its cache, metric, or legacy exception",
+    ]
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():

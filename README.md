@@ -184,6 +184,9 @@ translation to be documented.
 For a primary endpoint, a source-proven timeout fallback that returns 2xx creates a
 `timeout-fallback` review. It preserves the possibility of a valid cached or partial
 result and asks for an explicit degraded-result signal or documented timeout contract.
+For a primary HTTP safe-method endpoint or GraphQL query with a direct static write or
+publication, `plan_change` creates a `read-entrypoint-side-effect` review. It asks to
+confirm the effect is absent or document an allowed cache, metric, or legacy exception.
 When an affected SQL table has an exactly matching indexed migration fact,
 `plan_change` adds a schema-review unit. A destructive operation requires deployment,
 backup and rollback validation; it never asserts that the migration needs to run.

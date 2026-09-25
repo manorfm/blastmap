@@ -193,7 +193,10 @@ documented unavailable/gateway-timeout semantics or document an intentional 500.
 A primary endpoint can receive a `timeout-fallback` review only when a source-proven
 timeout handler returns 2xx after an internal HTTP call; it asks to validate the
 degraded-result signal or timeout contract and does not reject an intentional cached
-or partial response. `ready` means a
+or partial response. A primary HTTP safe-method endpoint or GraphQL query with a
+direct static write/publication can receive a `read-entrypoint-side-effect` review;
+it asks whether the effect is absent or an explicitly documented cache, metric, or
+legacy exception. `ready` means a
 relevant indexed surface exists without a blocking decision; `needs_decision` means the
 compatibility choice is required; and `insufficient_evidence` means no indexed service
 matched the task. The audit record links to a surface synthesis when one exists and does
