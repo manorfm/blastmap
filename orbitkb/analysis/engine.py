@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "22"
+STATIC_ANALYSIS_INPUT_VERSION = "23"
 
 
 def _walk(node: Node):
@@ -972,6 +972,12 @@ _KOTLIN_GRPC_STUB_PROPERTY = re.compile(
 _GO_GRPC_UNIMPLEMENTED_SERVER = re.compile(
     r"\b(?:[A-Za-z_]\w*\.)?Unimplemented(?P<service>[A-Za-z_]\w*)Server\b",
 )
+_GO_GRPC_CLIENT_TYPE = re.compile(
+    r"^(?P<package>[A-Za-z_]\w*)\.(?P<service>[A-Za-z_]\w*)Client$",
+)
+_GO_GRPC_CLIENT_FACTORY = re.compile(
+    r"^(?P<package>[A-Za-z_]\w*)\.New(?P<service>[A-Za-z_]\w*)Client$",
+)
 
 
 def _jvm_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
@@ -1185,6 +1191,111 @@ def _go_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
             services[0], method_name, f"{receiver_type}.{method_name}", _evidence(path, root, method),
         ))
     return handlers
+
+
+def _go_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClientBinding]:
+    """Return generated Go client fields proven by a matching struct-literal factory."""
+    parser = Parser(Language(tree_sitter_go.language()))
+    fields: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    initializers: dict[tuple[str, str], list[tuple[str, str, Evidence]]] = {}
+    methods: list[tuple[Node, bytes, Path]] = []
+    for path in files:
+        if path.suffix != ".go":
+            continue
+        source = path.read_bytes()
+        tree = parser.parse(source)
+        for node in _walk(tree.root_node):
+            if node.type == "type_spec":
+                _go_grpc_client_fields(node, source, fields)
+            elif node.type == "composite_literal":
+                _go_grpc_client_initializers(node, source, path, root, initializers)
+            elif node.type == "method_declaration":
+                methods.append((node, source, path))
+    clients: dict[str, list[tuple[str, str, Evidence]]] = {}
+    for key, typed_candidates in fields.items():
+        initialized_candidates = initializers.get(key, [])
+        if len(typed_candidates) != 1 or len(initialized_candidates) != 1:
+            continue
+        package, service = typed_candidates[0]
+        initialized_package, initialized_service, evidence = initialized_candidates[0]
+        if (package, service) == (initialized_package, initialized_service):
+            owner, member = key
+            clients.setdefault(owner, []).append((member, service, evidence))
+    bindings: list[GrpcClientBinding] = []
+    for method, source, _path in methods:
+        receiver = method.child_by_field_name("receiver")
+        if receiver is None:
+            continue
+        receiver_match = re.fullmatch(
+            r"\s*\(\s*(?P<name>[A-Za-z_]\w*)\s+\*?(?P<type>[A-Za-z_]\w*)\s*\)\s*",
+            _text(receiver, source),
+        )
+        if receiver_match is None:
+            continue
+        owner = receiver_match.group("type")
+        receiver_name = receiver_match.group("name")
+        for member, service, evidence in clients.get(owner, []):
+            bindings.append(GrpcClientBinding(owner, f"{receiver_name}.{member}", service, evidence))
+    return bindings
+
+
+def _go_grpc_client_fields(
+    type_spec: Node, source: bytes, fields: dict[tuple[str, str], list[tuple[str, str]]],
+) -> None:
+    name = type_spec.child_by_field_name("name")
+    struct_type = type_spec.child_by_field_name("type")
+    if name is None or struct_type is None or struct_type.type != "struct_type":
+        return
+    field_list = next(
+        (child for child in struct_type.named_children if child.type == "field_declaration_list"), None,
+    )
+    if field_list is None:
+        return
+    owner = _text(name, source)
+    for field in field_list.named_children:
+        member = field.child_by_field_name("name")
+        type_node = field.child_by_field_name("type")
+        if member is None or type_node is None:
+            continue
+        match = _GO_GRPC_CLIENT_TYPE.fullmatch(_text(type_node, source))
+        if match is not None:
+            fields.setdefault((owner, _text(member, source)), []).append((
+                match.group("package"), match.group("service"),
+            ))
+
+
+def _go_grpc_client_initializers(
+    literal: Node,
+    source: bytes,
+    path: Path,
+    root: Path,
+    initializers: dict[tuple[str, str], list[tuple[str, str, Evidence]]],
+) -> None:
+    type_node = literal.child_by_field_name("type")
+    body = literal.child_by_field_name("body")
+    if type_node is None or body is None or type_node.type != "type_identifier":
+        return
+    owner = _text(type_node, source)
+    for element in body.named_children:
+        if element.type != "keyed_element":
+            continue
+        key = element.child_by_field_name("key")
+        value = element.child_by_field_name("value")
+        call = (
+            next((child for child in value.named_children if child.type == "call_expression"), None)
+            if value is not None else None
+        )
+        function = call.child_by_field_name("function") if call is not None else None
+        match = (
+            _GO_GRPC_CLIENT_FACTORY.fullmatch(_text(function, source))
+            if function is not None else None
+        )
+        if key is None:
+            continue
+        if match is not None:
+            initializers.setdefault((owner, _text(key, source)), []).append((
+                match.group("package"), match.group("service"), _evidence(path, root, element),
+            ))
 
 
 class _NodeGraphqlAnalyzer(_FileAnalyzer):
@@ -3140,6 +3251,7 @@ class StaticAnalysisEngine:
             result.grpc_client_bindings.extend(_kotlin_grpc_client_bindings(files, root))
         if stack == "go":
             result.grpc_handlers.extend(_go_grpc_handlers(files, root))
+            result.grpc_client_bindings.extend(_go_grpc_client_bindings(files, root))
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)
         _enrich_openapi_contracts(result, root)

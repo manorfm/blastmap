@@ -354,7 +354,9 @@ handlers are omitted rather than arbitrarily selecting one.
 Go methods on a struct that embeds exactly one generated
 `Unimplemented<Service>Server` receive the same handler link. This identifies source
 intent only; `grpc.Server` registration, interceptors and runtime exposure remain
-unknown.
+unknown. A Go client call is linked only when a struct field typed as
+`package.ServiceClient` is initialized by the matching `package.NewServiceClient(...)`
+in a struct literal; dynamic construction and local client variables remain unknown.
 
 `describe_configuration` lists literal environment-variable keys read by local
 Node/TypeScript, Java/Kotlin and Go symbols, plus Java/Kotlin `System.getProperty`

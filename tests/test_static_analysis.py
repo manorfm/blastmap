@@ -2433,6 +2433,81 @@ func (s *InventoryServer) Reserve(ctx context.Context, request *pb.ReserveReques
     assert not any(edge.target == "InventoryServer.Reserve" for edge in result.edges)
 
 
+def test_static_analysis_links_a_go_grpc_client_call_to_a_unique_proto_rpc(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "checkout_service.go").write_text(
+        '''package checkout
+
+type CheckoutService struct {
+  inventory pb.InventoryClient
+}
+
+func NewCheckoutService(conn *grpc.ClientConn) *CheckoutService {
+  return &CheckoutService{inventory: pb.NewInventoryClient(conn)}
+}
+
+func (s *CheckoutService) Checkout(ctx context.Context, request *pb.ReserveRequest) error {
+  _, err := s.inventory.Reserve(ctx, request)
+  return err
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert any(
+        edge.source == "CheckoutService.Checkout"
+        and edge.target == "proto.inventory.v1.Inventory.Reserve"
+        and edge.confidence == "high"
+        for edge in result.edges
+    )
+
+
+def test_static_analysis_ignores_a_go_grpc_client_when_its_factory_does_not_match_the_field_type(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "checkout_service.go").write_text(
+        '''package checkout
+
+type CheckoutService struct {
+  inventory pb.InventoryClient
+}
+
+func NewCheckoutService(conn *grpc.ClientConn) *CheckoutService {
+  return &CheckoutService{inventory: pb.NewPaymentsClient(conn)}
+}
+
+func (s *CheckoutService) Checkout(ctx context.Context, request *pb.ReserveRequest) error {
+  _, err := s.inventory.Reserve(ctx, request)
+  return err
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "go")
+
+    assert not any(edge.target == "proto.inventory.v1.Inventory.Reserve" for edge in result.edges)
+
+
 def test_static_analysis_ignores_kotlin_grpc_handler_without_the_official_grpc_service_import(tmp_path: Path):
     (tmp_path / "inventory.proto").write_text(
         '''syntax = "proto3";
