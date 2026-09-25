@@ -827,8 +827,6 @@ def describe_runtime_configuration(
             ("binding_evidence_ranges", selected_binding_evidence_ranges is not None),
         ) if enabled
     ]
-    if len(binding_filter_dimensions) > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
-        return _runtime_configuration_filter_complexity_error("binding", binding_filter_dimensions)
     source_import_filter_dimensions = [
         name for name, enabled in (
             ("source_import_workloads", selected_source_import_scopes is not None),
@@ -841,8 +839,6 @@ def describe_runtime_configuration(
             ("source_import_evidence_ranges", selected_source_import_evidence_ranges is not None),
         ) if enabled
     ]
-    if len(source_import_filter_dimensions) > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
-        return _runtime_configuration_filter_complexity_error("source import", source_import_filter_dimensions)
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -850,6 +846,8 @@ def describe_runtime_configuration(
     all_source_imports = kubernetes_configuration_repo.list_kubernetes_configuration_source_imports_for_service(
         conn, row["id"],
     )
+    indexed_bindings = list(all_bindings)
+    indexed_source_imports = list(all_source_imports)
     indexed_binding_total = len(all_bindings)
     indexed_source_import_total = len(all_source_imports)
     binding_filters_applied = bool(binding_filter_dimensions)
@@ -913,6 +911,55 @@ def describe_runtime_configuration(
             conn, row["id"],
         )
     }
+    binding_dimension_filters = {
+        "binding_workloads": lambda records: _filter_runtime_configuration_workloads(records, selected_binding_scopes),
+        "binding_declaration_statuses": lambda records: _filter_runtime_configuration_bindings(
+            records, mismatches_by_reference, unknowns_by_reference, selected_binding_declaration_statuses,
+        ),
+        "binding_source_kinds": lambda records: _filter_runtime_configuration_source_kinds(
+            records, selected_binding_source_kinds,
+        ),
+        "binding_evidence_files": lambda records: _filter_runtime_configuration_evidence_files(
+            records, selected_binding_evidence_files,
+        ),
+        "binding_evidence_ranges": lambda records: _filter_runtime_configuration_evidence_ranges(
+            records, selected_binding_evidence_ranges,
+        ),
+    }
+    source_import_dimension_filters = {
+        "source_import_workloads": lambda records: _filter_runtime_configuration_workloads(
+            records, selected_source_import_scopes,
+        ),
+        "source_import_declaration_statuses": lambda records: _filter_runtime_configuration_source_imports(
+            records, source_import_unknowns_by_reference, selected_declaration_statuses, None,
+        ),
+        "source_import_availabilities": lambda records: _filter_runtime_configuration_source_imports(
+            records, source_import_unknowns_by_reference, None, selected_availabilities,
+        ),
+        "source_import_source_kinds": lambda records: _filter_runtime_configuration_source_kinds(
+            records, selected_source_import_source_kinds,
+        ),
+        "source_import_container_roles": lambda records: _filter_runtime_configuration_source_import_container_roles(
+            records, selected_source_import_container_roles,
+        ),
+        "source_import_prefixes": lambda records: _filter_runtime_configuration_source_import_prefixes(
+            records, selected_prefixes, source_import_include_unprefixed,
+        ),
+        "source_import_evidence_files": lambda records: _filter_runtime_configuration_evidence_files(
+            records, selected_source_import_evidence_files,
+        ),
+        "source_import_evidence_ranges": lambda records: _filter_runtime_configuration_evidence_ranges(
+            records, selected_source_import_evidence_ranges,
+        ),
+    }
+    if len(binding_filter_dimensions) > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
+        return _runtime_configuration_filter_complexity_error(
+            "binding", binding_filter_dimensions, indexed_bindings, binding_dimension_filters,
+        )
+    if len(source_import_filter_dimensions) > MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS:
+        return _runtime_configuration_filter_complexity_error(
+            "source import", source_import_filter_dimensions, indexed_source_imports, source_import_dimension_filters,
+        )
     if selected_binding_declaration_statuses is not None:
         all_bindings = _filter_runtime_configuration_bindings(
             all_bindings,
@@ -1017,28 +1064,50 @@ def _runtime_configuration_workload_scopes(
     return scopes, None
 
 
-def _runtime_configuration_filter_complexity_error(surface: str, dimensions: list[str]) -> dict:
-    """Provide deterministic query groups when active filters exceed the safe bound."""
+def _runtime_configuration_filter_complexity_error(
+    surface: str, dimensions: list[str], indexed_records: list[sqlite3.Row], dimension_filters: dict,
+) -> dict:
+    """Provide data-backed query groups when active filters exceed the safe bound."""
     query_groups = [
         dimensions[index : index + MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS]
         for index in range(0, len(dimensions), MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS)
     ]
+    selected_totals = _runtime_configuration_filter_group_selected_totals(
+        query_groups, indexed_records, dimension_filters,
+    )
     return {
         "error": f"{surface} filters must use at most {MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS} dimensions",
         "split_guidance": {
             "recommended_next_step": "split_filter_dimensions",
             "max_dimensions": MAX_RUNTIME_CONFIGURATION_FILTER_DIMENSIONS,
             "query_groups": query_groups,
-            "execution_order": _runtime_configuration_filter_group_execution_order(query_groups),
+            "query_group_selected_totals": selected_totals,
+            "execution_order": _runtime_configuration_filter_group_execution_order(query_groups, selected_totals),
         },
     }
 
 
-def _runtime_configuration_filter_group_execution_order(query_groups: list[list[str]]) -> list[int]:
-    """Order query groups by their most context-localizing dimension, stably."""
+def _runtime_configuration_filter_group_selected_totals(
+    query_groups: list[list[str]], indexed_records: list[sqlite3.Row], dimension_filters: dict,
+) -> list[int]:
+    """Count each proposed group against indexed records without returning records."""
+    selected_totals = []
+    for group in query_groups:
+        selected_records = indexed_records
+        for dimension in group:
+            selected_records = dimension_filters[dimension](selected_records)
+        selected_totals.append(len(selected_records))
+    return selected_totals
+
+
+def _runtime_configuration_filter_group_execution_order(
+    query_groups: list[list[str]], selected_totals: list[int],
+) -> list[int]:
+    """Order groups by indexed total, then evidence-locality, retaining stable ties."""
     return sorted(
         range(len(query_groups)),
         key=lambda index: (
+            selected_totals[index],
             min(_RUNTIME_FILTER_DIMENSION_PRIORITY[dimension] for dimension in query_groups[index]),
             index,
         ),
