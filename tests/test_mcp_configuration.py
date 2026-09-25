@@ -157,7 +157,7 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     services.ensure_service(conn, "orders", "/repos/shop/orders", "node-ts", repository_id=repository_id)
     kubernetes_configuration.replace_kubernetes_configuration_bindings(conn, repository_id, [
         KubernetesConfigurationBinding(
-            environment_key="API_TOKEN", source_kind="secret", source_name="api-secrets", source_key="token",
+            environment_key="API_TOKEN", source_kind="config_map", source_name="api-config", source_key="token",
             workload_kind="Deployment", workload_name="orders", container_name="api",
             file_path="deploy/orders.yaml", start_line=5, end_line=8, matched_service_name="orders",
         ),
@@ -169,7 +169,7 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     ])
     kubernetes_configuration.replace_kubernetes_configuration_key_mismatches(conn, repository_id, [
         KubernetesConfigurationKeyMismatch(
-            environment_key="API_TOKEN", source_kind="secret", source_name="api-secrets", source_key="token",
+            environment_key="API_TOKEN", source_kind="config_map", source_name="api-config", source_key="token",
             reference_file_path="deploy/orders.yaml", reference_start_line=5, reference_end_line=8,
             declaration_file_path="deploy/api-secrets.yaml", declaration_start_line=1, declaration_end_line=3,
             matched_service_name="orders",
@@ -242,6 +242,12 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         binding_declaration_statuses=["not_declared_locally"],
     )
     assert [item["environment_key"] for item in source_unknown_selected["bindings"]] == ["WORKER_TOKEN"]
+    config_map_bindings = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_source_kinds=["config_map"],
+    )
+    assert [item["environment_key"] for item in config_map_bindings["bindings"]] == ["API_TOKEN"]
     declaration_selected = queries.describe_runtime_configuration(
         conn,
         "orders",
@@ -254,6 +260,12 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         source_import_availabilities=["required"],
     )
     assert [item["source"]["name"] for item in availability_selected["source_imports"]] == ["worker-secrets"]
+    secret_imports = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        source_import_source_kinds=["secret"],
+    )
+    assert [item["source"]["name"] for item in secret_imports["source_imports"]] == ["worker-secrets"]
     assert queries.describe_runtime_configuration(conn, "orders", workloads=[]) == {
         "error": "workloads must be a non-empty list of workload identities",
     }
@@ -273,6 +285,11 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         "orders",
         binding_declaration_statuses=["declared"],
     ) == {"error": "binding_declaration_statuses must contain only: key_not_declared, not_declared_locally, not_reported"}
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_source_kinds=["vault"],
+    ) == {"error": "binding_source_kinds must contain only: config_map, secret"}
     assert queries.describe_runtime_configuration(
         conn,
         "orders",

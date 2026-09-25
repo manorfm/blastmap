@@ -220,6 +220,8 @@ that a declaration exists.
 `binding_declaration_statuses` filters `key_not_declared`, `not_declared_locally`,
 or `not_reported`; again, `not_reported` denotes no matching indexed finding rather
 than confirmation of a declaration.
+`binding_source_kinds` and `source_import_source_kinds` independently filter literal
+`config_map` or `secret` sources for each list.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset

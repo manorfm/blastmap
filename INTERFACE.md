@@ -222,6 +222,8 @@ declared locally.
 `binding_declaration_statuses` accepts `key_not_declared`, `not_declared_locally`, or
 `not_reported`. Its `not_reported` state likewise means no matching indexed finding,
 not confirmation that a declaration exists.
+`binding_source_kinds` and `source_import_source_kinds` independently accept literal
+`config_map` or `secret` source kinds for each list.
 Pass the evaluated page's `current_offset`; `needs_next_page` returns the next query
 with the correct offset. Pass `current_limit` from that page so its limit and offset
 remain consistent; the evaluated offset must be a multiple of that limit.

@@ -708,6 +708,7 @@ def describe_runtime_configuration(
     repository: str | None = None, workloads: object = None, binding_workloads: object = None,
     source_import_workloads: object = None, source_import_declaration_statuses: object = None,
     source_import_availabilities: object = None, binding_declaration_statuses: object = None,
+    binding_source_kinds: object = None, source_import_source_kinds: object = None,
 ) -> dict:
     """Return source-proven Kubernetes configuration references without values."""
     error = _validate_pagination(limit, offset)
@@ -753,6 +754,16 @@ def describe_runtime_configuration(
     )
     if binding_declaration_statuses_error is not None:
         return {"error": binding_declaration_statuses_error}
+    selected_binding_source_kinds, binding_source_kinds_error = _runtime_configuration_choice_filter(
+        binding_source_kinds, "binding_source_kinds", ("config_map", "secret"),
+    )
+    if binding_source_kinds_error is not None:
+        return {"error": binding_source_kinds_error}
+    selected_source_import_source_kinds, source_import_source_kinds_error = _runtime_configuration_choice_filter(
+        source_import_source_kinds, "source_import_source_kinds", ("config_map", "secret"),
+    )
+    if source_import_source_kinds_error is not None:
+        return {"error": source_import_source_kinds_error}
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -764,6 +775,12 @@ def describe_runtime_configuration(
         all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_binding_scopes)
     if selected_source_import_scopes is not None:
         all_source_imports = _filter_runtime_configuration_workloads(all_source_imports, selected_source_import_scopes)
+    if selected_binding_source_kinds is not None:
+        all_bindings = _filter_runtime_configuration_source_kinds(all_bindings, selected_binding_source_kinds)
+    if selected_source_import_source_kinds is not None:
+        all_source_imports = _filter_runtime_configuration_source_kinds(
+            all_source_imports, selected_source_import_source_kinds,
+        )
     mismatches_by_reference = {
         (
             mismatch["environment_key"], mismatch["source_kind"], mismatch["source_name"], mismatch["source_key"],
@@ -890,6 +907,13 @@ def _filter_runtime_configuration_workloads(
         record for record in records
         if (record["workload_kind"], record["workload_name"], record["container_name"]) in selected_scopes
     ]
+
+
+def _filter_runtime_configuration_source_kinds(
+    records: list[sqlite3.Row], source_kinds: set[str],
+) -> list[sqlite3.Row]:
+    """Keep only records whose source kind is one of the explicit literal kinds."""
+    return [record for record in records if record["source_kind"] in source_kinds]
 
 
 def _filter_runtime_configuration_bindings(
