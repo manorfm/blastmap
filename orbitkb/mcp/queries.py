@@ -705,15 +705,32 @@ def describe_configuration(
 
 def describe_runtime_configuration(
     conn: sqlite3.Connection, service: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0,
-    repository: str | None = None, workloads: object = None,
+    repository: str | None = None, workloads: object = None, binding_workloads: object = None,
+    source_import_workloads: object = None,
 ) -> dict:
     """Return source-proven Kubernetes configuration references without values."""
     error = _validate_pagination(limit, offset)
     if error:
         return {"error": error}
-    selected_workload_scopes, workloads_error = _runtime_configuration_workload_scopes(workloads)
-    if workloads_error is not None:
-        return {"error": workloads_error}
+    if workloads is not None and (binding_workloads is not None or source_import_workloads is not None):
+        return {"error": "workloads cannot be combined with binding_workloads or source_import_workloads"}
+    if workloads is not None:
+        selected_workload_scopes, workloads_error = _runtime_configuration_workload_scopes(workloads)
+        if workloads_error is not None:
+            return {"error": workloads_error}
+        selected_binding_scopes = selected_workload_scopes
+        selected_source_import_scopes = selected_workload_scopes
+    else:
+        selected_binding_scopes, bindings_error = _runtime_configuration_workload_scopes(
+            binding_workloads, "binding_workloads",
+        )
+        if bindings_error is not None:
+            return {"error": bindings_error}
+        selected_source_import_scopes, source_imports_error = _runtime_configuration_workload_scopes(
+            source_import_workloads, "source_import_workloads",
+        )
+        if source_imports_error is not None:
+            return {"error": source_imports_error}
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -721,9 +738,10 @@ def describe_runtime_configuration(
     all_source_imports = kubernetes_configuration_repo.list_kubernetes_configuration_source_imports_for_service(
         conn, row["id"],
     )
-    if selected_workload_scopes is not None:
-        all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_workload_scopes)
-        all_source_imports = _filter_runtime_configuration_workloads(all_source_imports, selected_workload_scopes)
+    if selected_binding_scopes is not None:
+        all_bindings = _filter_runtime_configuration_workloads(all_bindings, selected_binding_scopes)
+    if selected_source_import_scopes is not None:
+        all_source_imports = _filter_runtime_configuration_workloads(all_source_imports, selected_source_import_scopes)
     bindings, page = _paginate(
         all_bindings, limit, offset,
     )
@@ -815,20 +833,20 @@ def _runtime_configuration_reference(item: sqlite3.Row) -> dict:
 
 
 def _runtime_configuration_workload_scopes(
-    workloads: object,
+    workloads: object, argument_name: str = "workloads",
 ) -> tuple[set[tuple[str, str, str]] | None, str | None]:
     """Validate optional direct workload scopes used to reduce runtime context."""
     if workloads is None:
         return None, None
     if not isinstance(workloads, list) or not workloads:
-        return None, "workloads must be a non-empty list of workload identities"
+        return None, f"{argument_name} must be a non-empty list of workload identities"
     if len(workloads) > MAX_LIST_LIMIT:
-        return None, f"workloads must contain at most {MAX_LIST_LIMIT} workload identities"
+        return None, f"{argument_name} must contain at most {MAX_LIST_LIMIT} workload identities"
     scopes: set[tuple[str, str, str]] = set()
     for workload in workloads:
         scope = _workload_scope_key(workload)
         if scope is None:
-            return None, "workloads must be a non-empty list of workload identities"
+            return None, f"{argument_name} must be a non-empty list of workload identities"
         scopes.add(scope)
     return scopes, None
 

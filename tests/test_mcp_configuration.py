@@ -155,6 +155,18 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     conn = open_db(tmp_path / "runtime-configuration-workload-filter.db")
     repository_id = repositories.ensure_repository(conn, "shop", "/repos/shop")
     services.ensure_service(conn, "orders", "/repos/shop/orders", "node-ts", repository_id=repository_id)
+    kubernetes_configuration.replace_kubernetes_configuration_bindings(conn, repository_id, [
+        KubernetesConfigurationBinding(
+            environment_key="API_TOKEN", source_kind="secret", source_name="api-secrets", source_key="token",
+            workload_kind="Deployment", workload_name="orders", container_name="api",
+            file_path="deploy/orders.yaml", start_line=5, end_line=8, matched_service_name="orders",
+        ),
+        KubernetesConfigurationBinding(
+            environment_key="WORKER_TOKEN", source_kind="secret", source_name="worker-secrets", source_key="token",
+            workload_kind="Deployment", workload_name="orders", container_name="worker",
+            file_path="deploy/orders.yaml", start_line=15, end_line=18, matched_service_name="orders",
+        ),
+    ])
     kubernetes_configuration.replace_kubernetes_configuration_source_imports(conn, repository_id, [
         KubernetesConfigurationSourceImport(
             source_kind="config_map", source_name="api-defaults", prefix=None,
@@ -188,9 +200,23 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     assert [item["source"]["name"] for item in all_selected["source_imports"]] == [
         "api-defaults", "worker-secrets",
     ]
+    independently_selected = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        binding_workloads=[{"kind": "Deployment", "name": "orders", "container": "api"}],
+        source_import_workloads=[{"kind": "Deployment", "name": "orders", "container": "worker"}],
+    )
+    assert [item["environment_key"] for item in independently_selected["bindings"]] == ["API_TOKEN"]
+    assert [item["source"]["name"] for item in independently_selected["source_imports"]] == ["worker-secrets"]
     assert queries.describe_runtime_configuration(conn, "orders", workloads=[]) == {
         "error": "workloads must be a non-empty list of workload identities",
     }
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        workloads=[{"kind": "Deployment", "name": "orders", "container": "api"}],
+        binding_workloads=[{"kind": "Deployment", "name": "orders", "container": "api"}],
+    ) == {"error": "workloads cannot be combined with binding_workloads or source_import_workloads"}
     assert queries.describe_runtime_configuration(
         conn,
         "orders",

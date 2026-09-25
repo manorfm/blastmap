@@ -198,7 +198,8 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
     @mcp.tool()
     def describe_runtime_configuration(
         service: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0, repository: str | None = None,
-        workloads: list[dict] | None = None,
+        workloads: list[dict] | None = None, binding_workloads: list[dict] | None = None,
+        source_import_workloads: list[dict] | None = None,
     ) -> dict:
         """List literal Kubernetes workload environment references to ConfigMaps
         and Secrets, plus literal ``envFrom`` sources with unknown per-key coverage.
@@ -207,10 +208,12 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         unresolved source is an ownership hypothesis, not a missing-source finding.
         Values, dynamic names and unrendered Helm templates are excluded.
         Both lists are capped at `limit` (default 50) starting at `offset`; up to 500
-        workload identities optionally limits both to exact Kubernetes scopes. Pass
-        repository when service names duplicate."""
+        workload identities optionally limits both or either list to exact Kubernetes
+        scopes. Pass repository when service names duplicate."""
         with closing(_conn()) as conn:
-            return queries.describe_runtime_configuration(conn, service, limit, offset, repository, workloads)
+            return queries.describe_runtime_configuration(
+                conn, service, limit, offset, repository, workloads, binding_workloads, source_import_workloads,
+            )
 
     @mcp.tool()
     def validate_runtime_configuration_follow_up(
