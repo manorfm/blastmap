@@ -1818,6 +1818,19 @@ def test_cloud_dependency_iac_units_exclude_low_confidence_findings():
     ], {"media-service"}) == []
 
 
+def test_deployment_review_units_read_indexed_cloud_dependencies():
+    assert queries._minimal_unit_reading({
+        "id": "cloud-dependency-iac:media-service:aws:object_storage:uploads",
+        "service": "media-service",
+        "target": {"role": "deployment", "symbol": "cloud:aws:object_storage:uploads"},
+        "dependencies": [],
+    }) == [{
+        "service": "media-service",
+        "purpose": "confirm the indexed cloud dependency and IaC declaration",
+        "recommended_query": {"tool": "describe_cloud_dependencies", "arguments": {"service": "media-service"}},
+    }]
+
+
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
     assert derive_runtime_configuration_review_units(
         {"checkout-service": [{
