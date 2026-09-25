@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "19"
+STATIC_ANALYSIS_INPUT_VERSION = "20"
 
 
 def _walk(node: Node):
@@ -964,7 +964,7 @@ _JVM_GRPC_STUB_FIELD = re.compile(
 )
 _KOTLIN_GRPC_STUB_PROPERTY = re.compile(
     r"\b(?:val|var)\s+(?P<member>[A-Za-z_]\w*)\s*:\s*(?:[A-Za-z_]\w*\.)*"
-    r"(?P<service>[A-Za-z_]\w*)GrpcKt\.[A-Za-z_]\w*Stub\b",
+    r"(?P<service>[A-Za-z_]\w*)Grpc(?:Kt)?\.[A-Za-z_]\w*Stub\b",
 )
 
 
@@ -1063,7 +1063,7 @@ def _jvm_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClientB
 
 
 def _kotlin_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClientBinding]:
-    """Return direct Kotlin properties typed as generated gRPC coroutine stubs."""
+    """Return direct Kotlin properties typed as generated Java or coroutine gRPC stubs."""
     parser = Parser(Language(tree_sitter_kotlin.language()))
     bindings: list[GrpcClientBinding] = []
     inheritances: list[tuple[str, str, Evidence]] = []
