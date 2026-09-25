@@ -131,7 +131,8 @@ def aggregate(conn: sqlite3.Connection, epic_type: str | None = None) -> dict:
     )
     verification = conn.execute(verification_query, params).fetchone()
     measurements_query = (
-        "SELECT token_measurement AS measurement, COUNT(*) AS runs FROM context_budget_runs " + where
+        "SELECT token_measurement AS measurement, COUNT(*) AS runs "  # nosec B608 - where is a fixed literal; epic_type is bound.
+        "FROM context_budget_runs " + where
         + " GROUP BY token_measurement ORDER BY token_measurement"
     )
     measurements = conn.execute(measurements_query, params).fetchall()
