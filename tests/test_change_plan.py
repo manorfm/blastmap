@@ -758,6 +758,26 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         plan["plan_id"],
         "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         [],
+        source_import_truncated=True,
+        current_offset=25,
+        current_limit=25,
+    )["next_query"] == {
+        "tool": "describe_runtime_configuration",
+        "arguments": {"service": "checkout-service", "limit": 25, "offset": 50},
+    }
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
+        source_import_truncated=True,
+        current_limit=0,
+    ) == {"error": "current_limit must be an integer between 1 and 500"}
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
         source_import_truncated=False,
     )["status"] == "incomplete"
 

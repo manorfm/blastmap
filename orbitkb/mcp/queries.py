@@ -1390,7 +1390,7 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
 
 def validate_runtime_configuration_follow_up(
     conn: sqlite3.Connection, plan_id: str, change_unit_id: str, returned_workloads: object,
-    source_import_truncated: object, current_offset: object = 0,
+    source_import_truncated: object, current_offset: object = 0, current_limit: object = DEFAULT_LIST_LIMIT,
 ) -> dict:
     """Compare one runtime-configuration page with a truncated change-unit target."""
     if not isinstance(returned_workloads, list):
@@ -1399,6 +1399,12 @@ def validate_runtime_configuration_follow_up(
         return {"error": "source_import_truncated must be a boolean"}
     if not isinstance(current_offset, int) or isinstance(current_offset, bool) or current_offset < 0:
         return {"error": "current_offset must be a non-negative integer"}
+    if (
+        not isinstance(current_limit, int)
+        or isinstance(current_limit, bool)
+        or not 1 <= current_limit <= MAX_LIST_LIMIT
+    ):
+        return {"error": f"current_limit must be an integer between 1 and {MAX_LIST_LIMIT}"}
     match = re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)
     if match is None:
         return {"error": "invalid plan_id"}
@@ -1440,8 +1446,8 @@ def validate_runtime_configuration_follow_up(
         response["next_query"] = {
             "tool": "describe_runtime_configuration",
             "arguments": {
-                "service": change_unit["service"], "limit": DEFAULT_LIST_LIMIT,
-                "offset": current_offset + DEFAULT_LIST_LIMIT,
+                "service": change_unit["service"], "limit": current_limit,
+                "offset": current_offset + current_limit,
             },
         }
     return response
