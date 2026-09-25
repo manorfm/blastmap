@@ -175,7 +175,8 @@ must be created in the indexed repository.
 The same ownership review is created once per unresolved `envFrom` source for a
 primary service, grouping its references even when prefixes differ. It does not
 infer which keys the imported source supplies. For an optional source, it validates
-safe behavior when absent rather than requiring its keys before rollout.
+safe behavior when absent rather than requiring its keys before rollout. When indexed,
+the change target also names the affected Kubernetes workloads and containers.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned
@@ -268,7 +269,8 @@ prefixes while imported environment keys remain unknown. Its availability is
 absence review instead of an assertion that rollout must provision the source. When
 an initialization container imports the source, the review also checks that it
 completes before application containers start. When both roles import it, the detail
-orders them by lifecycle: `initialization`, then `application`.
+orders them by lifecycle: `initialization`, then `application`. It includes the
+proven workload/container scope when available; legacy snapshots omit that scope.
 
 `describe_feature_flags` lists literal feature-flag reads through a locally proven
 SDK, currently LaunchDarkly's Node server SDK. It returns the key, provider and

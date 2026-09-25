@@ -154,16 +154,19 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
         KubernetesConfigurationSourceImportUnknown(
             source_kind="config_map", source_name="external-config", prefix="ORDERS_",
             reference_file_path="deploy/orders.yaml", reference_start_line=12, reference_end_line=15,
+            workload_kind="Deployment", workload_name="orders", container_name="migrate",
             container_role="initialization", optional=True, matched_service_name="orders",
         ),
         KubernetesConfigurationSourceImportUnknown(
             source_kind="config_map", source_name="external-config", prefix="PAYMENTS_",
             reference_file_path="deploy/orders.yaml", reference_start_line=20, reference_end_line=23,
+            workload_kind="Deployment", workload_name="orders", container_name="migrate",
             container_role="initialization", optional=True, matched_service_name="orders",
         ),
         KubernetesConfigurationSourceImportUnknown(
             source_kind="config_map", source_name="external-config", prefix=None,
             reference_file_path="deploy/orders.yaml", reference_start_line=28, reference_end_line=30,
+            workload_kind="Deployment", workload_name="orders", container_name="migrate",
             container_role="initialization", optional=True, matched_service_name="orders",
         ),
     ])
@@ -180,6 +183,10 @@ def test_kubernetes_env_from_source_unknown_is_a_low_confidence_architecture_ins
             "source_kind": "config_map", "source_name": "external-config",
             "prefixes": ["ORDERS_", "PAYMENTS_"], "includes_unprefixed_import": True,
             "container_roles": ["initialization"], "availability": "optional", "confidence": 0.4,
+            "workloads": [{
+                "kind": "Deployment", "name": "orders", "container": "migrate",
+                "container_role": "initialization",
+            }],
             "evidence": [
                 {"file": "deploy/orders.yaml", "start_line": 12, "end_line": 15},
                 {"file": "deploy/orders.yaml", "start_line": 20, "end_line": 23},
@@ -211,11 +218,13 @@ def test_kubernetes_env_from_source_unknown_orders_initialization_before_applica
         KubernetesConfigurationSourceImportUnknown(
             source_kind="config_map", source_name="external-config", prefix=None,
             reference_file_path="deploy/orders.yaml", reference_start_line=20, reference_end_line=23,
+            workload_kind="Deployment", workload_name="orders", container_name="api",
             container_role="application", matched_service_name="orders",
         ),
         KubernetesConfigurationSourceImportUnknown(
             source_kind="config_map", source_name="external-config", prefix=None,
             reference_file_path="deploy/orders.yaml", reference_start_line=12, reference_end_line=15,
+            workload_kind="Deployment", workload_name="orders", container_name="migrate",
             container_role="initialization", matched_service_name="orders",
         ),
     ])
@@ -223,6 +232,10 @@ def test_kubernetes_env_from_source_unknown_orders_initialization_before_applica
     detail = find_kubernetes_configuration_source_import_unknowns(conn)[0]["detail"]
 
     assert detail["container_roles"] == ["initialization", "application"]
+    assert detail["workloads"] == [
+        {"kind": "Deployment", "name": "orders", "container": "migrate", "container_role": "initialization"},
+        {"kind": "Deployment", "name": "orders", "container": "api", "container_role": "application"},
+    ]
     assert detail["unknowns"].count(
         "An initialization container using this source must complete before application containers start.",
     ) == 1

@@ -128,7 +128,8 @@ availability; optional sources ask for safe absence behavior rather than asserti
 the source must be provisioned. An initialization-container import also reports the
 need to verify initialization completes before application containers start. When
 both roles occur, `container_roles` is lifecycle-ordered: `initialization`, then
-`application`.
+`application`. The finding also includes its proven workload/container scope when
+available; legacy snapshots omit it rather than guessing.
 
 `describe_feature_flags` returns literal reads through a locally proven feature-flag
 SDK, currently LaunchDarkly's Node server SDK. It returns key, provider and source
@@ -175,8 +176,8 @@ resolved HTTP boundary, `describe_persistence` for a schema/migration review, or
 `describe_runtime_configuration` for a source-proven Kubernetes key mismatch or
 unresolved source-ownership review, including an `envFrom` source. The latter is
 grouped by source because its imported keys remain unknown; initialization-container
-imports add an ordering validation. It does not scan source, rerun retrieval or call
-a model.
+imports add an ordering validation, and its target identifies proven workloads and
+containers when available. It does not scan source, rerun retrieval or call a model.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

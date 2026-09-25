@@ -4,7 +4,7 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "30"
+SCHEMA_VERSION = "31"
 DEFAULT_DB_PATH = Path.home() / ".orbitkb" / "orbitkb.db"
 
 
@@ -38,6 +38,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         conn, "kubernetes_configuration_source_import_unknowns", "container_role",
         "TEXT CHECK (container_role IN ('application', 'initialization'))",
     )
+    _add_column_if_missing(conn, "kubernetes_configuration_source_import_unknowns", "workload_kind", "TEXT")
+    _add_column_if_missing(conn, "kubernetes_configuration_source_import_unknowns", "workload_name", "TEXT")
+    _add_column_if_missing(conn, "kubernetes_configuration_source_import_unknowns", "container_name", "TEXT")
     _migrate_configuration_binding_kind_if_needed(conn)
     _migrate_entrypoint_kind_if_needed(conn)
     _migrate_architecture_findings_if_needed(conn)

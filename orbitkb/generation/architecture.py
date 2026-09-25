@@ -14,6 +14,7 @@ from collections import defaultdict
 
 from orbitkb.db.repositories import architecture as architecture_repo
 from orbitkb.db.repositories import flows as flows_repo
+from orbitkb.generation.runtime_configuration import ordered_kubernetes_workloads
 
 # Starting heuristic, not a trained threshold: flag a service once its fan-in or
 # fan-out crosses this count. Low enough to catch small systems, high enough that a
@@ -1948,7 +1949,8 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
     """Return low-confidence possible external ``envFrom`` dependencies."""
     names = _service_names(conn)
     rows = conn.execute(
-        """SELECT service_id, source_kind, source_name, prefix, container_role, optional, reference_file_path,
+        """SELECT service_id, source_kind, source_name, prefix, container_role, optional, workload_kind, workload_name,
+                  container_name, reference_file_path,
                   reference_start_line, reference_end_line
            FROM kubernetes_configuration_source_import_unknowns
            WHERE service_id IS NOT NULL
@@ -1970,6 +1972,10 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
         container_roles = [
             role for role in ("initialization", "application") if role in observed_container_roles
         ]
+        workloads = ordered_kubernetes_workloads(
+            (row["workload_kind"], row["workload_name"], row["container_name"], row["container_role"])
+            for row in imports
+        )
         availability_values = {None if row["optional"] is None else bool(row["optional"]) for row in imports}
         availability = (
             "optional" if availability_values == {True}
@@ -1997,6 +2003,8 @@ def find_kubernetes_configuration_source_import_unknowns(conn: sqlite3.Connectio
             detail["includes_unprefixed_import"] = True
         if container_roles:
             detail["container_roles"] = container_roles
+        if workloads:
+            detail["workloads"] = workloads
         if availability == "optional":
             detail["unknowns"].append("The source is optional and may be absent at runtime.")
             detail["remediation"].append(

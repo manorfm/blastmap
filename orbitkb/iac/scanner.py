@@ -138,7 +138,9 @@ def scan_repository_facts(repository_root: Path, candidates: list[ServiceCandida
         source_import_unknowns.append(KubernetesConfigurationSourceImportUnknown(
             source_kind=source_import.source_kind, source_name=source_import.source_name, prefix=source_import.prefix,
             reference_file_path=source_import.file_path, reference_start_line=source_import.start_line,
-            reference_end_line=source_import.end_line, container_role=source_import.container_role,
+            reference_end_line=source_import.end_line, workload_kind=source_import.workload_kind,
+            workload_name=source_import.workload_name, container_name=source_import.container_name,
+            container_role=source_import.container_role,
             optional=source_import.optional,
             matched_service_name=source_import.matched_service_name,
         ))

@@ -131,15 +131,16 @@ def replace_kubernetes_configuration_source_import_unknowns(
             service_id = service["id"] if service is not None else None
         rows.append((
             repository_id, service_id, unknown.source_kind, unknown.source_name, unknown.prefix,
-            None if unknown.optional is None else int(unknown.optional), unknown.container_role,
+            None if unknown.optional is None else int(unknown.optional), unknown.container_role, unknown.workload_kind,
+            unknown.workload_name, unknown.container_name,
             unknown.reference_file_path,
             unknown.reference_start_line, unknown.reference_end_line, timestamp,
         ))
     conn.executemany(
         """INSERT INTO kubernetes_configuration_source_import_unknowns
-           (repository_id, service_id, source_kind, source_name, prefix, optional, container_role, reference_file_path,
-            reference_start_line, reference_end_line, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (repository_id, service_id, source_kind, source_name, prefix, optional, container_role, workload_kind,
+            workload_name, container_name, reference_file_path, reference_start_line, reference_end_line, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()
@@ -149,7 +150,8 @@ def list_kubernetes_configuration_source_import_unknowns_for_service(
     conn: sqlite3.Connection, service_id: int,
 ) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT source_kind, source_name, prefix, optional, container_role, reference_file_path, reference_start_line, reference_end_line
+        """SELECT source_kind, source_name, prefix, optional, container_role, workload_kind, workload_name, container_name,
+                  reference_file_path, reference_start_line, reference_end_line
            FROM kubernetes_configuration_source_import_unknowns WHERE service_id = ?
            ORDER BY source_kind, source_name, prefix, reference_file_path, reference_start_line""",
         (service_id,),

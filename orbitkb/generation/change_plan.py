@@ -1,6 +1,8 @@
 """Deterministic decisions that gate an evidence-backed change plan."""
 from __future__ import annotations
 
+from orbitkb.generation.runtime_configuration import ordered_kubernetes_workloads
+
 
 def derive_decision_points(contracts_at_risk: list[dict], primary_services: set[str]) -> list[dict]:
     """Require an explicit compatibility choice for affected primary event contracts.
@@ -518,20 +520,27 @@ def derive_runtime_configuration_source_import_unknown_review_units(
                 and _unique_evidence([reference])
             ):
                 grouped.setdefault((source_kind, source_name), []).append((
-                    reference, unknown.get("optional"), unknown.get("container_role"),
+                    reference, unknown.get("optional"), unknown.get("container_role"), unknown.get("workload_kind"),
+                    unknown.get("workload_name"), unknown.get("container_name"),
                 ))
         for (source_kind, source_name), records in sorted(grouped.items()):
-            evidence = _sorted_evidence([reference for reference, _optional, _container_role in records])
+            evidence = _sorted_evidence([
+                reference for reference, _optional, _container_role, _workload_kind, _workload_name, _container_name in records
+            ])
             source_label = "ConfigMap" if source_kind == "config_map" else "Secret"
             availability_values = {
                 None if optional is None else bool(optional)
-                for _reference, optional, _container_role in records
+                for _reference, optional, _container_role, _workload_kind, _workload_name, _container_name in records
             }
             container_roles = {
                 container_role
-                for _reference, _optional, container_role in records
+                for _reference, _optional, container_role, _workload_kind, _workload_name, _container_name in records
                 if container_role in {"application", "initialization"}
             }
+            workloads = ordered_kubernetes_workloads(
+                (workload_kind, workload_name, container_name, container_role)
+                for _reference, _optional, container_role, workload_kind, workload_name, container_name in records
+            )
             availability = (
                 "optional" if availability_values == {True}
                 else "required" if availability_values == {False}
@@ -551,13 +560,15 @@ def derive_runtime_configuration_source_import_unknown_review_units(
             ]
             if "initialization" in container_roles:
                 validation.append("verify initialization completes before application containers start")
+            target = {
+                "role": "configuration", "symbol": f"kubernetes:{source_kind}:{source_name}", "evidence": evidence,
+            }
+            if workloads:
+                target["workloads"] = workloads
             units.append({
                 "id": f"runtime-configuration-source-import-unknown:{service}:{source_kind}:{source_name}",
                 "service": service,
-                "target": {
-                    "role": "configuration", "symbol": f"kubernetes:{source_kind}:{source_name}",
-                    "evidence": evidence,
-                },
+                "target": target,
                 "action": "review",
                 "reason": (
                     f"{service} imports keys from {source_label} {source_name} through envFrom, but no matching "

@@ -90,6 +90,11 @@ class KubernetesConfigurationSourceImportUnknown:
     reference_file_path: str
     reference_start_line: int
     reference_end_line: int
+    # Workload scope is retained when the scanner produced this fact. Legacy
+    # snapshots omit it instead of guessing an owning workload or container.
+    workload_kind: str | None = None
+    workload_name: str | None = None
+    container_name: str | None = None
     container_role: str | None = None
     optional: bool | None = None
     matched_service_name: str | None = None
