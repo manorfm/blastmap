@@ -2430,6 +2430,39 @@ service Inventory {
     )
 
 
+def test_static_analysis_links_a_kotlin_constructor_grpc_stub_call_to_a_unique_proto_rpc(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "CheckoutService.kt").write_text(
+        '''class CheckoutService(
+  private val inventoryStub: InventoryGrpcKt.InventoryCoroutineStub,
+) {
+  suspend fun checkout(request: ReserveRequest): Receipt {
+    return inventoryStub.reserve(request)
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert any(
+        edge.source == "CheckoutService.checkout"
+        and edge.target == "proto.inventory.v1.Inventory.Reserve"
+        and edge.confidence == "medium"
+        for edge in result.edges
+    )
+
+
 def test_static_analysis_ignores_ambiguous_protobuf_rpc_declarations(tmp_path: Path):
     for name in ("inventory.proto", "inventory-duplicate.proto"):
         (tmp_path / name).write_text(

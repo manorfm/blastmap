@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "17"
+STATIC_ANALYSIS_INPUT_VERSION = "18"
 
 
 def _walk(node: Node):
@@ -1074,18 +1074,28 @@ def _kotlin_grpc_client_bindings(files: list[Path], root: Path) -> list[GrpcClie
         for class_node in (node for node in _walk(tree.root_node) if node.type == "class_declaration"):
             class_name = class_node.child_by_field_name("name")
             class_body = next((node for node in class_node.named_children if node.type == "class_body"), None)
-            if class_name is None or class_body is None:
+            if class_name is None:
                 continue
-            for property_node in class_body.named_children:
-                if property_node.type != "property_declaration":
-                    continue
-                matches = list(_KOTLIN_GRPC_STUB_PROPERTY.finditer(_text(property_node, source)))
+            declarations = []
+            if class_body is not None:
+                declarations.extend(
+                    node for node in class_body.named_children if node.type == "property_declaration"
+                )
+            primary_constructor = next(
+                (node for node in class_node.named_children if node.type == "primary_constructor"), None,
+            )
+            if primary_constructor is not None:
+                declarations.extend(
+                    node for node in _walk(primary_constructor) if node.type == "class_parameter"
+                )
+            for declaration in declarations:
+                matches = list(_KOTLIN_GRPC_STUB_PROPERTY.finditer(_text(declaration, source)))
                 if len(matches) != 1:
                     continue
                 match = matches[0]
                 bindings.append(GrpcClientBinding(
                     _text(class_name, source), match.group("member"), match.group("service"),
-                    _evidence(path, root, property_node),
+                    _evidence(path, root, declaration),
                 ))
     return bindings
 

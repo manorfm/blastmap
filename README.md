@@ -343,9 +343,10 @@ override one method. A Nest
 `this.client.getService<T>("Service")` assignment and subsequent literal RPC method
 call to one unique declared RPC. Java calls through a direct generated
 `ServiceGrpc.*Stub` field, and Kotlin calls through a direct generated
-`ServiceGrpcKt.*Stub` property, receive the same link. Host, channel, token, stub
-generation, dynamic bindings and non-unique service/RPC names remain unknown. An exact
-RPC method name has high confidence; a unique case-only match such as
+`ServiceGrpcKt.*Stub` property (including a primary-constructor property), receive the
+same link. Host, channel, token, stub generation, dynamic bindings and non-unique
+service/RPC names remain unknown. An exact RPC method name has high confidence; a
+unique case-only match such as
 `ReserveStock` → `reserveStock` has medium confidence. Duplicate declarations or
 handlers are omitted rather than arbitrarily selecting one.
 
