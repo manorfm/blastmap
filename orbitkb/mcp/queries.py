@@ -709,7 +709,8 @@ def describe_runtime_configuration(
     source_import_workloads: object = None, source_import_declaration_statuses: object = None,
     source_import_availabilities: object = None, binding_declaration_statuses: object = None,
     binding_source_kinds: object = None, source_import_source_kinds: object = None,
-    source_import_container_roles: object = None,
+    source_import_container_roles: object = None, source_import_prefixes: object = None,
+    source_import_include_unprefixed: object = False,
 ) -> dict:
     """Return source-proven Kubernetes configuration references without values."""
     error = _validate_pagination(limit, offset)
@@ -772,6 +773,11 @@ def describe_runtime_configuration(
     )
     if source_import_container_roles_error is not None:
         return {"error": source_import_container_roles_error}
+    selected_prefixes, prefixes_error = _runtime_configuration_prefix_filter(source_import_prefixes)
+    if prefixes_error is not None:
+        return {"error": prefixes_error}
+    if not isinstance(source_import_include_unprefixed, bool):
+        return {"error": "source_import_include_unprefixed must be a boolean"}
     row, service_error = _resolve_service(conn, service, repository)
     if service_error:
         return service_error
@@ -792,6 +798,10 @@ def describe_runtime_configuration(
     if selected_source_import_container_roles is not None:
         all_source_imports = _filter_runtime_configuration_source_import_container_roles(
             all_source_imports, selected_source_import_container_roles,
+        )
+    if selected_prefixes is not None or source_import_include_unprefixed:
+        all_source_imports = _filter_runtime_configuration_source_import_prefixes(
+            all_source_imports, selected_prefixes, source_import_include_unprefixed,
         )
     mismatches_by_reference = {
         (
@@ -993,6 +1003,32 @@ def _runtime_configuration_choice_filter(
     if len(values) > MAX_LIST_LIMIT or any(value not in allowed_values for value in values):
         return None, f"{argument_name} must contain only: {', '.join(allowed_values)}"
     return set(values), None
+
+
+def _runtime_configuration_prefix_filter(prefixes: object) -> tuple[set[str] | None, str | None]:
+    """Validate exact non-empty envFrom prefixes without interpreting key names."""
+    error = "source_import_prefixes must be a non-empty list of non-empty strings"
+    if prefixes is None:
+        return None, None
+    if (
+        not isinstance(prefixes, list)
+        or not prefixes
+        or len(prefixes) > MAX_LIST_LIMIT
+        or any(not isinstance(prefix, str) or not prefix for prefix in prefixes)
+    ):
+        return None, error
+    return set(prefixes), None
+
+
+def _filter_runtime_configuration_source_import_prefixes(
+    records: list[sqlite3.Row], prefixes: set[str] | None, include_unprefixed: bool,
+) -> list[sqlite3.Row]:
+    """Keep imports with selected exact prefixes and optionally absent prefixes."""
+    selected_prefixes = prefixes or set()
+    return [
+        record for record in records
+        if record["prefix"] in selected_prefixes or (include_unprefixed and record["prefix"] is None)
+    ]
 
 
 def _filter_runtime_configuration_source_imports(

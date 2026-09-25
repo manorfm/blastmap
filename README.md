@@ -225,6 +225,9 @@ than confirmation of a declaration.
 `source_import_container_roles` filters imports by indexed `application`,
 `initialization`, or `unknown` role. Bindings are not role-filterable because that
 fact is not indexed for them.
+`source_import_prefixes` filters exact non-empty `envFrom` prefixes; set
+`source_import_include_unprefixed=true` to include only (or also include) imports
+without a prefix. It does not infer individual imported environment keys.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
 `current_limit` as well so the next offset remains consistent; the evaluated offset

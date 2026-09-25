@@ -184,7 +184,7 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     ])
     kubernetes_configuration.replace_kubernetes_configuration_source_imports(conn, repository_id, [
         KubernetesConfigurationSourceImport(
-            source_kind="config_map", source_name="api-defaults", prefix=None,
+            source_kind="config_map", source_name="api-defaults", prefix="API_",
             workload_kind="Deployment", workload_name="orders", container_name="api",
             file_path="deploy/orders.yaml", start_line=11, end_line=14, container_role="initialization",
             optional=True, matched_service_name="orders",
@@ -198,7 +198,7 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
     ])
     kubernetes_configuration.replace_kubernetes_configuration_source_import_unknowns(conn, repository_id, [
         KubernetesConfigurationSourceImportUnknown(
-            source_kind="config_map", source_name="api-defaults", prefix=None,
+            source_kind="config_map", source_name="api-defaults", prefix="API_",
             reference_file_path="deploy/orders.yaml", reference_start_line=11, reference_end_line=14,
             matched_service_name="orders",
         ),
@@ -274,6 +274,18 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         source_import_container_roles=["initialization"],
     )
     assert [item["source"]["name"] for item in initialization_imports["source_imports"]] == ["api-defaults"]
+    prefixed_imports = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        source_import_prefixes=["API_"],
+    )
+    assert [item["source"]["name"] for item in prefixed_imports["source_imports"]] == ["api-defaults"]
+    unprefixed_imports = queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        source_import_include_unprefixed=True,
+    )
+    assert [item["source"]["name"] for item in unprefixed_imports["source_imports"]] == ["worker-secrets"]
     assert queries.describe_runtime_configuration(conn, "orders", workloads=[]) == {
         "error": "workloads must be a non-empty list of workload identities",
     }
@@ -303,6 +315,11 @@ def test_describe_runtime_configuration_filters_to_selected_workloads(tmp_path):
         "orders",
         source_import_container_roles=["sidecar"],
     ) == {"error": "source_import_container_roles must contain only: application, initialization, unknown"}
+    assert queries.describe_runtime_configuration(
+        conn,
+        "orders",
+        source_import_prefixes=[""],
+    ) == {"error": "source_import_prefixes must be a non-empty list of non-empty strings"}
     assert queries.describe_runtime_configuration(
         conn,
         "orders",
