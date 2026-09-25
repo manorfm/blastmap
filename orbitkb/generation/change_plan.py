@@ -537,6 +537,57 @@ def derive_read_entrypoint_side_effect_review_units(
     return units
 
 
+def derive_public_object_storage_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
+    """Create IaC review units for literal public object-storage declarations.
+
+    The literal setting is strong evidence, while bucket policies or account-level
+    blocks outside the indexed resource remain unknown and must be reviewed.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_public_object_storage":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.85
+        ):
+            continue
+        bucket = detail.get("bucket")
+        attribute = detail.get("attribute")
+        value = detail.get("value")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(bucket, str) or not isinstance(attribute, str) or not isinstance(value, str)
+            or not isinstance(evidence, list) or not evidence
+        ):
+            continue
+        service = services[0]
+        key = service, bucket
+        if key in seen:
+            continue
+        seen.add(key)
+        units.append({
+            "id": f"public-object-storage:{service}:{bucket}",
+            "service": service,
+            "target": {"role": "deployment", "symbol": f"object-storage:{bucket}", "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed public object-storage setting"),
+            "preconditions": [],
+            "related_contracts": [f"cloud:object_storage:{bucket}"],
+            "dependencies": [],
+            "validation": [
+                f"verify public access for object storage {bucket} is intentional, or use a private ACL with explicit access policy",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_persistence_migration_review_units(
     persistence_affected: list[dict], migration_facts_by_service: dict[str, list[dict]], primary_services: set[str],
 ) -> list[dict]:

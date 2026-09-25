@@ -187,6 +187,10 @@ result and asks for an explicit degraded-result signal or documented timeout con
 For a primary HTTP safe-method endpoint or GraphQL query with a direct static write or
 publication, `plan_change` creates a `read-entrypoint-side-effect` review. It asks to
 confirm the effect is absent or document an allowed cache, metric, or legacy exception.
+For a primary service whose IaC literally declares public object storage,
+`plan_change` creates a `public-object-storage` review. It asks to confirm access is
+intentional or use private access with an explicit policy, while preserving the
+possibility of a restrictive account or bucket policy outside the indexed resource.
 When an affected SQL table has an exactly matching indexed migration fact,
 `plan_change` adds a schema-review unit. A destructive operation requires deployment,
 backup and rollback validation; it never asserts that the migration needs to run.

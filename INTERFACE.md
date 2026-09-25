@@ -196,7 +196,10 @@ degraded-result signal or timeout contract and does not reject an intentional ca
 or partial response. A primary HTTP safe-method endpoint or GraphQL query with a
 direct static write/publication can receive a `read-entrypoint-side-effect` review;
 it asks whether the effect is absent or an explicitly documented cache, metric, or
-legacy exception. `ready` means a
+legacy exception. A primary service with a literal public object-storage IaC setting
+can receive a `public-object-storage` review; it asks to confirm intentional access or
+private access with explicit policy, while retaining account/bucket policies outside
+the resource as unknown. `ready` means a
 relevant indexed surface exists without a blocking decision; `needs_decision` means the
 compatibility choice is required; and `insufficient_evidence` means no indexed service
 matched the task. The audit record links to a surface synthesis when one exists and does

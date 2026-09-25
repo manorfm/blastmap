@@ -27,6 +27,7 @@ from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.change_plan import (
     derive_error_mapping_review_units,
     derive_persistence_migration_review_units,
+    derive_public_object_storage_review_units,
     derive_read_entrypoint_side_effect_review_units,
     derive_retry_policy_review_units,
     derive_runtime_configuration_review_units,
@@ -1361,6 +1362,52 @@ def test_read_entrypoint_side_effect_units_label_graphql_queries():
     assert units[0]["validation"] == [
         "verify GRAPHQL QUERY catalog has no externally observable side effect, or document its cache, metric, or legacy exception",
     ]
+
+
+def test_public_object_storage_units_include_a_literal_public_iac_setting():
+    assert derive_public_object_storage_review_units([
+        {
+            "kind": "possible_public_object_storage",
+            "services": ["media-service"],
+            "reason": "media-service storage 'public-assets' declares acl='public-read'.",
+            "confidence": 0.85,
+            "detail": {
+                "bucket": "public-assets", "attribute": "acl", "value": "public-read",
+                "evidence": [{"file": "infra/storage.tf", "start_line": 8, "end_line": 14}],
+            },
+        },
+    ], {"media-service"}) == [{
+        "id": "public-object-storage:media-service:public-assets",
+        "service": "media-service",
+        "target": {
+            "role": "deployment", "symbol": "object-storage:public-assets",
+            "evidence": [{"file": "infra/storage.tf", "start_line": 8, "end_line": 14}],
+        },
+        "action": "review",
+        "reason": "media-service storage 'public-assets' declares acl='public-read'.",
+        "preconditions": [],
+        "related_contracts": ["cloud:object_storage:public-assets"],
+        "dependencies": [],
+        "validation": [
+            "verify public access for object storage public-assets is intentional, or use a private ACL with explicit access policy",
+        ],
+        "confidence": 0.85,
+        "evidence": [{"file": "infra/storage.tf", "start_line": 8, "end_line": 14}],
+    }]
+
+
+def test_public_object_storage_units_exclude_low_confidence_findings():
+    assert derive_public_object_storage_review_units([
+        {
+            "kind": "possible_public_object_storage",
+            "services": ["media-service"],
+            "confidence": 0.84,
+            "detail": {
+                "bucket": "public-assets", "attribute": "acl", "value": "public-read",
+                "evidence": [{"file": "infra/storage.tf", "start_line": 8, "end_line": 14}],
+            },
+        },
+    ], {"media-service"}) == []
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
