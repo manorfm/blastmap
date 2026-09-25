@@ -1025,6 +1025,40 @@ export class OrdersController {
     assert result.entrypoints[0].contract is None
 
 
+def test_node_analyzer_resolves_a_nest_constructor_injected_service_call(tmp_path: Path):
+    (tmp_path / "orders.controller.ts").write_text(
+        '''import { Controller, Post } from "@nestjs/common";
+
+export class OrdersService {
+  create(input: CreateOrder) {
+    return this.repository.save(input);
+  }
+}
+
+@Controller("/orders")
+export class OrdersController {
+  constructor(private readonly ordersService: OrdersService) {}
+
+  @Post()
+  create(input: CreateOrder) {
+    return this.ordersService.create(input);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "node-ts")
+
+    assert [(item.consumer, item.contract) for item in result.injections] == [
+        ("OrdersController.ordersService", "OrdersService"),
+    ]
+    assert any(
+        edge.source == "OrdersController.create" and edge.target == "OrdersService.create"
+        for edge in result.edges
+    )
+
+
 def test_go_analyzer_links_a_literal_amqp_queue_binding_to_its_consumer(tmp_path: Path):
     source = tmp_path / "consumer.go"
     source.write_text(

@@ -60,6 +60,7 @@ class BoundedFlowResolver:
         if imported_target in implementations:
             return replace(edge, target=imported_target, confidence="high")
         receiver, separator, method = edge.target.rpartition(".")
+        receiver = receiver.removeprefix("this.")
         owner = edge.source.split(".", 1)[0]
         injected_type = injections.get(f"{owner}.{receiver}") if separator else None
         injected_candidate = f"{injected_type}.{method}" if injected_type else None

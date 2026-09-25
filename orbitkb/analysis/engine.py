@@ -62,7 +62,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "8"
+STATIC_ANALYSIS_INPUT_VERSION = "9"
 
 
 def _walk(node: Node):
@@ -970,9 +970,17 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         client_declarations = node_stateful_client_declarations(source_text)
         command_imports = node_command_imports(source_text)
         result.message_contracts.extend(_node_publish_contracts(tree, source, path, root))
+        for injection in _node_nest_constructor_injections(tree, source, path, root, imports):
+            result.injections.append(injection)
+            result.edges.append(FlowEdge(injection.consumer, injection.contract, "injects", injection.evidence))
         functions_by_name: dict[str, _Function] = {}
         for function in _node_named_functions(tree, source, path.stem):
             functions_by_name[function.name] = function
+            self._record_function(
+                result, function, path, root, source, imports, mongoose_models, prisma_clients,
+                client_declarations, command_imports, launchdarkly_clients,
+            )
+        for function in _node_class_functions(tree, source):
             self._record_function(
                 result, function, path, root, source, imports, mongoose_models, prisma_clients,
                 client_declarations, command_imports, launchdarkly_clients,
@@ -1140,6 +1148,8 @@ class _NodeGraphqlAnalyzer(_FileAnalyzer):
         launchdarkly_clients: frozenset[str],
     ) -> None:
         """Store one Node handler and every bounded fact derived from it."""
+        if any(symbol.name == function.symbol for symbol in result.symbols):
+            return
         result.symbols.append(_symbol(function, path, root, imports=imports))
         function_edges, function_cloud_facts = self._edges_for_node(
             function, path, root, source, mongoose_models, prisma_clients, client_declarations, command_imports,
@@ -2297,6 +2307,30 @@ def _node_named_functions(tree: Node, source: bytes, module_name: str) -> list[_
     return functions
 
 
+def _node_class_functions(tree: Node, source: bytes) -> list[_Function]:
+    """Return directly declared class methods so injected calls can resolve locally."""
+    functions: list[_Function] = []
+    for class_node in _walk(tree):
+        if class_node.type != "class_declaration":
+            continue
+        class_name = class_node.child_by_field_name("name")
+        class_body = class_node.child_by_field_name("body")
+        if class_name is None or class_body is None:
+            continue
+        for method in class_body.named_children:
+            if method.type != "method_definition":
+                continue
+            name = method.child_by_field_name("name")
+            body = method.child_by_field_name("body")
+            if name is None or body is None or _text(name, source) == "constructor":
+                continue
+            method_name = _text(name, source)
+            functions.append(_Function(
+                method_name, f"{_text(class_name, source)}.{method_name}", body, method,
+            ))
+    return functions
+
+
 _NEST_HTTP_DECORATORS = {
     "Get": "GET", "Post": "POST", "Put": "PUT", "Patch": "PATCH", "Delete": "DELETE",
 }
@@ -2307,6 +2341,59 @@ _NEST_CACHE_DECORATORS = {
 }
 
 _NEST_RATE_LIMIT_DECORATORS = {"throttler.Throttle": "Throttle"}
+
+
+def _node_nest_constructor_injections(
+    tree: Node, source: bytes, path: Path, root: Path, imports: tuple[tuple[str, str], ...],
+) -> list[Injection]:
+    """Return direct typed constructor members on literal Nest controllers.
+
+    The member must be declared through a TypeScript accessibility modifier and a
+    nominal type. Tokens, factories and ordinary constructor locals remain outside
+    this structural subset.
+    """
+    nest_imports = {
+        local: imported.rsplit(".", 1)[-1]
+        for local, imported in imports
+        if imported.startswith("common.")
+    }
+    if "Controller" not in nest_imports.values():
+        return []
+    injections: list[Injection] = []
+    for class_node in _walk(tree):
+        if class_node.type != "class_declaration":
+            continue
+        class_name = class_node.child_by_field_name("name")
+        class_body = class_node.child_by_field_name("body")
+        if class_name is None or class_body is None:
+            continue
+        if _nest_decorator_path(_preceding_decorators(class_node), source, nest_imports, "Controller") is None:
+            continue
+        for method in class_body.named_children:
+            name = method.child_by_field_name("name") if method.type == "method_definition" else None
+            if name is None or _text(name, source) != "constructor":
+                continue
+            parameters = method.child_by_field_name("parameters")
+            if parameters is None:
+                continue
+            for parameter in parameters.named_children:
+                if not any(child.type == "accessibility_modifier" for child in parameter.named_children):
+                    continue
+                pattern = parameter.child_by_field_name("pattern")
+                annotation = parameter.child_by_field_name("type")
+                type_nodes = annotation.named_children if annotation is not None else []
+                if (
+                    pattern is None
+                    or pattern.type != "identifier"
+                    or len(type_nodes) != 1
+                    or type_nodes[0].type != "type_identifier"
+                ):
+                    continue
+                injections.append(Injection(
+                    f"{_text(class_name, source)}.{_text(pattern, source)}",
+                    _text(type_nodes[0], source), None, _evidence(path, root, parameter),
+                ))
+    return injections
 
 
 def _nest_http_entrypoint_functions(
