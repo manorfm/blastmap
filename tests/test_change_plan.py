@@ -33,6 +33,7 @@ from orbitkb.generation.change_plan import (
     derive_retry_delivery_review_units,
     derive_retry_downstream_error_review_units,
     derive_retry_policy_review_units,
+    derive_retry_write_publish_review_units,
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
     derive_timeout_fallback_review_units,
@@ -1589,6 +1590,63 @@ def test_partial_write_resilience_units_exclude_low_confidence_findings():
             "detail": {},
         },
     ], {"orders-service"}) == []
+
+
+def test_retry_write_publish_units_include_uncovered_literal_channels():
+    assert derive_retry_write_publish_review_units([
+        {
+            "kind": "possible_retry_on_write_publish_flow",
+            "services": ["orders-service"],
+            "reason": "OrderService.create retries publication after a local write.",
+            "confidence": 0.7,
+            "detail": {
+                "flow": {"symbol": "OrderService.create"},
+                "retry_policies": [{"mechanism": "reactor.retry", "value": 3, "unit": "attempts"}],
+                "writes": [{"target": "orders"}], "write_count": 1,
+                "publishes": [{"target": "order.created"}], "publish_count": 1,
+                "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 22}],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "retry-write-publish:orders-service:OrderService.create:order.created",
+        "service": "orders-service",
+        "target": {
+            "role": "application_flow", "symbol": "OrderService.create",
+            "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 22}],
+        },
+        "action": "review",
+        "reason": "OrderService.create retries publication after a local write.",
+        "preconditions": [],
+        "related_contracts": ["message:order.created"],
+        "dependencies": [],
+        "validation": [
+            "verify OrderService.create uses an outbox or idempotency strategy before retrying publication to order.created",
+            "verify duplicate-event and partial-effect handling for order.created",
+        ],
+        "confidence": 0.7,
+        "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 22}],
+    }]
+
+
+def test_retry_write_publish_units_yield_to_a_consumer_aware_finding_for_the_same_channel():
+    generic = {
+        "kind": "possible_retry_on_write_publish_flow",
+        "services": ["orders-service"],
+        "confidence": 0.7,
+        "detail": {
+            "flow": {"symbol": "OrderService.create"},
+            "retry_policies": [{"mechanism": "reactor.retry"}],
+            "writes": [{"target": "orders"}], "publishes": [{"target": "order.created"}],
+            "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 22}],
+        },
+    }
+    consumer_aware = {
+        "kind": "possible_retry_write_publish_reaches_consumer",
+        "services": ["orders-service", "billing-service"],
+        "detail": {"flow": {"symbol": "OrderService.create"}, "channel": "order.created"},
+    }
+
+    assert derive_retry_write_publish_review_units([generic, consumer_aware], {"orders-service"}) == []
 
 
 def test_runtime_configuration_units_require_an_exact_environment_key_match():

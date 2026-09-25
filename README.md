@@ -187,6 +187,10 @@ HTTP call, `plan_change` creates a `partial-write-resilience` review. It asks fo
 ordering, idempotency and recovery validation without assuming the execution order or
 whether a transaction, outbox, compensation, or retry-safe contract already protects
 the flow.
+For a primary producer that writes and retries a literal event publication without a
+more specific indexed consumer finding, `plan_change` creates one
+`retry-write-publish` review per channel. It asks for outbox/idempotency and
+duplicate-event handling; a consumer-aware review supersedes it for the same channel.
 For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific

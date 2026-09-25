@@ -189,6 +189,10 @@ does not claim that the branch is retried at runtime. A primary service can rece
 channel consumed by another source-proven state-writing service. The consumers are
 dependencies and validation asks for producer outbox/idempotency plus consumer
 de-duplication; broker delivery and duplicate execution remain unknown. A primary
+producer without a more specific consumer finding can receive one
+`retry-write-publish` review per literal published channel. It asks for
+outbox/idempotency and duplicate-event handling; a consumer-aware review supersedes
+the same producer/symbol/channel. A primary
 caller can receive a `retry-downstream-error` review when a literal retry shares a
 source with a resolved downstream endpoint flow exposing 4xx. It asks to exclude that
 response unless its remote contract explicitly marks it transient; service-wide

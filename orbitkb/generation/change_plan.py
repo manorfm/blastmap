@@ -480,6 +480,82 @@ def derive_retry_delivery_review_units(findings: list[dict], primary_services: s
     return units
 
 
+def derive_retry_write_publish_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
+    """Create producer-only retry reviews for channels without richer consumer findings."""
+    covered = _retry_publish_channels_with_consumers(findings)
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_on_write_publish_flow":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.7
+        ):
+            continue
+        flow = detail.get("flow")
+        retry_policies = detail.get("retry_policies")
+        writes = detail.get("writes")
+        publishes = detail.get("publishes")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(flow, dict) or not isinstance(flow.get("symbol"), str) or not isinstance(retry_policies, list)
+            or not retry_policies or not isinstance(writes, list) or not writes or not isinstance(publishes, list)
+            or not publishes or not isinstance(evidence, list) or not evidence
+            or not all(isinstance(policy, dict) and isinstance(policy.get("mechanism"), str) for policy in retry_policies)
+            or not all(isinstance(publish, dict) and isinstance(publish.get("target"), str) for publish in publishes)
+        ):
+            continue
+        service = services[0]
+        symbol = flow["symbol"]
+        for channel in sorted({publish["target"] for publish in publishes}):
+            key = service, symbol, channel
+            if key in seen or key in covered:
+                continue
+            seen.add(key)
+            units.append({
+                "id": f"retry-write-publish:{service}:{symbol}:{channel}",
+                "service": service,
+                "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+                "action": "review",
+                "reason": finding.get("reason", "review the indexed retrying write-and-publish boundary"),
+                "preconditions": [],
+                "related_contracts": [f"message:{channel}"],
+                "dependencies": [],
+                "validation": [
+                    f"verify {symbol} uses an outbox or idempotency strategy before retrying publication to {channel}",
+                    f"verify duplicate-event and partial-effect handling for {channel}",
+                ],
+                "confidence": float(confidence),
+                "evidence": evidence,
+            })
+    return units
+
+
+def _retry_publish_channels_with_consumers(findings: list[dict]) -> set[tuple[str, str, str]]:
+    """Identify channels already covered by a consumer-aware retry review."""
+    covered: set[tuple[str, str, str]] = set()
+    consumer_kinds = {
+        "possible_retry_write_publish_reaches_consumer",
+        "possible_retry_write_publish_reaches_persistent_consumer",
+    }
+    for finding in findings:
+        if finding.get("kind") not in consumer_kinds:
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        if not isinstance(services, list) or not services or not isinstance(detail, dict):
+            continue
+        flow = detail.get("flow")
+        channel = detail.get("channel")
+        if isinstance(flow, dict) and isinstance(flow.get("symbol"), str) and isinstance(channel, str):
+            covered.add((services[0], flow["symbol"], channel))
+    return covered
+
+
 def derive_retry_downstream_error_review_units(
     findings: list[dict], primary_services: set[str],
 ) -> list[dict]:
