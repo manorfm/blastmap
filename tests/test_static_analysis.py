@@ -2264,6 +2264,42 @@ export class CheckoutService {
     )
 
 
+def test_static_analysis_links_a_literal_java_grpc_service_handler_to_a_unique_proto_rpc(tmp_path: Path):
+    (tmp_path / "inventory.proto").write_text(
+        '''syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+''',
+        encoding="utf-8",
+    )
+    (tmp_path / "InventoryGrpcService.java").write_text(
+        '''import io.grpc.stub.StreamObserver;
+import net.devh.boot.grpc.server.service.GrpcService;
+
+@GrpcService
+public class InventoryGrpcService extends InventoryGrpc.InventoryImplBase {
+  @Override
+  public void reserve(ReserveRequest request, StreamObserver<ReserveResponse> observer) {
+    inventoryService.reserve(request);
+  }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = StaticAnalysisEngine().analyze(tmp_path, "jvm-spring")
+
+    assert any(
+        edge.source == "proto.inventory.v1.Inventory.Reserve"
+        and edge.target == "InventoryGrpcService.reserve"
+        and edge.confidence == "medium"
+        for edge in result.edges
+    )
+
+
 def test_static_analysis_ignores_ambiguous_protobuf_rpc_declarations(tmp_path: Path):
     for name in ("inventory.proto", "inventory-duplicate.proto"):
         (tmp_path / name).write_text(

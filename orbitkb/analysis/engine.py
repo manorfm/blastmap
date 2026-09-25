@@ -64,7 +64,7 @@ from orbitkb.analysis.resolution import BoundedFlowResolver
 from orbitkb.discovery.scan_helpers import SKIP_DIRS
 
 _HTTP_METHOD_LITERALS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-STATIC_ANALYSIS_INPUT_VERSION = "13"
+STATIC_ANALYSIS_INPUT_VERSION = "14"
 
 
 def _walk(node: Node):
@@ -948,6 +948,46 @@ class _JvmSpringAnalyzer:
 
     def analyze(self, path: Path, root: Path) -> AnalysisResult:
         return self._java.analyze(path, root) if path.suffix == ".java" else self._kotlin.analyze(path, root)
+
+
+_JVM_GRPC_SERVICE_IMPORT = re.compile(
+    r"^\s*import\s+net\.devh\.boot\.grpc\.server\.service\.GrpcService\s*;", re.MULTILINE,
+)
+_JVM_GRPC_IMPL_BASE = re.compile(
+    r"\bextends\s+(?:[\w.]+\.)?(?P<service>[A-Za-z_]\w*)Grpc\.\w*ImplBase\b",
+)
+
+
+def _jvm_grpc_handlers(files: list[Path], root: Path) -> list[GrpcHandler]:
+    """Return direct Java ``@GrpcService`` implementations of generated bases."""
+    parser = Parser(Language(tree_sitter_java.language()))
+    handlers: list[GrpcHandler] = []
+    for path in files:
+        if path.suffix != ".java":
+            continue
+        source = path.read_bytes()
+        if _JVM_GRPC_SERVICE_IMPORT.search(source.decode("utf-8", errors="ignore")) is None:
+            continue
+        tree = parser.parse(source)
+        for class_node in (node for node in _walk(tree.root_node) if node.type == "class_declaration"):
+            annotations = _class_annotations(class_node, source)
+            base = _JVM_GRPC_IMPL_BASE.search(_text(class_node, source))
+            class_name = class_node.child_by_field_name("name")
+            class_body = class_node.child_by_field_name("body")
+            if "@GrpcService" not in annotations or base is None or class_name is None or class_body is None:
+                continue
+            service = base.group("service")
+            for method in class_body.named_children:
+                if method.type != "method_declaration" or "@Override" not in _class_annotations(method, source):
+                    continue
+                method_name = method.child_by_field_name("name")
+                if method_name is None:
+                    continue
+                handlers.append(GrpcHandler(
+                    service, _text(method_name, source),
+                    f"{_text(class_name, source)}.{_text(method_name, source)}", _evidence(path, root, method),
+                ))
+    return handlers
 
 
 class _NodeGraphqlAnalyzer(_FileAnalyzer):
@@ -2897,11 +2937,12 @@ class StaticAnalysisEngine:
             result.edges = _classify_spring_data_query_operations(
                 result.edges, result.injections, _spring_data_query_methods(files),
             )
+            result.grpc_handlers.extend(_jvm_grpc_handlers(files, root))
         _enrich_contract_fields(result.contracts, files)
         _enrich_rabbitmq_contracts(result.contracts, files)
         _enrich_openapi_contracts(result, root)
         _enrich_protobuf_contracts(result, root)
-        _link_nest_grpc_handlers(result)
+        _link_grpc_handlers(result)
         _link_nest_grpc_client_calls(result)
         result.configuration_bindings.extend(_literal_configuration_bindings(result.symbols, root))
         _extract_scheduled_jobs(result, files, root)
@@ -3385,8 +3426,8 @@ def _enrich_protobuf_contracts(result: AnalysisResult, root: Path) -> None:
         result.contracts[entrypoint.symbol] = {"formal_contract": candidate.contract}
 
 
-def _link_nest_grpc_handlers(result: AnalysisResult) -> None:
-    """Link one unique declared Protobuf RPC to one explicit Nest handler.
+def _link_grpc_handlers(result: AnalysisResult) -> None:
+    """Link one unique declared Protobuf RPC to one explicit static handler.
 
     This establishes source-level intent only. It does not claim a transport
     server, generated stubs or runtime registration is present.
@@ -3396,12 +3437,18 @@ def _link_nest_grpc_handlers(result: AnalysisResult) -> None:
     for handler in result.grpc_handlers:
         handlers.setdefault((handler.service, handler.rpc), []).append(handler)
     for key, rpc_entrypoints in declared.items():
-        matching_handlers = handlers.get(key, [])
+        matching_handlers = [
+            handler
+            for (service, rpc), candidates in handlers.items()
+            if service == key[0] and rpc.casefold() == key[1].casefold()
+            for handler in candidates
+        ]
         if len(rpc_entrypoints) != 1 or len(matching_handlers) != 1:
             continue
         entrypoint = rpc_entrypoints[0]
         handler = matching_handlers[0]
-        result.edges.append(FlowEdge(entrypoint.symbol, handler.symbol, "invokes", handler.evidence))
+        confidence = "high" if handler.rpc == key[1] else "medium"
+        result.edges.append(FlowEdge(entrypoint.symbol, handler.symbol, "invokes", handler.evidence, confidence))
 
 
 def _link_nest_grpc_client_calls(result: AnalysisResult) -> None:
