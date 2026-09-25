@@ -778,6 +778,15 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
         plan["plan_id"],
         "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
         [],
+        source_import_truncated=True,
+        current_offset=30,
+        current_limit=25,
+    ) == {"error": "current_offset must be a multiple of current_limit"}
+    assert queries.validate_runtime_configuration_follow_up(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+        [],
         source_import_truncated=False,
     )["status"] == "incomplete"
 

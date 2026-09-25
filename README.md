@@ -196,7 +196,8 @@ compares its returned workload identities with the persisted target and reports
 whether another page is useful.
 Pass that page's `current_offset`; when another page is useful, the response returns
 the next `describe_runtime_configuration` call ready to execute. Pass the matching
-`current_limit` as well so the next offset remains consistent.
+`current_limit` as well so the next offset remains consistent; the evaluated offset
+must be a multiple of that limit.
 After implementation, `assess_working_change` compares a ready plan with a Git diff
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned

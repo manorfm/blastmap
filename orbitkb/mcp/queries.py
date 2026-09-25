@@ -1405,6 +1405,8 @@ def validate_runtime_configuration_follow_up(
         or not 1 <= current_limit <= MAX_LIST_LIMIT
     ):
         return {"error": f"current_limit must be an integer between 1 and {MAX_LIST_LIMIT}"}
+    if current_offset % current_limit != 0:
+        return {"error": "current_offset must be a multiple of current_limit"}
     match = re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)
     if match is None:
         return {"error": "invalid plan_id"}
