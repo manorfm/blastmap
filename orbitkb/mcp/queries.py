@@ -1517,6 +1517,9 @@ def _truncated_workload_scopes(change_unit: dict) -> list[dict]:
         if not all(isinstance(value, str) and value for value in (kind, name, container)):
             continue
         scope = {"kind": kind, "name": name, "container": container}
+        evidence_total = workload.get("evidence_total")
+        if isinstance(evidence_total, int) and not isinstance(evidence_total, bool) and evidence_total > 0:
+            scope["evidence_total"] = evidence_total
         if scope not in scopes:
             scopes.append(scope)
     return scopes

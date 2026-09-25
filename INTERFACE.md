@@ -182,6 +182,7 @@ containers when available. Its reading purpose repeats that scope without scanni
 source, rerunning retrieval or calling a model, with up to two file/line locations
 per workload. The structured workload target uses the same bound and sets
 `evidence_truncated` when more evidence exists in the unit.
+Truncated scopes also report `evidence_total`.
 `describe_change_unit` adds `evidence_follow_up` only in that case, directing the
 agent to complete runtime-configuration context and listing the affected
 workloads/containers.

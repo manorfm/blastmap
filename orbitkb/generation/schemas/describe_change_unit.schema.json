@@ -47,7 +47,8 @@
             "properties": {
               "kind": {"type": "string"},
               "name": {"type": "string"},
-              "container": {"type": "string"}
+              "container": {"type": "string"},
+              "evidence_total": {"type": "integer", "minimum": 1}
             }
           }
         },

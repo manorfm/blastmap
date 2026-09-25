@@ -657,6 +657,7 @@ def test_env_from_source_import_review_caps_structured_workload_evidence():
             {"file": "deploy/checkout.yaml", "start_line": 20, "end_line": 23},
         ],
         "evidence_truncated": True,
+        "evidence_total": 3,
     }]
 
 
@@ -699,7 +700,9 @@ def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp
 
     assert detail["evidence_follow_up"] == {
         "reason": "workload evidence is truncated",
-        "workloads": [{"kind": "Deployment", "name": "checkout", "container": "api"}],
+        "workloads": [{
+            "kind": "Deployment", "name": "checkout", "container": "api", "evidence_total": 3,
+        }],
         "recommended_query": {
             "tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"},
         },

@@ -181,6 +181,7 @@ Its `describe_change_unit` reading purpose repeats that proven scope, without ad
 another retrieval or model call, with up to two file/line locations per workload.
 The structured workload target uses the same bound and flags `evidence_truncated`
 when the complete unit-level evidence should be consulted.
+For a truncated scope, `evidence_total` makes that remaining evidence volume explicit.
 When that flag is present, `describe_change_unit` returns an `evidence_follow_up`
 query for the complete runtime-configuration context, scoped to the affected
 workloads and containers.

@@ -40,6 +40,7 @@ def ordered_kubernetes_workloads(
                 ],
             } if evidence else {}),
             **({"evidence_truncated": True} if evidence_limit is not None and len(evidence) > evidence_limit else {}),
+            **({"evidence_total": len(evidence)} if evidence_limit is not None and len(evidence) > evidence_limit else {}),
         }
         for (workload_kind, workload_name, container_name, container_role), (prefixes, evidence) in sorted(
             scopes.items(),
