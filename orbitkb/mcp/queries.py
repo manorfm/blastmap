@@ -1546,7 +1546,7 @@ def _evidence_follow_up(change_unit: dict) -> dict | None:
     if next_step == "query_runtime_configuration":
         follow_up["pagination"] = {
             "limit": DEFAULT_LIST_LIMIT, "offset": 0, "next_offset": DEFAULT_LIST_LIMIT,
-            "continue_when": "source_import_truncated",
+            "continue_when": "source_import_truncated", "stop_when": "all_selected_workloads_found",
         }
     return follow_up
 

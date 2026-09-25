@@ -72,13 +72,14 @@
         },
         "pagination": {
           "type": "object",
-          "required": ["limit", "offset", "next_offset", "continue_when"],
+          "required": ["limit", "offset", "next_offset", "continue_when", "stop_when"],
           "additionalProperties": false,
           "properties": {
             "limit": {"type": "integer", "minimum": 1, "maximum": 500},
             "offset": {"const": 0},
             "next_offset": {"type": "integer", "minimum": 1, "maximum": 500},
-            "continue_when": {"const": "source_import_truncated"}
+            "continue_when": {"const": "source_import_truncated"},
+            "stop_when": {"const": "all_selected_workloads_found"}
           }
         }
       }
