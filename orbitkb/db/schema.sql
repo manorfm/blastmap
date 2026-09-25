@@ -603,6 +603,7 @@ CREATE TABLE IF NOT EXISTS context_budget_runs (
     truncated                  INTEGER NOT NULL CHECK (truncated IN (0, 1)),
     response_bytes             INTEGER NOT NULL,
     estimated_tokens           INTEGER NOT NULL,
+    token_measurement          TEXT NOT NULL DEFAULT 'byte_estimate',
     included_service_ids_json  TEXT NOT NULL,
     omitted_service_ids_json   TEXT NOT NULL,
     candidate_ranking_json     TEXT NOT NULL,

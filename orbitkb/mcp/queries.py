@@ -2363,12 +2363,14 @@ def _record_context_telemetry(
             row = services_repo.get_service_by_name(conn, service, repository_id)
             service_id = row["id"] if row is not None else None
         recommendations.append({"tool": item["tool"], "service_id": service_id, "rank": rank})
+    base_measurement = measure_json_tokens(context)
     base_bytes = len(json.dumps(context, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
     metadata = {
         "change_surface_run_id": surface.get("run_id"), "repository_id": repository_id, "epic_type": epic_type,
         "requested_budget": context["budget"]["max_services"], "returned_cards": context["budget"]["returned_services"],
         "candidate_count": len(candidates), "truncated": context["budget"]["truncated"],
-        "response_bytes": base_bytes, "estimated_tokens": (base_bytes + 3) // 4,
+        "response_bytes": base_bytes, "estimated_tokens": base_measurement.tokens,
+        "token_measurement": base_measurement.method,
         "included_service_ids": included, "omitted_service_ids": omitted,
         "candidate_ranking": candidates, "recommended_queries": recommendations,
     }
@@ -2376,7 +2378,10 @@ def _record_context_telemetry(
         run_id = context_telemetry_repo.record_run(conn, metadata)
         context["telemetry"] = {"recorded": True, "run_id": run_id}
         response_bytes = len(json.dumps(context, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-        context_telemetry_repo.update_response_measurements(conn, run_id, response_bytes, (response_bytes + 3) // 4)
+        response_measurement = measure_json_tokens(context)
+        context_telemetry_repo.update_response_measurements(
+            conn, run_id, response_bytes, response_measurement.tokens, response_measurement.method,
+        )
     except Exception:  # telemetry must never turn an otherwise valid context into an error
         logger.warning("context telemetry recording failed")
         context["telemetry"] = {"recorded": False}

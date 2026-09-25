@@ -4,7 +4,7 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "32"
+SCHEMA_VERSION = "33"
 DEFAULT_DB_PATH = Path.home() / ".orbitkb" / "orbitkb.db"
 
 
@@ -27,6 +27,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "change_plan_runs", "selected_decisions_json", "TEXT NOT NULL DEFAULT '[]'")
     _add_column_if_missing(conn, "change_plan_runs", "change_units_json", "TEXT NOT NULL DEFAULT '[]'")
     _add_column_if_missing(conn, "change_plan_runs", "token_measurement", "TEXT NOT NULL DEFAULT 'byte_estimate'")
+    _add_column_if_missing(conn, "context_budget_runs", "token_measurement", "TEXT NOT NULL DEFAULT 'byte_estimate'")
     _add_column_if_missing(conn, "kubernetes_configuration_source_imports", "optional", "INTEGER CHECK (optional IN (0, 1))")
     _add_column_if_missing(
         conn, "kubernetes_configuration_source_import_unknowns", "optional", "INTEGER CHECK (optional IN (0, 1))",

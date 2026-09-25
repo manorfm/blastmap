@@ -299,7 +299,7 @@ candidate budget; without that optional backend, retrieval remains keyword/graph
 
 Every `get_change_context` response has `telemetry: {recorded, run_id?}`. Its
 telemetry store contains only requested/returned budget, candidate rank and
-truncation, response bytes/token estimate, included/omitted service IDs, and
+truncation, response bytes/token measurement method and count, included/omitted service IDs, and
 recommended/executed tool and service IDs. It never retains task text, prompts,
 source, cards or tool arguments. A telemetry failure is non-blocking and is returned
 as `{"recorded": false}`.
@@ -310,7 +310,8 @@ The optional note is stored only as a one-way digest and missing services as IDs
 Call `record_context_query_execution(run_id, tool, service?)` after following a
 returned recommendation. `get_context_budget_metrics(epic_type?)` returns the budget
 distribution, truncation rate, sufficiency, mean response size, query follow-through,
-adequacy per epic type and a history-backed recommendation. `epic_type` is a
+adequacy per epic type, a compact `token_measurements` method distribution and a
+history-backed recommendation. `epic_type` is a
 non-sensitive lowercase category. The hard 1–5 cap remains until a future explicit,
 evidence-backed policy changes it.
 

@@ -1,8 +1,8 @@
 """Privacy-safe calibration metadata for compact change-context responses."""
-from tests.test_change_surface import FakeBackend, _build_pix_fixture
-
 from orbitkb.db.repositories import context_telemetry as telemetry_repo
+from orbitkb.generation.token_budget import TokenMeasurement
 from orbitkb.mcp import queries
+from tests.test_change_surface import FakeBackend, _build_pix_fixture
 
 
 def _context(conn):
@@ -29,8 +29,25 @@ def test_context_records_only_budget_metadata_and_ranked_service_ids(tmp_path):
     assert row["truncated"] == 1
     assert row["response_bytes"] > 0
     assert row["estimated_tokens"] > 0
+    assert row["token_measurement"] == "byte_estimate"
     assert "Add a payment method" not in str(dict(row))
     assert "checkout-service" not in row["included_service_ids_json"]
+
+
+def test_context_telemetry_records_and_aggregates_the_token_measurement(tmp_path, monkeypatch):
+    conn = _build_pix_fixture(tmp_path / "tokenizer-telemetry.db")
+    monkeypatch.setattr(
+        queries, "measure_json_tokens", lambda _response: TokenMeasurement(37, "tiktoken:o200k_base"),
+    )
+
+    result = _context(conn)
+
+    row = telemetry_repo.get_run(conn, result["telemetry"]["run_id"])
+    assert row["estimated_tokens"] == 37
+    assert row["token_measurement"] == "tiktoken:o200k_base"
+    assert queries.get_context_budget_metrics(conn)["token_measurements"] == [
+        {"measurement": "tiktoken:o200k_base", "runs": 1},
+    ]
 
 
 def test_context_telemetry_failure_never_blocks_the_context_response(tmp_path, monkeypatch):

@@ -12,15 +12,16 @@ def record_run(conn: sqlite3.Connection, metadata: dict) -> int:
     cur = conn.execute(
         """INSERT INTO context_budget_runs (
                change_surface_run_id, repository_id, epic_type, requested_budget, returned_cards,
-               candidate_count, truncated, response_bytes, estimated_tokens,
+               candidate_count, truncated, response_bytes, estimated_tokens, token_measurement,
                included_service_ids_json, omitted_service_ids_json, candidate_ranking_json,
                recommended_queries_json, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             metadata["change_surface_run_id"], metadata.get("repository_id"),
             metadata["epic_type"],
             metadata["requested_budget"], metadata["returned_cards"], metadata["candidate_count"],
             int(metadata["truncated"]), metadata["response_bytes"], metadata["estimated_tokens"],
+            metadata["token_measurement"],
             json.dumps(metadata["included_service_ids"]), json.dumps(metadata["omitted_service_ids"]),
             json.dumps(metadata["candidate_ranking"]), json.dumps(metadata["recommended_queries"]), now(),
         ),
@@ -29,10 +30,12 @@ def record_run(conn: sqlite3.Connection, metadata: dict) -> int:
     return cur.lastrowid
 
 
-def update_response_measurements(conn: sqlite3.Connection, run_id: int, response_bytes: int, estimated_tokens: int) -> None:
+def update_response_measurements(
+    conn: sqlite3.Connection, run_id: int, response_bytes: int, estimated_tokens: int, token_measurement: str,
+) -> None:
     conn.execute(
-        "UPDATE context_budget_runs SET response_bytes = ?, estimated_tokens = ? WHERE id = ?",
-        (response_bytes, estimated_tokens, run_id),
+        "UPDATE context_budget_runs SET response_bytes = ?, estimated_tokens = ?, token_measurement = ? WHERE id = ?",
+        (response_bytes, estimated_tokens, token_measurement, run_id),
     )
     conn.commit()
 
@@ -127,6 +130,11 @@ def aggregate(conn: sqlite3.Connection, epic_type: str | None = None) -> dict:
         "JOIN context_budget_runs AS run ON run.id = verification.context_run_id " + run_where
     )
     verification = conn.execute(verification_query, params).fetchone()
+    measurements_query = (
+        "SELECT token_measurement AS measurement, COUNT(*) AS runs FROM context_budget_runs " + where
+        + " GROUP BY token_measurement ORDER BY token_measurement"
+    )
+    measurements = conn.execute(measurements_query, params).fetchall()
     by_type_rows = conn.execute(
         """SELECT run.epic_type, feedback.outcome, COUNT(*) AS count
            FROM context_budget_feedback AS feedback
@@ -140,6 +148,7 @@ def aggregate(conn: sqlite3.Connection, epic_type: str | None = None) -> dict:
         "runs": totals["runs"],
         "average_response_bytes": round(totals["average_response_bytes"] or 0),
         "average_estimated_tokens": round(totals["average_estimated_tokens"] or 0),
+        "token_measurements": [{"measurement": row["measurement"], "runs": row["runs"]} for row in measurements],
         "truncation_rate": round(totals["truncation_rate"] or 0, 3),
         "budget_distribution": [
             {"budget": row["budget"], "runs": row["runs"], "average_returned_cards": round(row["average_returned_cards"], 2)}

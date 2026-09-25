@@ -122,6 +122,9 @@ unknowns and recommended next queries. A selected service card can additionally
 include up to three source-proven, unambiguous static HTTP dependencies with their literal
 target routes and resolved service identity; when indexed, the remote endpoint link
 and code location are included. It does not reread the source tree while answering.
+Its privacy-safe telemetry persists the same token measurement provenance as
+`plan_change`; context-budget metrics group runs by `tiktoken:o200k_base` or the
+explicitly approximate `byte_estimate`, without retaining response text.
 Repeated `find_change_surface` requests with the same backend and unchanged candidate
 context reuse their prior structured synthesis at zero model-call cost; current graph,
 freshness and contract facts are still recomputed for each response.
