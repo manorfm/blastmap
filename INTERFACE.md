@@ -182,6 +182,8 @@ containers when available. Its reading purpose repeats that scope without scanni
 source, rerunning retrieval or calling a model, with up to two file/line locations
 per workload. The structured workload target uses the same bound and sets
 `evidence_truncated` when more evidence exists in the unit.
+`describe_change_unit` adds `evidence_follow_up` only in that case, directing the
+agent to complete runtime-configuration context.
 
 `assess_working_change` accepts a ready `plan_id`, repository and Git base commit. It
 uses only the Git diff from that base (including local tracked and untracked files)

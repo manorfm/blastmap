@@ -450,6 +450,7 @@ def test_plan_change_derives_a_review_for_a_persisted_kubernetes_configuration_m
         "purpose": "confirm the indexed Kubernetes configuration mismatch",
         "recommended_query": {"tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"}},
     }]
+    assert "evidence_follow_up" not in detail
     validate(detail, load_schema("describe_change_unit"))
 
 
@@ -593,6 +594,7 @@ def test_plan_change_derives_a_review_for_an_unresolved_kubernetes_env_from_sour
         ),
         "recommended_query": {"tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"}},
     }]
+    assert "evidence_follow_up" not in detail
     validate(detail, load_schema("describe_change_unit"))
 
 
@@ -656,6 +658,52 @@ def test_env_from_source_import_review_caps_structured_workload_evidence():
         ],
         "evidence_truncated": True,
     }]
+
+
+def test_describe_change_unit_adds_follow_up_for_truncated_workload_evidence(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "runtime-configuration-source-import-evidence-follow-up.db")
+    checkout = services_repo.get_service_by_name(conn, "checkout-service")
+    repository_id = repositories_repo.ensure_repository(conn, "shop", "/tmp/shop")
+    conn.execute("UPDATE services SET repository_id = ? WHERE id = ?", (repository_id, checkout["id"]))
+    conn.commit()
+    kubernetes_configuration_repo.replace_kubernetes_configuration_source_import_unknowns(conn, repository_id, [
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix=None,
+            reference_file_path="deploy/checkout.yaml", reference_start_line=12, reference_end_line=15,
+            workload_kind="Deployment", workload_name="checkout", container_name="api",
+            matched_service_name="checkout-service",
+        ),
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix=None,
+            reference_file_path="deploy/checkout.yaml", reference_start_line=20, reference_end_line=23,
+            workload_kind="Deployment", workload_name="checkout", container_name="api",
+            matched_service_name="checkout-service",
+        ),
+        KubernetesConfigurationSourceImportUnknown(
+            source_kind="config_map", source_name="external-config", prefix=None,
+            reference_file_path="deploy/checkout.yaml", reference_start_line=28, reference_end_line=31,
+            workload_kind="Deployment", workload_name="checkout", container_name="api",
+            matched_service_name="checkout-service",
+        ),
+    ])
+
+    plan = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Change checkout configuration", repository="shop")
+    detail = queries.describe_change_unit(
+        conn,
+        plan["plan_id"],
+        "runtime-configuration-source-import-unknown:checkout-service:config_map:external-config",
+    )
+
+    assert detail["evidence_follow_up"] == {
+        "reason": "workload evidence is truncated",
+        "recommended_query": {
+            "tool": "describe_runtime_configuration", "arguments": {"service": "checkout-service"},
+        },
+    }
+    validate(detail, load_schema("describe_change_unit"))
 
 
 def test_error_mapping_units_exclude_low_confidence_or_unrelated_error_findings():

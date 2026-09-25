@@ -1363,7 +1363,7 @@ def _refined_plan_response(plan_id: str, status: str, selections: list[dict], ch
 
 
 def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id: str) -> dict:
-    """Return one persisted unit and its smallest source-free reading path."""
+    """Return one persisted unit, its reading path and truncated-evidence follow-up."""
     match = re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)
     if match is None:
         return {"error": "invalid plan_id"}
@@ -1376,12 +1376,20 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
     )
     if change_unit is None:
         return {"error": f"unknown change_unit_id: {change_unit_id}"}
-    return {
+    response = {
         "plan_id": plan_id,
         "change_unit": change_unit,
         "minimal_reading": _minimal_unit_reading(change_unit),
         "validation": change_unit["validation"],
     }
+    if _has_truncated_workload_evidence(change_unit):
+        response["evidence_follow_up"] = {
+            "reason": "workload evidence is truncated",
+            "recommended_query": {
+                "tool": "describe_runtime_configuration", "arguments": {"service": change_unit["service"]},
+            },
+        }
+    return response
 
 
 def assess_working_change(
@@ -1492,6 +1500,17 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
             "recommended_query": {"tool": "describe_messages", "arguments": {"service": consumer}},
         })
     return reading
+
+
+def _has_truncated_workload_evidence(change_unit: dict) -> bool:
+    """Identify a persisted workload target whose compact evidence was bounded."""
+    target = change_unit.get("target")
+    if not isinstance(target, dict) or not isinstance(target.get("workloads"), list):
+        return False
+    return any(
+        isinstance(workload, dict) and workload.get("evidence_truncated") is True
+        for workload in target["workloads"]
+    )
 
 
 def _kubernetes_workload_reading_scope(target: dict) -> str | None:
