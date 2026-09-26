@@ -479,6 +479,66 @@ def derive_error_mapping_review_units(findings: list[dict], primary_services: se
     return units
 
 
+def derive_http_resilience_policy_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create advisory reviews for HTTP calls lacking a literal local policy.
+
+    This is intentionally lower confidence than a source-proven unsafe retry. Client
+    factories, framework defaults and runtime configuration can provide protection
+    outside the symbol, so the unit asks for confirmation rather than a code change.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_missing_http_resilience_policy":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.5
+        ):
+            continue
+        caller = detail.get("caller")
+        target = detail.get("target")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(caller, dict) or not isinstance(target, dict) or not isinstance(evidence, list) or not evidence
+            or caller.get("service") != services[0] or not isinstance(caller.get("symbol"), str)
+            or not isinstance(target.get("service"), str) or not isinstance(target.get("method"), str)
+            or not isinstance(target.get("path"), str) or not target["path"]
+        ):
+            continue
+        service = services[0]
+        symbol = caller["symbol"]
+        dependency = target["service"]
+        method = target["method"]
+        path = target["path"]
+        key = service, symbol, dependency, method, path
+        if key in seen:
+            continue
+        seen.add(key)
+        contract = f"{method} {path}"
+        units.append({
+            "id": f"http-resilience-policy:{service}:{symbol}:{dependency}:{method}:{path}",
+            "service": service,
+            "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed HTTP boundary without a local policy"),
+            "preconditions": [],
+            "related_contracts": [contract],
+            "dependencies": [dependency],
+            "validation": [
+                f"verify {symbol} has a documented timeout policy for {contract} and retries only when repeat safety is established",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_retry_policy_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
     """Turn source-proven retries of permanent local errors into review units.
 

@@ -28,6 +28,7 @@ from orbitkb.generation.change_plan import (
     derive_aggregate_ownership_review_units,
     derive_cloud_dependency_iac_review_units,
     derive_error_mapping_review_units,
+    derive_http_resilience_policy_review_units,
     derive_partial_write_resilience_review_units,
     derive_persistence_migration_review_units,
     derive_public_object_storage_review_units,
@@ -1592,6 +1593,63 @@ def test_timeout_local_fallback_review_units_read_the_local_timeout_boundary():
     }) == [{
         "service": "checkout-service",
         "purpose": "confirm the indexed timeout boundary and local fallback coverage",
+        "recommended_query": {"tool": "describe_service", "arguments": {"service": "checkout-service"}},
+    }]
+
+
+def test_http_resilience_policy_units_include_literal_internal_calls_without_policy():
+    assert derive_http_resilience_policy_review_units([
+        {
+            "kind": "possible_missing_http_resilience_policy",
+            "services": ["checkout-service"],
+            "reason": "CheckoutService.reserve calls inventory-service GET /stock without a literal policy.",
+            "confidence": 0.5,
+            "detail": {
+                "caller": {"service": "checkout-service", "symbol": "CheckoutService.reserve"},
+                "target": {"service": "inventory-service", "method": "GET", "path": "/stock"},
+                "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+            },
+        },
+    ], {"checkout-service"}) == [{
+        "id": "http-resilience-policy:checkout-service:CheckoutService.reserve:inventory-service:GET:/stock",
+        "service": "checkout-service",
+        "target": {
+            "role": "application_flow", "symbol": "CheckoutService.reserve",
+            "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+        },
+        "action": "review",
+        "reason": "CheckoutService.reserve calls inventory-service GET /stock without a literal policy.",
+        "preconditions": [],
+        "related_contracts": ["GET /stock"],
+        "dependencies": ["inventory-service"],
+        "validation": [
+            "verify CheckoutService.reserve has a documented timeout policy for GET /stock and retries only when repeat safety is established",
+        ],
+        "confidence": 0.5,
+        "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+    }]
+
+
+def test_http_resilience_policy_units_exclude_lower_confidence_findings():
+    assert derive_http_resilience_policy_review_units([
+        {
+            "kind": "possible_missing_http_resilience_policy",
+            "services": ["checkout-service"],
+            "confidence": 0.49,
+            "detail": {},
+        },
+    ], {"checkout-service"}) == []
+
+
+def test_http_resilience_policy_review_units_read_the_local_http_boundary():
+    assert queries._minimal_unit_reading({
+        "id": "http-resilience-policy:checkout-service:CheckoutService.reserve:inventory-service:GET:/stock",
+        "service": "checkout-service",
+        "target": {"role": "application_flow", "symbol": "CheckoutService.reserve"},
+        "dependencies": ["inventory-service"],
+    }) == [{
+        "service": "checkout-service",
+        "purpose": "confirm the indexed outbound HTTP boundary and resilience policy",
         "recommended_query": {"tool": "describe_service", "arguments": {"service": "checkout-service"}},
     }]
 

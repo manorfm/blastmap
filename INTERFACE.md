@@ -275,6 +275,8 @@ For a retry-HTTP-idempotency review, it is also the smallest context because the
 literal target call does not necessarily resolve an indexed endpoint.
 For a timeout-local-fallback review, `describe_service` similarly scopes inspection to
 the selected symbol; a global handler, gateway or client factory remains unknown.
+For an HTTP-resilience-policy review, it is the smallest context because client
+factories, framework defaults and runtime configuration may provide the policy.
 Truncated scopes also report `evidence_total`.
 `describe_change_unit` adds `evidence_follow_up` only in that case, directing the
 agent to complete runtime-configuration context and listing the affected

@@ -44,6 +44,7 @@ from orbitkb.generation.change_plan import (
     derive_decision_points,
     derive_error_mapping_review_units,
     derive_feature_flag_review_units,
+    derive_http_resilience_policy_review_units,
     derive_partial_write_resilience_review_units,
     derive_persistence_migration_review_units,
     derive_public_object_storage_review_units,
@@ -1799,6 +1800,7 @@ def plan_change(
             *derive_aggregate_ownership_review_units(architecture_findings, error_mapping_services),
             *derive_cloud_dependency_iac_review_units(architecture_findings, error_mapping_services),
             *derive_error_mapping_review_units(architecture_findings, error_mapping_services),
+            *derive_http_resilience_policy_review_units(architecture_findings, error_mapping_services),
             *derive_retry_policy_review_units(architecture_findings, error_mapping_services),
             *derive_retry_http_idempotency_review_units(architecture_findings, error_mapping_services),
             *derive_retry_delivery_review_units(architecture_findings, error_mapping_services),
@@ -2148,6 +2150,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
         return [{
             "service": producer,
             "purpose": "confirm the indexed timeout boundary and local fallback coverage",
+            "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
+        }]
+    if change_unit["id"].startswith("http-resilience-policy:"):
+        return [{
+            "service": producer,
+            "purpose": "confirm the indexed outbound HTTP boundary and resilience policy",
             "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
         }]
     if change_unit["target"]["role"] == "error_mapping":
