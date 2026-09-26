@@ -2527,7 +2527,8 @@ def find_missing_bucket_versioning(conn: sqlite3.Connection) -> list[dict]:
 
 
 _DETECTORS = (
-    find_cycles, find_fan_imbalance, find_shared_database, find_aggregate_ownership_overlap,
+    find_cycles, find_fan_imbalance, find_component_cycles, find_component_fan_imbalance,
+    find_shared_database, find_aggregate_ownership_overlap,
     find_duplicate_external_integrations,
     find_flow_hypotheses, find_read_entrypoint_side_effects, find_error_semantics_lost,
     find_unhandled_endpoint_errors, find_internal_error_exposures,

@@ -439,6 +439,28 @@ def test_find_component_fan_imbalance_ignores_boundary_edges(tmp_path: Path):
     assert find_component_fan_imbalance(conn) == []
 
 
+def test_component_cycle_and_fan_imbalance_are_exposed_via_find_architecture_smells(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "python")
+    evidence = Evidence("checkout.py", 10, 10)
+    edges = [
+        FlowEdge("A.run", "B.process", "invokes", evidence),
+        FlowEdge("B.process", "A.run", "invokes", evidence),
+    ]
+    edges += [FlowEdge("Hub.run", f"Leaf{i}.handle", "invokes", evidence) for i in range(COMPONENT_FAN_THRESHOLD)]
+    edges += [FlowEdge(f"Leaf{i}.handle", f"Sink{i}.absorb", "invokes", evidence) for i in range(COMPONENT_FAN_THRESHOLD)]
+    flows_repo.replace_analysis(conn, service_id, AnalysisResult(edges=edges))
+
+    recompute_architecture_view(conn)
+    response = queries.find_architecture_smells(conn)
+
+    kinds = {item["kind"] for item in response["findings"]}
+    assert "component_cycle" in kinds
+    assert "component_fan_out" in kinds
+    cycle = next(item for item in response["findings"] if item["kind"] == "component_cycle")
+    assert cycle["services"] == ["checkout"]
+
+
 def test_find_shared_database_flags_same_entity_on_same_engine(tmp_path: Path):
     conn = open_db(tmp_path / "test.db")
     a = services_repo.ensure_service(conn, "a-service", "/tmp/a", "python")
