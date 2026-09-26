@@ -20,6 +20,11 @@ from orbitkb.generation.runtime_configuration import ordered_kubernetes_workload
 # fan-out crosses this count. Low enough to catch small systems, high enough that a
 # handful of legitimate dependencies doesn't trigger noise.
 FAN_THRESHOLD = 4
+# Same posture as FAN_THRESHOLD, at the component (intra-service) scale instead of the
+# service (system) scale. A single service's internal call graph tends to be denser
+# than the graph between services, so this starts higher — still a starting heuristic,
+# not a value calibrated against a real large indexed project.
+COMPONENT_FAN_THRESHOLD = 5
 READ_ENTRYPOINT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 BROAD_EXCEPTION_TYPES = frozenset({"exception", "throwable", "error", "runtimeexception"})
 POTENTIALLY_NON_IDEMPOTENT_HTTP_METHODS = frozenset({"POST", "PATCH"})
@@ -215,6 +220,45 @@ def find_component_cycles(conn: sqlite3.Connection) -> list[dict]:
                 ),
                 "detail": {"components": cycle_names},
             })
+    return findings
+
+
+def _component_fan_finding(kind: str, service_name: str, component: str, count: int, ce: int, ca: int) -> dict:
+    reason = (
+        f"Within {service_name}, {component} calls {count} other components directly inside traced flows — "
+        "a broad orchestrator, or a candidate to split."
+        if kind == "component_fan_out" else
+        f"Within {service_name}, {count} other components call {component} directly inside traced flows — "
+        "a potential bottleneck or single point of coupling."
+    )
+    detail: dict = {"component": component, "count": count}
+    if ca + ce > 0:
+        detail["instability"] = round(ce / (ca + ce), 2)
+    return {"kind": kind, "severity": "info", "services": [service_name], "reason": reason, "detail": detail}
+
+
+def find_component_fan_imbalance(conn: sqlite3.Connection) -> list[dict]:
+    """The intra-service analog of find_fan_imbalance: a component whose fan-in or
+    fan-out, within traced entrypoint-to-boundary flows, crosses COMPONENT_FAN_THRESHOLD.
+    Carries Robert Martin's instability index (Ce/(Ca+Ce)) as context in `detail`, not
+    as a threshold of its own."""
+    names = _service_names(conn)
+    findings = []
+    for service_id, pairs in _internal_component_edges(conn).items():
+        service_name = names.get(service_id)
+        if service_name is None:
+            continue
+        efferent: dict[str, set[str]] = defaultdict(set)
+        afferent: dict[str, set[str]] = defaultdict(set)
+        for owner_from, owner_to in pairs:
+            efferent[owner_from].add(owner_to)
+            afferent[owner_to].add(owner_from)
+        for component in sorted(set(efferent) | set(afferent)):
+            ce, ca = len(efferent.get(component, ())), len(afferent.get(component, ()))
+            if ce >= COMPONENT_FAN_THRESHOLD:
+                findings.append(_component_fan_finding("component_fan_out", service_name, component, ce, ce, ca))
+            if ca >= COMPONENT_FAN_THRESHOLD:
+                findings.append(_component_fan_finding("component_fan_in", service_name, component, ca, ce, ca))
     return findings
 
 

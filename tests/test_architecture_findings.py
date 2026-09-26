@@ -22,9 +22,11 @@ from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import (
+    COMPONENT_FAN_THRESHOLD,
     diff_architecture_runs,
     find_aggregate_ownership_overlap,
     find_component_cycles,
+    find_component_fan_imbalance,
     find_cycles,
     find_duplicate_external_integrations,
     find_fan_imbalance,
@@ -377,6 +379,64 @@ def test_find_component_cycles_ignores_cross_service_edges(tmp_path: Path):
     ]))
 
     assert find_component_cycles(conn) == []
+
+
+def test_find_component_fan_imbalance_flags_high_fan_out(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "python")
+    evidence = Evidence("checkout.py", 10, 10)
+    edges = [FlowEdge("Hub.run", f"Leaf{i}.handle", "invokes", evidence) for i in range(COMPONENT_FAN_THRESHOLD)]
+    edges += [FlowEdge(f"Leaf{i}.handle", f"Sink{i}.absorb", "invokes", evidence) for i in range(COMPONENT_FAN_THRESHOLD)]
+    flows_repo.replace_analysis(conn, service_id, AnalysisResult(edges=edges))
+
+    findings = find_component_fan_imbalance(conn)
+
+    fan_out = [f for f in findings if f["kind"] == "component_fan_out"]
+    assert len(fan_out) == 1
+    assert fan_out[0]["services"] == ["checkout"]
+    assert fan_out[0]["detail"] == {
+        "component": "Hub", "count": COMPONENT_FAN_THRESHOLD, "instability": 1.0,
+    }
+
+
+def test_find_component_fan_imbalance_flags_high_fan_in(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "python")
+    evidence = Evidence("checkout.py", 10, 10)
+    edges = [FlowEdge(f"Caller{i}.run", "Hub.handle", "invokes", evidence) for i in range(COMPONENT_FAN_THRESHOLD)]
+    edges.append(FlowEdge("Hub.handle", "Sink.absorb", "invokes", evidence))
+    flows_repo.replace_analysis(conn, service_id, AnalysisResult(edges=edges))
+
+    findings = find_component_fan_imbalance(conn)
+
+    fan_in = [f for f in findings if f["kind"] == "component_fan_in"]
+    assert len(fan_in) == 1
+    assert fan_in[0]["services"] == ["checkout"]
+    assert fan_in[0]["detail"] == {
+        "component": "Hub", "count": COMPONENT_FAN_THRESHOLD, "instability": 0.0,
+    }
+
+
+def test_find_component_fan_imbalance_does_not_flag_below_threshold(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "python")
+    evidence = Evidence("checkout.py", 10, 10)
+    below = COMPONENT_FAN_THRESHOLD - 1
+    edges = [FlowEdge("Hub.run", f"Leaf{i}.handle", "invokes", evidence) for i in range(below)]
+    edges += [FlowEdge(f"Leaf{i}.handle", f"Sink{i}.absorb", "invokes", evidence) for i in range(below)]
+    flows_repo.replace_analysis(conn, service_id, AnalysisResult(edges=edges))
+
+    assert find_component_fan_imbalance(conn) == []
+
+
+def test_find_component_fan_imbalance_ignores_boundary_edges(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "python")
+    evidence = Evidence("checkout.py", 10, 10)
+    edges = [FlowEdge("Hub.run", f"Table{i}.save", "writes", evidence) for i in range(COMPONENT_FAN_THRESHOLD)]
+    flows_repo.replace_analysis(conn, service_id, AnalysisResult(edges=edges))
+
+    assert find_component_fan_imbalance(conn) == []
 
 
 def test_find_shared_database_flags_same_entity_on_same_engine(tmp_path: Path):
