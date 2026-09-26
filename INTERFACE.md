@@ -397,6 +397,10 @@ exact indexed workflow path and line, `passed`/`failed` status and optional dura
 It records only the current status for that plan command: no command execution,
 stdout, stderr, note, source content or secret is accepted or retained. The next
 assessment includes a compact matching result.
+`describe_change_validation_status(plan_id, repository)` provides the same bounded
+commands with `pending`, `failed` or `reported_passed` aggregate state. It is an
+agent-reported CI summary, not a release gate or evidence that manual unit checks are
+complete.
 The result also lists changed files outside services named by the plan and every
 remaining validation obligation. It is an advisory, read-only check, never an
 implementation gate.

@@ -542,6 +542,18 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             )
 
     @mcp.tool()
+    def describe_change_validation_status(plan_id: str, repository: str) -> dict:
+        """Summarize current agent-reported CI validation for one ready change plan.
+
+        Status is advisory: reported_passed means each compact indexed test/build
+        command has a passed report, not that the requested change is approved or
+        all manual checks are complete. The tool never executes commands or returns
+        process output.
+        """
+        with closing(_conn()) as conn:
+            return queries.describe_change_validation_status(conn, plan_id, repository)
+
+    @mcp.tool()
     def record_change_context_feedback(
         run_id: int,
         outcome: str,

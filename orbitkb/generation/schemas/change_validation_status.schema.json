@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "required": ["plan_id", "repository", "status", "summary", "commands"],
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {"type": "string", "pattern": "^cp_[1-9][0-9]*$"},
+    "repository": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "enum": ["no_indexed_commands", "pending", "failed", "reported_passed"]},
+    "summary": {
+      "type": "object",
+      "required": ["total", "passed", "failed", "pending"],
+      "additionalProperties": false,
+      "properties": {
+        "total": {"type": "integer", "minimum": 0, "maximum": 3},
+        "passed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0},
+        "pending": {"type": "integer", "minimum": 0}
+      }
+    },
+    "commands": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["kind", "command", "workflow_path", "status", "duration_ms"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"type": "string", "enum": ["test", "build"]},
+          "command": {"type": "string", "minLength": 1},
+          "workflow_path": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "enum": ["passed", "failed", "pending"]},
+          "duration_ms": {"type": ["integer", "null"], "minimum": 0}
+        }
+      }
+    }
+  }
+}

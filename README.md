@@ -114,6 +114,7 @@ Start broad, then narrow the request.
 | Inspect feature-flag reads | `describe_feature_flags` | `describe_entrypoint`, `list_security_findings` |
 | Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
 | Inspect indexed CI validation commands | `describe_ci_commands` | `plan_change`, `assess_working_change` |
+| Review reported plan validation | `describe_change_validation_status` | `record_ci_validation_result` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |
 | Compare runtime and static paths | `describe_runtime_divergence` | `describe_entrypoint` |
 
@@ -405,6 +406,9 @@ with the exact indexed workflow path and line, `passed`/`failed` status, and opt
 duration. OrbitKB records only the latest status for that plan command; it never runs
 the command or stores stdout, stderr, notes, source content or secrets. A later
 assessment returns the matching compact result.
+`describe_change_validation_status` then summarizes at most three indexed test/build
+commands as `pending`, `failed`, or `reported_passed`. It is a compact agent report,
+not release approval or proof that manual change-unit checks are complete.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

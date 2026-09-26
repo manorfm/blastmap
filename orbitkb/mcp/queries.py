@@ -1950,6 +1950,54 @@ def _ci_validation_result_summaries(
     return summaries
 
 
+def describe_change_validation_status(conn: sqlite3.Connection, plan_id: object, repository: object) -> dict:
+    """Return a bounded, agent-reported CI validation summary for one ready plan."""
+    if not isinstance(plan_id, str) or (match := re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)) is None:
+        return {"error": "plan_id must have the form cp_<positive integer>"}
+    stored_plan = change_plans_repo.get_plan(conn, int(match.group(1)))
+    if stored_plan is None:
+        return {"error": f"unknown plan_id: {plan_id}"}
+    if stored_plan["status"] != "ready":
+        return {"error": f"plan must be ready before reviewing validation (status: {stored_plan['status']})"}
+    if not isinstance(repository, str) or not repository:
+        return {"error": "repository must be a non-empty string"}
+    repo = repositories_repo.get_repository_by_name(conn, repository)
+    if repo is None:
+        return {"error": f"unknown repository: {repository}"}
+    commands = _compact_ci_validation_commands(conn, repo["id"])
+    results_by_command = {
+        (result["kind"], result["command"], result["workflow_path"]): result
+        for result in _ci_validation_result_summaries(conn, int(match.group(1)), repo["id"], commands)
+    }
+    command_statuses: list[dict] = []
+    for command in commands:
+        result = results_by_command.get((command["kind"], command["command"], command["workflow_path"]))
+        command_statuses.append({
+            **command,
+            "status": result["status"] if result is not None else "pending",
+            "duration_ms": result["duration_ms"] if result is not None else None,
+        })
+    summary = {
+        "total": len(command_statuses),
+        "passed": sum(command["status"] == "passed" for command in command_statuses),
+        "failed": sum(command["status"] == "failed" for command in command_statuses),
+        "pending": sum(command["status"] == "pending" for command in command_statuses),
+    }
+    status = (
+        "no_indexed_commands" if not command_statuses
+        else "failed" if summary["failed"]
+        else "pending" if summary["pending"]
+        else "reported_passed"
+    )
+    return {
+        "plan_id": plan_id,
+        "repository": repository,
+        "status": status,
+        "summary": summary,
+        "commands": command_statuses,
+    }
+
+
 def record_ci_validation_result(
     conn: sqlite3.Connection,
     plan_id: object,
