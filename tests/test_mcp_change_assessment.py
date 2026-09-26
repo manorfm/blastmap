@@ -75,6 +75,9 @@ async def test_assess_working_change_over_stdio(tmp_path: Path):
             validation_status = content_json(await session.call_tool("describe_change_validation_status", {
                 "plan_id": plan_id, "repository": "commerce",
             }))
+            closure = content_json(await session.call_tool("review_change_closure", {
+                "plan_id": plan_id, "repository": "commerce", "since_commit": since_commit,
+            }))
             result = content_json(await session.call_tool("assess_working_change", {
                 "plan_id": plan_id, "repository": "commerce", "since_commit": since_commit,
             }))
@@ -82,6 +85,7 @@ async def test_assess_working_change_over_stdio(tmp_path: Path):
     assert recorded == {"ok": True, "status": "passed", "duration_ms": 42}
     assert validation_status["status"] == "reported_passed"
     assert validation_status["summary"] == {"total": 1, "passed": 1, "failed": 0, "pending": 0}
+    assert closure["status"] == "ready_for_manual_review"
     assert result["covered_change_units"] == [{
         "id": "unit-1", "changed_files": ["checkout-service/client.py"],
     }]

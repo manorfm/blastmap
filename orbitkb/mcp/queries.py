@@ -41,6 +41,7 @@ from orbitkb.generation.backend_base import LLMBackend
 from orbitkb.generation.change_assessment import (
     assess_change_units,
     changed_files_touch_service_roots,
+    summarize_change_closure,
 )
 from orbitkb.generation.change_context import MAX_CONTEXT_SERVICES, build_change_context
 from orbitkb.generation.change_plan import (
@@ -101,6 +102,7 @@ DEFAULT_PLAN_TOKEN_BUDGET = 2200
 MAX_PLAN_TOKEN_BUDGET = 2200
 MAX_PLAN_CI_VALIDATION_COMMANDS = 3
 MAX_CI_VALIDATION_DURATION_MS = 86_400_000
+MAX_CLOSURE_CHANGE_UNIT_IDS = 3
 _FLOW_KINDS = {"invokes", "injects", "validates", "reads", "writes", "publishes", "consumes"}
 _EPIC_TYPE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _RUNTIME_FILTER_DIMENSION_PRIORITY = {
@@ -2328,6 +2330,23 @@ def assess_working_change(
         "ci_validation_commands": ci_validation_commands,
         "ci_validation_results": ci_validation_results,
         **assessment,
+    }
+
+
+def review_change_closure(conn: sqlite3.Connection, plan_id: str, repository: str, since_commit: str) -> dict:
+    """Combine a bounded diff assessment and reported CI state without approving release."""
+    assessment = assess_working_change(conn, plan_id, repository, since_commit)
+    if "error" in assessment:
+        return assessment
+    ci_validation = describe_change_validation_status(conn, plan_id, repository)
+    if "error" in ci_validation:
+        return ci_validation
+    closure = summarize_change_closure(assessment, ci_validation, MAX_CLOSURE_CHANGE_UNIT_IDS)
+    return {
+        "plan_id": plan_id,
+        "repository": repository,
+        "since_commit": since_commit,
+        **closure,
     }
 
 

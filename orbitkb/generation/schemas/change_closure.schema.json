@@ -1,0 +1,69 @@
+{
+  "type": "object",
+  "required": [
+    "plan_id",
+    "repository",
+    "since_commit",
+    "status",
+    "coverage",
+    "risks",
+    "ci_validation",
+    "outstanding_change_units"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {"type": "string", "pattern": "^cp_[1-9][0-9]*$"},
+    "repository": {"type": "string", "minLength": 1},
+    "since_commit": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "enum": ["needs_attention", "needs_review", "ready_for_manual_review"]},
+    "coverage": {
+      "type": "object",
+      "required": ["planned_units", "covered_units", "omitted_units", "unassessable_units"],
+      "additionalProperties": false,
+      "properties": {
+        "planned_units": {"type": "integer", "minimum": 0},
+        "covered_units": {"type": "integer", "minimum": 0},
+        "omitted_units": {"type": "integer", "minimum": 0},
+        "unassessable_units": {"type": "integer", "minimum": 0}
+      }
+    },
+    "risks": {
+      "type": "object",
+      "required": ["files_outside_planned_surface", "public_error_contracts_at_risk", "public_error_contract_breaks"],
+      "additionalProperties": false,
+      "properties": {
+        "files_outside_planned_surface": {"type": "integer", "minimum": 0},
+        "public_error_contracts_at_risk": {"type": "integer", "minimum": 0},
+        "public_error_contract_breaks": {"type": "integer", "minimum": 0}
+      }
+    },
+    "ci_validation": {
+      "type": "object",
+      "required": ["status", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {"type": "string", "enum": ["no_indexed_commands", "pending", "failed", "reported_passed"]},
+        "summary": {
+          "type": "object",
+          "required": ["total", "passed", "failed", "pending"],
+          "additionalProperties": false,
+          "properties": {
+            "total": {"type": "integer", "minimum": 0, "maximum": 3},
+            "passed": {"type": "integer", "minimum": 0},
+            "failed": {"type": "integer", "minimum": 0},
+            "pending": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "outstanding_change_units": {
+      "type": "object",
+      "required": ["omitted", "unassessable"],
+      "additionalProperties": false,
+      "properties": {
+        "omitted": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+        "unassessable": {"type": "array", "maxItems": 3, "items": {"type": "string"}}
+      }
+    }
+  }
+}

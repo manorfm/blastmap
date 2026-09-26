@@ -115,6 +115,7 @@ Start broad, then narrow the request.
 | Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
 | Inspect indexed CI validation commands | `describe_ci_commands` | `plan_change`, `assess_working_change` |
 | Review reported plan validation | `describe_change_validation_status` | `record_ci_validation_result` |
+| Review advisory plan closure | `review_change_closure` | `describe_change_unit`, `assess_working_change` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |
 | Compare runtime and static paths | `describe_runtime_divergence` | `describe_entrypoint` |
 
@@ -409,6 +410,11 @@ assessment returns the matching compact result.
 `describe_change_validation_status` then summarizes at most three indexed test/build
 commands as `pending`, `failed`, or `reported_passed`. It is a compact agent report,
 not release approval or proof that manual change-unit checks are complete.
+`review_change_closure` combines that report with one bounded Git assessment. It uses
+`needs_attention` for a failed reported validation, a confirmed public-error-contract
+break or an omitted source-backed plan unit; `needs_review` for remaining uncertainty;
+and `ready_for_manual_review` only when its bounded checks are clear. It never approves
+a deployment or infers runtime behavior.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

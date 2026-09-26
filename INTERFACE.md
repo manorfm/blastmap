@@ -401,6 +401,12 @@ assessment includes a compact matching result.
 commands with `pending`, `failed` or `reported_passed` aggregate state. It is an
 agent-reported CI summary, not a release gate or evidence that manual unit checks are
 complete.
+`review_change_closure(plan_id, repository, since_commit)` combines this compact
+validation state with a fresh bounded Git assessment. Its `needs_attention` status
+covers reported CI failure, a confirmed public error-contract break or an omitted
+source-backed plan unit; `needs_review` retains uncertainty. Even
+`ready_for_manual_review` is advisory and does not approve deployment or prove runtime
+behavior.
 The result also lists changed files outside services named by the plan and every
 remaining validation obligation. It is an advisory, read-only check, never an
 implementation gate.

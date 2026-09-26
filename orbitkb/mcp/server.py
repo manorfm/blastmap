@@ -554,6 +554,17 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.describe_change_validation_status(conn, plan_id, repository)
 
     @mcp.tool()
+    def review_change_closure(plan_id: str, repository: str, since_commit: str) -> dict:
+        """Return an advisory closing summary for a ready plan and one Git diff.
+
+        It combines unit coverage, public-error-contract risk and agent-reported
+        indexed CI validation. ready_for_manual_review is not deployment approval:
+        manual checks and unproven runtime behavior remain outside this bounded view.
+        """
+        with closing(_conn()) as conn:
+            return queries.review_change_closure(conn, plan_id, repository, since_commit)
+
+    @mcp.tool()
     def record_change_context_feedback(
         run_id: int,
         outcome: str,
