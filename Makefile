@@ -136,25 +136,4 @@ release-major:
 	@$(MAKE) _release KIND=major
 
 _release: verify
-	@branch=$$(git symbolic-ref --short HEAD); \
-	if [ "$$branch" != "main" ]; then \
-		echo "release: must be on main (currently on $$branch)" >&2; exit 1; \
-	fi
-	@if [ -n "$$(git status --porcelain)" ]; then \
-		echo "release: working tree is not clean" >&2; exit 1; \
-	fi
-	git fetch origin main --quiet
-	@if [ -n "$$(git rev-list HEAD..origin/main)" ]; then \
-		echo "release: local main is behind origin/main -- pull first" >&2; exit 1; \
-	fi
-	$(PYTHON) scripts/bump_version.py $(KIND)
-	$(eval NEW_VERSION := $(shell $(PYTHON) -c "import orbitkb; print(orbitkb.__version__)"))
-	$(PYTHON) scripts/ensure_badges.py
-	git add pyproject.toml orbitkb/__init__.py README.md
-	git commit -m "chore: released v$(NEW_VERSION)"
-	git tag "v$(NEW_VERSION)"
-	git push origin main
-	git push origin "v$(NEW_VERSION)"
-	@echo ""
-	@echo "Pushed v$(NEW_VERSION). publish.yml will rerun test/lint/sast/sca/dast"
-	@echo "and only publish to PyPI if every one of them passes."
+	@scripts/cut_release.sh $(KIND)
