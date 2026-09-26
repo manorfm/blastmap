@@ -42,6 +42,7 @@ from orbitkb.generation.change_plan import (
     derive_retry_downstream_error_review_units,
     derive_retry_http_idempotency_review_units,
     derive_retry_policy_review_units,
+    derive_retry_unrecovered_consumer_delivery_review_units,
     derive_retry_write_publish_review_units,
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
@@ -1483,6 +1484,92 @@ def test_retry_delivery_units_exclude_low_confidence_findings():
             "detail": {},
         },
     ], {"orders-service"}) == []
+
+
+def test_retry_unrecovered_consumer_delivery_units_include_rabbitmq_recovery_checks():
+    assert derive_retry_unrecovered_consumer_delivery_review_units([
+        {
+            "kind": "possible_retry_write_publish_reaches_unrecovered_persistent_consumer",
+            "services": ["orders-service", "billing-service"],
+            "reason": "OrderService.create retries a publication to a persistent RabbitMQ consumer without indexed recovery.",
+            "confidence": 0.65,
+            "detail": {
+                "flow": {"symbol": "OrderService.create"},
+                "channel": "order.created",
+                "retry_policies": [{"mechanism": "reactor.retry", "value": 3, "unit": "attempts"}],
+                "writes": [{"target": "orders"}], "write_count": 1,
+                "consumers": [{
+                    "service": "billing-service", "symbol": "BillingConsumer.onOrderCreated",
+                    "queue": "billing.orders", "writes": [{"target": "invoices"}], "write_count": 1,
+                }],
+                "consumer_count": 1,
+                "evidence": [
+                    {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+                    {"file": "BillingConsumer.java", "start_line": 12, "end_line": 12},
+                ],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "retry-unrecovered-consumer-delivery:orders-service:OrderService.create:order.created",
+        "service": "orders-service",
+        "target": {
+            "role": "application_flow", "symbol": "OrderService.create",
+            "evidence": [
+                {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+                {"file": "BillingConsumer.java", "start_line": 12, "end_line": 12},
+            ],
+        },
+        "action": "review",
+        "reason": "OrderService.create retries a publication to a persistent RabbitMQ consumer without indexed recovery.",
+        "preconditions": [],
+        "related_contracts": ["message:order.created", "rabbitmq:billing.orders"],
+        "dependencies": ["billing-service"],
+        "validation": [
+            "verify OrderService.create uses an outbox or idempotency strategy before retrying order.created",
+            "verify billing-service has a RabbitMQ retry or dead-letter policy for queue billing.orders and idempotent handling for order.created",
+        ],
+        "confidence": 0.65,
+        "evidence": [
+            {"file": "OrderService.java", "start_line": 18, "end_line": 18},
+            {"file": "BillingConsumer.java", "start_line": 12, "end_line": 12},
+        ],
+    }]
+
+
+def test_retry_unrecovered_consumer_delivery_units_exclude_low_confidence_findings():
+    assert derive_retry_unrecovered_consumer_delivery_review_units([
+        {
+            "kind": "possible_retry_write_publish_reaches_unrecovered_persistent_consumer",
+            "services": ["orders-service", "billing-service"],
+            "confidence": 0.64,
+            "detail": {},
+        },
+    ], {"orders-service"}) == []
+
+
+def test_retry_delivery_units_yield_to_unrecovered_consumer_evidence():
+    generic_finding = {
+        "kind": "possible_retry_write_publish_reaches_persistent_consumer",
+        "services": ["orders-service", "billing-service"],
+        "confidence": 0.8,
+        "detail": {
+            "flow": {"symbol": "OrderService.create"},
+            "channel": "order.created",
+            "retry_policies": [{"mechanism": "reactor.retry"}],
+            "writes": [{"target": "orders"}],
+            "consumers": [{"service": "billing-service", "writes": [{"target": "invoices"}]}],
+            "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 18}],
+        },
+    }
+    unrecovered_finding = {
+        "kind": "possible_retry_write_publish_reaches_unrecovered_persistent_consumer",
+        "services": ["orders-service", "billing-service"],
+        "detail": {"flow": {"symbol": "OrderService.create"}, "channel": "order.created"},
+    }
+
+    assert derive_retry_delivery_review_units(
+        [generic_finding, unrecovered_finding], {"orders-service"},
+    ) == []
 
 
 def test_retry_http_idempotency_units_include_literal_post_retries():

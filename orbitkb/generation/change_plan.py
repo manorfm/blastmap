@@ -870,12 +870,32 @@ def derive_retry_http_idempotency_review_units(
     return units
 
 
+def _retry_publish_channels_with_unrecovered_persistent_consumers(
+    findings: list[dict],
+) -> set[tuple[str, str, str]]:
+    """Identify channels that need the more specific RabbitMQ recovery review."""
+    covered: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_write_publish_reaches_unrecovered_persistent_consumer":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        if not isinstance(services, list) or not services or not isinstance(detail, dict):
+            continue
+        flow = detail.get("flow")
+        channel = detail.get("channel")
+        if isinstance(flow, dict) and isinstance(flow.get("symbol"), str) and isinstance(channel, str):
+            covered.add((services[0], flow["symbol"], channel))
+    return covered
+
+
 def derive_retry_delivery_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
     """Create duplicate-effect reviews for retrying producers and persistent consumers.
 
     The static facts prove local writes, a literal channel and consumer writes, but
     never broker delivery or duplicate execution. The resulting unit remains a review.
     """
+    unrecovered = _retry_publish_channels_with_unrecovered_persistent_consumers(findings)
     units: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
     for finding in findings:
@@ -912,7 +932,7 @@ def derive_retry_delivery_review_units(findings: list[dict], primary_services: s
         service = services[0]
         symbol = flow["symbol"]
         key = service, symbol, channel
-        if key in seen:
+        if key in seen or key in unrecovered:
             continue
         seen.add(key)
         dependencies = sorted({consumer["service"] for consumer in consumers})
@@ -928,6 +948,83 @@ def derive_retry_delivery_review_units(findings: list[dict], primary_services: s
             "validation": [
                 f"verify {symbol} uses an outbox or idempotency strategy before retrying {channel}",
                 *[f"verify {dependency} de-duplicates persistent effects for {channel}" for dependency in dependencies],
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
+def derive_retry_unrecovered_consumer_delivery_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Review retrying RabbitMQ flows whose persistent consumers lack indexed recovery.
+
+    Missing source evidence cannot prove a broker policy is absent at runtime. The
+    review therefore requests verification of a retry or dead-letter route, while
+    retaining the source-proven persistent effects and queue as bounded context.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_write_publish_reaches_unrecovered_persistent_consumer":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) < 2 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.65
+        ):
+            continue
+        flow = detail.get("flow")
+        channel = detail.get("channel")
+        retry_policies = detail.get("retry_policies")
+        producer_writes = detail.get("writes")
+        consumers = detail.get("consumers")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(flow, dict) or not isinstance(flow.get("symbol"), str) or not isinstance(channel, str)
+            or not isinstance(retry_policies, list) or not retry_policies or not isinstance(producer_writes, list)
+            or not producer_writes or not isinstance(consumers, list) or not consumers or not isinstance(evidence, list)
+            or not evidence
+            or not all(isinstance(policy, dict) and isinstance(policy.get("mechanism"), str) for policy in retry_policies)
+            or not all(
+                isinstance(consumer, dict) and isinstance(consumer.get("service"), str)
+                and consumer["service"] in services[1:] and isinstance(consumer.get("symbol"), str)
+                and isinstance(consumer.get("queue"), str) and isinstance(consumer.get("writes"), list)
+                and consumer["writes"]
+                for consumer in consumers
+            )
+        ):
+            continue
+        service = services[0]
+        symbol = flow["symbol"]
+        key = service, symbol, channel
+        if key in seen:
+            continue
+        seen.add(key)
+        consumer_queues = sorted({(consumer["service"], consumer["queue"]) for consumer in consumers})
+        dependencies = sorted({consumer["service"] for consumer in consumers})
+        units.append({
+            "id": f"retry-unrecovered-consumer-delivery:{service}:{symbol}:{channel}",
+            "service": service,
+            "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed retrying publisher and consumer recovery boundary"),
+            "preconditions": [],
+            "related_contracts": [
+                f"message:{channel}",
+                *[f"rabbitmq:{queue}" for _, queue in consumer_queues],
+            ],
+            "dependencies": dependencies,
+            "validation": [
+                f"verify {symbol} uses an outbox or idempotency strategy before retrying {channel}",
+                *[
+                    f"verify {consumer_service} has a RabbitMQ retry or dead-letter policy for queue {queue} "
+                    f"and idempotent handling for {channel}"
+                    for consumer_service, queue in consumer_queues
+                ],
             ],
             "confidence": float(confidence),
             "evidence": evidence,
@@ -1001,7 +1098,10 @@ def _retry_publish_channels_with_persistent_consumers(findings: list[dict]) -> s
     """Identify channels for which persistent-consumer evidence supersedes a general review."""
     covered: set[tuple[str, str, str]] = set()
     for finding in findings:
-        if finding.get("kind") != "possible_retry_write_publish_reaches_persistent_consumer":
+        if finding.get("kind") not in {
+            "possible_retry_write_publish_reaches_persistent_consumer",
+            "possible_retry_write_publish_reaches_unrecovered_persistent_consumer",
+        }:
             continue
         services = finding.get("services")
         detail = finding.get("detail")
@@ -1075,6 +1175,7 @@ def _retry_publish_channels_with_consumers(findings: list[dict]) -> set[tuple[st
     consumer_kinds = {
         "possible_retry_write_publish_reaches_consumer",
         "possible_retry_write_publish_reaches_persistent_consumer",
+        "possible_retry_write_publish_reaches_unrecovered_persistent_consumer",
     }
     for finding in findings:
         if finding.get("kind") not in consumer_kinds:

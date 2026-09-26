@@ -196,6 +196,12 @@ HTTP method makes the retry unsafe. A primary service can receive a
 channel consumed by another source-proven state-writing service. The consumers are
 dependencies and validation asks for producer outbox/idempotency plus consumer
 de-duplication; broker delivery and duplicate execution remain unknown. A primary
+producer instead receives `retry-unrecovered-consumer-delivery` when the consumer is
+a source-proven RabbitMQ queue with no indexed recovery policy. It preserves the queue
+as evidence and asks for producer outbox/idempotency plus consumer retry or dead-letter
+routing and idempotent handling; externally managed broker policy remains unknown. It
+supersedes the less-specific delivery review for the same producer, symbol and channel.
+A primary
 producer without a more specific consumer finding can receive one
 `retry-write-publish` review per literal published channel. It asks for
 outbox/idempotency and duplicate-event handling; a consumer-aware review supersedes
