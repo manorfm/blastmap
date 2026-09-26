@@ -7,8 +7,10 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
+from orbitkb.analysis.models import AnalysisResult, Evidence, FlowEdge
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import service_calls as service_calls_repo
 from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import recompute_architecture_view
@@ -56,6 +58,39 @@ async def test_find_architecture_smells_reports_a_cycle(tmp_path: Path):
             cycle_findings = [f for f in result["findings"] if f["kind"] == "cycle"]
             assert len(cycle_findings) == 1
             assert set(cycle_findings[0]["services"]) == {"a-service", "b-service"}
+
+
+def _build_component_cycle_fixture_db(db_path: Path) -> None:
+    conn = open_db(db_path)
+    service_id = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "python")
+    evidence = Evidence("checkout.py", 10, 10)
+    flows_repo.replace_analysis(
+        conn, service_id,
+        AnalysisResult(edges=[
+            FlowEdge("Validator.run", "Pricer.quote", "invokes", evidence),
+            FlowEdge("Pricer.quote", "Validator.run", "invokes", evidence),
+        ]),
+    )
+    recompute_architecture_view(conn)
+    conn.close()
+
+
+@pytest.mark.anyio
+async def test_find_architecture_smells_reports_a_component_cycle(tmp_path: Path):
+    db_path = tmp_path / "component_cycle_fixture.db"
+    _build_component_cycle_fixture_db(db_path)
+
+    params = server_params(db_path)
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            result = content_json(await session.call_tool("find_architecture_smells", {}))
+
+            component_cycle_findings = [f for f in result["findings"] if f["kind"] == "component_cycle"]
+            assert len(component_cycle_findings) == 1
+            assert component_cycle_findings[0]["services"] == ["checkout"]
+            assert set(component_cycle_findings[0]["detail"]["components"]) == {"Validator", "Pricer"}
 
 
 def test_find_architecture_smells_omits_trend_on_the_first_run_ever(tmp_path: Path):
