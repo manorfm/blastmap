@@ -178,6 +178,10 @@ The same high-confidence threshold creates an `error-exposure` review when an in
 public error response directly includes an internal detail. Its validation asks for a
 stable public code/message and internal diagnostic logging; it never includes the
 detail itself in the plan.
+When a broad HTTP 500 handler coexists with a timeout-protected HTTP flow in one
+primary service, `plan_change` creates a `broad-timeout-handler` review. It preserves
+the broad handler as a possible final fallback and asks for explicit timeout semantics;
+it does not claim that the handler captures the timeout at runtime.
 For a primary caller, a source-proven static HTTP call whose indexed downstream
 endpoint flow exposes a 4xx without a local mapping creates a
 `downstream-error-mapping` review. It includes the remote service as a dependency and

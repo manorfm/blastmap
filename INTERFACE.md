@@ -178,6 +178,10 @@ this is advisory, since middleware and gateways are not proved. It may include a
 `error-exposure` review unit for a high-confidence source-proven public response that
 directly includes an internal error detail; the unit contains only source evidence and
 safe-response validation, never the detail. A primary caller can also receive a
+`broad-timeout-handler` review when a broad HTTP 500 handler and timeout-protected
+HTTP flow coexist in the service. It preserves the broad handler as a possible final
+fallback and asks for explicit timeout semantics; it does not claim the handler catches
+the timeout. A primary caller can also receive a
 `downstream-error-mapping` review only when a source-proven static HTTP call resolves
 to an indexed downstream endpoint flow with a known 4xx contract; service-wide or
 ambiguous contracts are excluded. The unit keeps the downstream service as a

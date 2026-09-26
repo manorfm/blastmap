@@ -26,6 +26,7 @@ from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.change_plan import (
     derive_aggregate_ownership_review_units,
+    derive_broad_timeout_handler_review_units,
     derive_cloud_dependency_iac_review_units,
     derive_error_mapping_review_units,
     derive_http_resilience_policy_review_units,
@@ -1652,6 +1653,63 @@ def test_http_resilience_policy_review_units_read_the_local_http_boundary():
         "purpose": "confirm the indexed outbound HTTP boundary and resilience policy",
         "recommended_query": {"tool": "describe_service", "arguments": {"service": "checkout-service"}},
     }]
+
+
+def test_broad_timeout_handler_units_include_handler_and_timeout_flow():
+    assert derive_broad_timeout_handler_review_units([
+        {
+            "kind": "possible_broad_handler_swallows_timeout",
+            "services": ["checkout-service"],
+            "reason": "ApiErrorHandler.fallback maps broad Exception to HTTP 500 while CheckoutService.reserve times out.",
+            "confidence": 0.65,
+            "detail": {
+                "handler": {"symbol": "ApiErrorHandler.fallback", "error_type": "Exception", "status": "500"},
+                "timeout_flow": {
+                    "symbol": "CheckoutService.reserve", "target_service": "inventory-service",
+                    "method": "GET", "path": "/stock",
+                },
+                "timeout_policies": [{"mechanism": "reactor.timeout", "value": 2, "unit": "seconds"}],
+                "evidence": [
+                    {"file": "ApiErrorHandler.java", "start_line": 22, "end_line": 22},
+                    {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
+                ],
+            },
+        },
+    ], {"checkout-service"}) == [{
+        "id": "broad-timeout-handler:checkout-service:ApiErrorHandler.fallback:CheckoutService.reserve",
+        "service": "checkout-service",
+        "target": {
+            "role": "error_mapping", "symbol": "ApiErrorHandler.fallback",
+            "evidence": [
+                {"file": "ApiErrorHandler.java", "start_line": 22, "end_line": 22},
+                {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
+            ],
+        },
+        "action": "review",
+        "reason": "ApiErrorHandler.fallback maps broad Exception to HTTP 500 while CheckoutService.reserve times out.",
+        "preconditions": [],
+        "related_contracts": ["HTTP 500", "timeout"],
+        "dependencies": [],
+        "validation": [
+            "verify ApiErrorHandler.fallback preserves a documented generic fallback and maps timeout failures from CheckoutService.reserve with explicit unavailable or gateway-timeout semantics",
+        ],
+        "confidence": 0.65,
+        "evidence": [
+            {"file": "ApiErrorHandler.java", "start_line": 22, "end_line": 22},
+            {"file": "CheckoutService.java", "start_line": 18, "end_line": 18},
+        ],
+    }]
+
+
+def test_broad_timeout_handler_units_exclude_low_confidence_findings():
+    assert derive_broad_timeout_handler_review_units([
+        {
+            "kind": "possible_broad_handler_swallows_timeout",
+            "services": ["checkout-service"],
+            "confidence": 0.64,
+            "detail": {},
+        },
+    ], {"checkout-service"}) == []
 
 
 def test_retry_downstream_error_units_include_a_resolved_endpoint_contract():

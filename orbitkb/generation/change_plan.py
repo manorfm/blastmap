@@ -167,6 +167,66 @@ def derive_cloud_dependency_iac_review_units(findings: list[dict], primary_servi
     return units
 
 
+def derive_broad_timeout_handler_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create review units for broad HTTP 500 handlers near timeout flows.
+
+    The coexistence of both facts does not prove the handler catches the timeout;
+    a specific mapping can run first. Keep this review focused on preserving the
+    generic fallback while checking timeout semantics explicitly.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_broad_handler_swallows_timeout":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.65
+        ):
+            continue
+        handler = detail.get("handler")
+        timeout_flow = detail.get("timeout_flow")
+        timeout_policies = detail.get("timeout_policies")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(handler, dict) or not isinstance(timeout_flow, dict) or not isinstance(timeout_policies, list)
+            or not timeout_policies or not isinstance(evidence, list) or not evidence
+            or not isinstance(handler.get("symbol"), str) or handler.get("status") != "500"
+            or not isinstance(timeout_flow.get("symbol"), str)
+            or not all(isinstance(policy, dict) and isinstance(policy.get("mechanism"), str) for policy in timeout_policies)
+        ):
+            continue
+        service = services[0]
+        handler_symbol = handler["symbol"]
+        timeout_symbol = timeout_flow["symbol"]
+        key = service, handler_symbol, timeout_symbol
+        if key in seen:
+            continue
+        seen.add(key)
+        units.append({
+            "id": f"broad-timeout-handler:{service}:{handler_symbol}:{timeout_symbol}",
+            "service": service,
+            "target": {"role": "error_mapping", "symbol": handler_symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review timeout semantics near the indexed broad error handler"),
+            "preconditions": [],
+            "related_contracts": ["HTTP 500", "timeout"],
+            "dependencies": [],
+            "validation": [
+                f"verify {handler_symbol} preserves a documented generic fallback and maps timeout failures from "
+                f"{timeout_symbol} with explicit unavailable or gateway-timeout semantics",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def validate_decision_selections(
     decision_points: list[dict], selections: object,
 ) -> tuple[list[dict] | None, str | None]:
