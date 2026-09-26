@@ -2128,6 +2128,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
             "purpose": "confirm local writes and the indexed outbound HTTP boundary",
             "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
         }]
+    if change_unit["id"].startswith("retry-policy:"):
+        return [{
+            "service": producer,
+            "purpose": "confirm the indexed local retry policy and error flow",
+            "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
+        }]
     if change_unit["target"]["role"] == "error_mapping":
         return [{
             "service": producer,

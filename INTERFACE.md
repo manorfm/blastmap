@@ -266,6 +266,8 @@ per workload. The structured workload target uses the same bound and sets
 For a partial-write resilience review, the smallest context is the producer's
 `describe_service` result: the static call proves its local HTTP boundary but does not
 necessarily resolve an indexed remote endpoint.
+For a retry-policy review, `describe_service` is likewise the smallest context because
+the source-proven permanent error is local to its selected application flow.
 Truncated scopes also report `evidence_total`.
 `describe_change_unit` adds `evidence_follow_up` only in that case, directing the
 agent to complete runtime-configuration context and listing the affected
