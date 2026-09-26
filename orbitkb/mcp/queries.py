@@ -2122,6 +2122,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
                 "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": target_service}},
             },
         ]
+    if change_unit["id"].startswith("partial-write-resilience:"):
+        return [{
+            "service": producer,
+            "purpose": "confirm local writes and the indexed outbound HTTP boundary",
+            "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
+        }]
     if change_unit["target"]["role"] == "error_mapping":
         return [{
             "service": producer,

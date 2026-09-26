@@ -1864,6 +1864,19 @@ def test_downstream_retry_review_units_read_the_resolved_http_boundary():
     ]
 
 
+def test_partial_write_review_units_read_the_local_http_boundary():
+    assert queries._minimal_unit_reading({
+        "id": "partial-write-resilience:orders-service:OrderService.create:inventory-service",
+        "service": "orders-service",
+        "target": {"role": "application_flow", "symbol": "OrderService.create"},
+        "dependencies": ["inventory-service"],
+    }) == [{
+        "service": "orders-service",
+        "purpose": "confirm local writes and the indexed outbound HTTP boundary",
+        "recommended_query": {"tool": "describe_service", "arguments": {"service": "orders-service"}},
+    }]
+
+
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
     assert derive_runtime_configuration_review_units(
         {"checkout-service": [{
