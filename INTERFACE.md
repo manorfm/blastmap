@@ -202,6 +202,11 @@ as evidence and asks for producer outbox/idempotency plus consumer retry or dead
 routing and idempotent handling; externally managed broker policy remains unknown. It
 supersedes the less-specific delivery review for the same producer, symbol and channel.
 A primary
+RabbitMQ consumer with no source-proven retry boundary, retry delay or dead-letter
+route can receive a low-confidence `message-consumer-recovery` review. Its target is
+the consumer entrypoint and queue; it requests confirmation of the recovery policy
+without claiming that broker topology is missing. It is omitted when a selected
+producer-flow review already covers that exact consumer scope. A primary
 producer without a more specific consumer finding can receive one
 `retry-write-publish` review per literal published channel. It asks for
 outbox/idempotency and duplicate-event handling; a consumer-aware review supersedes

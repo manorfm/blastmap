@@ -213,6 +213,11 @@ supersedes `retry-delivery` for the same producer, symbol and channel. It retain
 queue as context and asks to verify producer outbox/idempotency plus consumer retry or
 dead-letter routing and idempotent handling; externally managed broker policy remains
 an explicit unknown.
+For a selected RabbitMQ consumer with no source-proven retry boundary, retry delay or
+dead-letter route, `plan_change` creates a low-confidence
+`message-consumer-recovery` review. It points to the consumer and queue and asks only
+for verification of its recovery policy; it is omitted when a selected producer flow
+already covers that exact consumer scope.
 For a primary caller with a literal retry and a resolved downstream endpoint flow that
 exposes 4xx, `plan_change` creates a `retry-downstream-error` review. It asks to
 exclude the response from retries unless the remote contract explicitly marks it

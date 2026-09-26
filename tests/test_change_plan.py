@@ -33,6 +33,7 @@ from orbitkb.generation.change_plan import (
     derive_cloud_versioning_review_units,
     derive_error_mapping_review_units,
     derive_http_resilience_policy_review_units,
+    derive_message_consumer_recovery_review_units,
     derive_partial_write_resilience_review_units,
     derive_persistence_migration_review_units,
     derive_public_object_storage_review_units,
@@ -1545,6 +1546,77 @@ def test_retry_unrecovered_consumer_delivery_units_exclude_low_confidence_findin
             "detail": {},
         },
     ], {"orders-service"}) == []
+
+
+def test_message_consumer_recovery_units_include_the_rabbitmq_queue():
+    assert derive_message_consumer_recovery_review_units([
+        {
+            "kind": "possible_message_consumer_without_recovery_policy",
+            "services": ["billing-service"],
+            "reason": "A RabbitMQ consumer has no source-proven retry boundary, retry delay or dead-letter route; validate its recovery policy.",
+            "confidence": 0.45,
+            "detail": {
+                "consumer": {"queue": "billing.orders", "symbol": "BillingConsumer.onOrderCreated"},
+                "source_proven": {
+                    "dead_letter_routing_key": None, "retry_delay_ms": None, "retry_boundary": False,
+                },
+                "evidence": [{"file": "BillingConsumer.java", "start_line": 12, "end_line": 12}],
+            },
+        },
+    ], {"billing-service"}) == [{
+        "id": "message-consumer-recovery:billing-service:BillingConsumer.onOrderCreated:billing.orders",
+        "service": "billing-service",
+        "target": {
+            "role": "entrypoint", "symbol": "BillingConsumer.onOrderCreated",
+            "evidence": [{"file": "BillingConsumer.java", "start_line": 12, "end_line": 12}],
+        },
+        "action": "review",
+        "reason": "A RabbitMQ consumer has no source-proven retry boundary, retry delay or dead-letter route; validate its recovery policy.",
+        "preconditions": [],
+        "related_contracts": ["rabbitmq:billing.orders"],
+        "dependencies": [],
+        "validation": [
+            "verify RabbitMQ consumer BillingConsumer.onOrderCreated has a retry or dead-letter policy for queue billing.orders",
+        ],
+        "confidence": 0.45,
+        "evidence": [{"file": "BillingConsumer.java", "start_line": 12, "end_line": 12}],
+    }]
+
+
+def test_message_consumer_recovery_units_exclude_lower_confidence_findings():
+    assert derive_message_consumer_recovery_review_units([
+        {
+            "kind": "possible_message_consumer_without_recovery_policy",
+            "services": ["billing-service"],
+            "confidence": 0.44,
+            "detail": {},
+        },
+    ], {"billing-service"}) == []
+
+
+def test_message_consumer_recovery_units_yield_to_selected_producer_flow_review():
+    consumer_finding = {
+        "kind": "possible_message_consumer_without_recovery_policy",
+        "services": ["billing-service"],
+        "confidence": 0.45,
+        "detail": {
+            "consumer": {"queue": "billing.orders", "symbol": "BillingConsumer.onOrderCreated"},
+            "evidence": [{"file": "BillingConsumer.java", "start_line": 12, "end_line": 12}],
+        },
+    }
+    producer_finding = {
+        "kind": "possible_retry_write_publish_reaches_unrecovered_persistent_consumer",
+        "services": ["orders-service", "billing-service"],
+        "detail": {
+            "consumers": [{
+                "service": "billing-service", "symbol": "BillingConsumer.onOrderCreated", "queue": "billing.orders",
+            }],
+        },
+    }
+
+    assert derive_message_consumer_recovery_review_units(
+        [consumer_finding, producer_finding], {"orders-service", "billing-service"},
+    ) == []
 
 
 def test_retry_delivery_units_yield_to_unrecovered_consumer_evidence():

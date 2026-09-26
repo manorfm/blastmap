@@ -1032,6 +1032,85 @@ def derive_retry_unrecovered_consumer_delivery_review_units(
     return units
 
 
+def _unrecovered_rabbitmq_consumers_with_primary_retry_write_publish(
+    findings: list[dict], primary_services: set[str],
+) -> set[tuple[str, str, str]]:
+    """Identify consumer scopes already covered by a primary producer flow review."""
+    covered: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_write_publish_reaches_unrecovered_persistent_consumer":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        if (
+            not isinstance(services, list) or not services or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(detail.get("consumers"), list)
+        ):
+            continue
+        for consumer in detail["consumers"]:
+            if (
+                isinstance(consumer, dict) and isinstance(consumer.get("service"), str)
+                and isinstance(consumer.get("symbol"), str) and isinstance(consumer.get("queue"), str)
+            ):
+                covered.add((consumer["service"], consumer["symbol"], consumer["queue"]))
+    return covered
+
+
+def derive_message_consumer_recovery_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create bounded recovery reviews for RabbitMQ consumers lacking source proof.
+
+    The review is intentionally low-confidence: indexed source proves the consumer
+    and queue, but broker topology can be maintained elsewhere. A producer-flow
+    review takes precedence only when that producer is also in the selected scope.
+    """
+    covered = _unrecovered_rabbitmq_consumers_with_primary_retry_write_publish(findings, primary_services)
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_message_consumer_without_recovery_policy":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.45
+        ):
+            continue
+        consumer = detail.get("consumer")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(consumer, dict) or not isinstance(consumer.get("symbol"), str)
+            or not isinstance(consumer.get("queue"), str) or not isinstance(evidence, list) or not evidence
+        ):
+            continue
+        service = services[0]
+        symbol = consumer["symbol"]
+        queue = consumer["queue"]
+        key = service, symbol, queue
+        if key in seen or key in covered:
+            continue
+        seen.add(key)
+        units.append({
+            "id": f"message-consumer-recovery:{service}:{symbol}:{queue}",
+            "service": service,
+            "target": {"role": "entrypoint", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed RabbitMQ consumer recovery policy"),
+            "preconditions": [],
+            "related_contracts": [f"rabbitmq:{queue}"],
+            "dependencies": [],
+            "validation": [
+                f"verify RabbitMQ consumer {symbol} has a retry or dead-letter policy for queue {queue}",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_retry_consumer_delivery_review_units(
     findings: list[dict], primary_services: set[str],
 ) -> list[dict]:
