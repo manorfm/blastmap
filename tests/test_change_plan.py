@@ -30,6 +30,7 @@ from orbitkb.generation.change_plan import (
     derive_cloud_dead_letter_queue_review_units,
     derive_cloud_dependency_iac_review_units,
     derive_cloud_encryption_review_units,
+    derive_cloud_versioning_review_units,
     derive_error_mapping_review_units,
     derive_http_resilience_policy_review_units,
     derive_partial_write_resilience_review_units,
@@ -1798,6 +1799,49 @@ def test_cloud_encryption_units_exclude_lower_confidence_findings():
             "detail": {},
         },
     ], {"orders-service"}) == []
+
+
+def test_cloud_versioning_units_include_buckets_without_local_versioning_declaration():
+    assert derive_cloud_versioning_review_units([
+        {
+            "kind": "possible_missing_bucket_versioning",
+            "services": ["media-service"],
+            "reason": "media-service bucket 'uploads' has no source-proven versioning configuration.",
+            "confidence": 0.4,
+            "detail": {
+                "bucket": "uploads",
+                "evidence": [{"file": "infra/storage.tf", "start_line": 8, "end_line": 14}],
+            },
+        },
+    ], {"media-service"}) == [{
+        "id": "cloud-versioning:media-service:uploads",
+        "service": "media-service",
+        "target": {
+            "role": "deployment", "symbol": "object-storage:uploads",
+            "evidence": [{"file": "infra/storage.tf", "start_line": 8, "end_line": 14}],
+        },
+        "action": "review",
+        "reason": "media-service bucket 'uploads' has no source-proven versioning configuration.",
+        "preconditions": [],
+        "related_contracts": ["cloud:object_storage:uploads"],
+        "dependencies": [],
+        "validation": [
+            "verify versioning for object storage uploads is declared in IaC or covered by documented account or organization policy",
+        ],
+        "confidence": 0.4,
+        "evidence": [{"file": "infra/storage.tf", "start_line": 8, "end_line": 14}],
+    }]
+
+
+def test_cloud_versioning_units_exclude_lower_confidence_findings():
+    assert derive_cloud_versioning_review_units([
+        {
+            "kind": "possible_missing_bucket_versioning",
+            "services": ["media-service"],
+            "confidence": 0.39,
+            "detail": {},
+        },
+    ], {"media-service"}) == []
 
 
 def test_retry_downstream_error_units_include_a_resolved_endpoint_contract():

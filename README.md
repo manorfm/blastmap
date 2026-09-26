@@ -240,6 +240,10 @@ For a primary service with an indexed S3/SQS resource lacking a local encryption
 declaration, `plan_change` creates a `cloud-encryption` review. It asks to confirm IaC
 or documented account/organization policy, without claiming the resource is
 unencrypted at runtime.
+For a primary service with an indexed S3 bucket lacking local versioning declaration,
+`plan_change` creates a `cloud-versioning` review. It asks to confirm IaC or documented
+account/organization policy, without claiming object recovery controls are absent at
+runtime.
 For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific

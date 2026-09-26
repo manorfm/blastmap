@@ -266,6 +266,55 @@ def derive_cloud_encryption_review_units(
     return units
 
 
+def derive_cloud_versioning_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create deployment reviews for buckets lacking local versioning evidence.
+
+    Account or organization defaults can supply versioning outside indexed IaC. The
+    review asks for confirmation without claiming an object recovery control is absent.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_missing_bucket_versioning":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.4
+        ):
+            continue
+        bucket = detail.get("bucket")
+        evidence = detail.get("evidence")
+        if not isinstance(bucket, str) or not bucket or not isinstance(evidence, list) or not evidence:
+            continue
+        service = services[0]
+        key = service, bucket
+        if key in seen:
+            continue
+        seen.add(key)
+        contract = f"cloud:object_storage:{bucket}"
+        units.append({
+            "id": f"cloud-versioning:{service}:{bucket}",
+            "service": service,
+            "target": {"role": "deployment", "symbol": f"object-storage:{bucket}", "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed object storage versioning declaration"),
+            "preconditions": [],
+            "related_contracts": [contract],
+            "dependencies": [],
+            "validation": [
+                f"verify versioning for object storage {bucket} is declared in IaC or covered by documented account or organization policy",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_broad_timeout_handler_review_units(
     findings: list[dict], primary_services: set[str],
 ) -> list[dict]:
