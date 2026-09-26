@@ -75,7 +75,9 @@ def assess_change_units(
     }
 
 
-def summarize_change_closure(assessment: dict, ci_validation: dict, max_unit_ids: int = 3) -> dict:
+def summarize_change_closure(
+    assessment: dict, ci_validation: dict, manual_validation: dict, max_unit_ids: int = 3,
+) -> dict:
     """Summarize advisory closure state without asserting deployment approval."""
     omitted_units = assessment["omitted_change_units"]
     unassessable_units = assessment["unassessable_change_units"]
@@ -85,12 +87,19 @@ def summarize_change_closure(assessment: dict, ci_validation: dict, max_unit_ids
         "public_error_contract_breaks": len(assessment["public_error_contract_breaks"]),
     }
     validation_status = ci_validation["status"]
-    needs_attention = bool(omitted_units or risks["public_error_contract_breaks"] or validation_status == "failed")
+    manual_validation_status = manual_validation["status"]
+    needs_attention = bool(
+        omitted_units
+        or risks["public_error_contract_breaks"]
+        or validation_status == "failed"
+        or manual_validation_status == "failed"
+    )
     needs_review = bool(
         unassessable_units
         or risks["files_outside_planned_surface"]
         or risks["public_error_contracts_at_risk"]
         or validation_status in {"pending", "no_indexed_commands"}
+        or manual_validation_status == "pending"
     )
     return {
         "status": "needs_attention" if needs_attention else "needs_review" if needs_review else "ready_for_manual_review",
@@ -105,6 +114,7 @@ def summarize_change_closure(assessment: dict, ci_validation: dict, max_unit_ids
             "status": validation_status,
             "summary": ci_validation["summary"],
         },
+        "manual_validation": manual_validation,
         "outstanding_change_units": {
             "omitted": [unit["id"] for unit in omitted_units[:max_unit_ids]],
             "unassessable": [unit["id"] for unit in unassessable_units[:max_unit_ids]],

@@ -1,6 +1,6 @@
 {
   "type": "object",
-  "required": ["plan_id", "change_unit", "minimal_reading", "validation"],
+  "required": ["plan_id", "change_unit", "minimal_reading", "validation", "validation_status"],
   "additionalProperties": false,
   "properties": {
     "plan_id": {"type": "string", "pattern": "^cp_[1-9][0-9]*$"},
@@ -84,6 +84,36 @@
         }
       }
     },
-    "validation": {"type": "array", "items": {"type": "string"}}
+    "validation": {"type": "array", "items": {"type": "string"}},
+    "validation_status": {
+      "type": "object",
+      "required": ["summary", "checks"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "type": "object",
+          "required": ["total", "passed", "failed", "pending"],
+          "additionalProperties": false,
+          "properties": {
+            "total": {"type": "integer", "minimum": 0},
+            "passed": {"type": "integer", "minimum": 0},
+            "failed": {"type": "integer", "minimum": 0},
+            "pending": {"type": "integer", "minimum": 0}
+          }
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["index", "status"],
+            "additionalProperties": false,
+            "properties": {
+              "index": {"type": "integer", "minimum": 0},
+              "status": {"type": "string", "enum": ["pending", "passed", "failed"]}
+            }
+          }
+        }
+      }
+    }
   }
 }

@@ -2755,6 +2755,10 @@ def test_describe_change_unit_returns_only_the_persisted_unit_and_minimal_querie
             },
         ],
         "validation": ["verify payment_authorized remains compatible with notification-service"],
+        "validation_status": {
+            "summary": {"total": 1, "passed": 0, "failed": 0, "pending": 1},
+            "checks": [{"index": 0, "status": "pending"}],
+        },
     }
     validate(result, load_schema("describe_change_unit"))
 

@@ -542,6 +542,21 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             )
 
     @mcp.tool()
+    def record_change_unit_validation_result(
+        plan_id: str, change_unit_id: str, check_index: int, status: str,
+    ) -> dict:
+        """Record passed/failed for one persisted manual check on a ready plan unit.
+
+        check_index is the zero-based position in describe_change_unit.validation.
+        This tool accepts neither check text nor notes, so it can only report a
+        preplanned validation obligation and never stores source or free-form data.
+        """
+        with closing(_conn()) as conn:
+            return queries.record_change_unit_validation_result(
+                conn, plan_id, change_unit_id, check_index, status,
+            )
+
+    @mcp.tool()
     def describe_change_validation_status(plan_id: str, repository: str) -> dict:
         """Summarize current agent-reported CI validation for one ready change plan.
 

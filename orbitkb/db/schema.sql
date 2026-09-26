@@ -624,6 +624,20 @@ CREATE TABLE IF NOT EXISTS change_plan_ci_validation_results (
 CREATE INDEX IF NOT EXISTS idx_change_plan_ci_validation_results_plan
     ON change_plan_ci_validation_results(plan_id, repository_id);
 
+-- Agent-reported state for a checklist item already persisted on a plan unit.
+-- The check text lives only in change_units_json; no free-form result detail is stored.
+CREATE TABLE IF NOT EXISTS change_plan_manual_validation_results (
+    id             INTEGER PRIMARY KEY,
+    plan_id        INTEGER NOT NULL REFERENCES change_plan_runs(id) ON DELETE CASCADE,
+    change_unit_id TEXT NOT NULL,
+    check_index    INTEGER NOT NULL CHECK (check_index >= 0),
+    status         TEXT NOT NULL CHECK (status IN ('passed', 'failed')),
+    recorded_at    TEXT NOT NULL,
+    UNIQUE(plan_id, change_unit_id, check_index)
+);
+CREATE INDEX IF NOT EXISTS idx_change_plan_manual_validation_results_plan
+    ON change_plan_manual_validation_results(plan_id, change_unit_id);
+
 -- A static snapshot is valid only for the exact analyzer input digest and parser
 -- version. It stores no source content and is invalidated by external depth facts.
 CREATE TABLE IF NOT EXISTS static_analysis_snapshots (

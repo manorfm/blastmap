@@ -279,7 +279,8 @@ unit, both listing indexed consumers as dependencies. It performs no retrieval o
 model call. Retrying the same finalized selections is safe; changing a finalized
 choice is rejected, requiring a new plan and an explicit impact reassessment.
 
-`describe_change_unit` returns one persisted change unit, its validation checklist and
+`describe_change_unit` returns one persisted change unit, its validation checklist,
+the compact `validation_status` for every zero-based checklist index, and
 the smallest producer/consumer `describe_messages` queries needed to verify an event
 contract, or the client `describe_service` and remote `list_entrypoints` queries for a
 resolved HTTP boundary (including a retry against a resolved downstream HTTP error),
@@ -401,10 +402,16 @@ assessment includes a compact matching result.
 commands with `pending`, `failed` or `reported_passed` aggregate state. It is an
 agent-reported CI summary, not a release gate or evidence that manual unit checks are
 complete.
+`record_change_unit_validation_result(plan_id, change_unit_id, check_index, status)`
+records `passed` or `failed` only for a zero-based check index already persisted on a
+ready plan unit. It never accepts new check text, notes, command output or source
+content. A pending persisted check keeps the closure in review; a failed one needs
+attention.
 `review_change_closure(plan_id, repository, since_commit)` combines this compact
 validation state with a fresh bounded Git assessment. Its `needs_attention` status
-covers reported CI failure, a confirmed public error-contract break or an omitted
-source-backed plan unit; `needs_review` retains uncertainty. Even
+covers reported CI or persisted manual-check failure, a confirmed public error-contract
+break or an omitted source-backed plan unit; `needs_review` retains uncertainty and
+pending persisted checks. Even
 `ready_for_manual_review` is advisory and does not approve deployment or prove runtime
 behavior.
 The result also lists changed files outside services named by the plan and every

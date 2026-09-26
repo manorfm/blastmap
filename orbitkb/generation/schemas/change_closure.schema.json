@@ -8,6 +8,7 @@
     "coverage",
     "risks",
     "ci_validation",
+    "manual_validation",
     "outstanding_change_units"
   ],
   "additionalProperties": false,
@@ -49,6 +50,25 @@
           "additionalProperties": false,
           "properties": {
             "total": {"type": "integer", "minimum": 0, "maximum": 3},
+            "passed": {"type": "integer", "minimum": 0},
+            "failed": {"type": "integer", "minimum": 0},
+            "pending": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "manual_validation": {
+      "type": "object",
+      "required": ["status", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {"type": "string", "enum": ["no_manual_checks", "pending", "failed", "reported_passed"]},
+        "summary": {
+          "type": "object",
+          "required": ["total", "passed", "failed", "pending"],
+          "additionalProperties": false,
+          "properties": {
+            "total": {"type": "integer", "minimum": 0},
             "passed": {"type": "integer", "minimum": 0},
             "failed": {"type": "integer", "minimum": 0},
             "pending": {"type": "integer", "minimum": 0}

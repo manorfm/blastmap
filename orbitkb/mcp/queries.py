@@ -26,6 +26,9 @@ from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import (
     kubernetes_configuration as kubernetes_configuration_repo,
 )
+from orbitkb.db.repositories import (
+    manual_validation_results as manual_validation_results_repo,
+)
 from orbitkb.db.repositories import messages as messages_repo
 from orbitkb.db.repositories import persistence as persistence_repo
 from orbitkb.db.repositories import repositories as repositories_repo
@@ -2000,6 +2003,32 @@ def describe_change_validation_status(conn: sqlite3.Connection, plan_id: object,
     }
 
 
+def _manual_validation_summary(conn: sqlite3.Connection, plan_id: int, change_units: list[dict]) -> dict:
+    """Summarize persisted unit checks without exposing or accepting result text."""
+    results = {
+        (result["change_unit_id"], result["check_index"]): result["status"]
+        for result in manual_validation_results_repo.list_results(conn, plan_id)
+    }
+    statuses = [
+        results.get((unit["id"], check_index), "pending")
+        for unit in change_units
+        for check_index, _check in enumerate(unit.get("validation", []))
+    ]
+    summary = {
+        "total": len(statuses),
+        "passed": sum(status == "passed" for status in statuses),
+        "failed": sum(status == "failed" for status in statuses),
+        "pending": sum(status == "pending" for status in statuses),
+    }
+    status = (
+        "no_manual_checks" if not statuses
+        else "failed" if summary["failed"]
+        else "pending" if summary["pending"]
+        else "reported_passed"
+    )
+    return {"status": status, "summary": summary}
+
+
 def record_ci_validation_result(
     conn: sqlite3.Connection,
     plan_id: object,
@@ -2051,6 +2080,38 @@ def record_ci_validation_result(
         "duration_ms": duration_ms,
     })
     return {"ok": True, "status": status, "duration_ms": duration_ms}
+
+
+def record_change_unit_validation_result(
+    conn: sqlite3.Connection, plan_id: object, change_unit_id: object, check_index: object, status: object,
+) -> dict:
+    """Persist an agent-reported state for one pre-existing manual validation check."""
+    if not isinstance(plan_id, str) or (match := re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)) is None:
+        return {"error": "plan_id must have the form cp_<positive integer>"}
+    stored_plan = change_plans_repo.get_plan(conn, int(match.group(1)))
+    if stored_plan is None:
+        return {"error": f"unknown plan_id: {plan_id}"}
+    if stored_plan["status"] != "ready":
+        return {"error": f"plan must be ready before recording validation (status: {stored_plan['status']})"}
+    if not isinstance(change_unit_id, str) or not change_unit_id:
+        return {"error": "change_unit_id must be a non-empty string"}
+    if not isinstance(check_index, int) or isinstance(check_index, bool):
+        return {"error": "check_index must identify a persisted validation check"}
+    if not isinstance(status, str) or status not in {"passed", "failed"}:
+        return {"error": "status must be 'passed' or 'failed'"}
+    change_unit = next(
+        (unit for unit in json.loads(stored_plan["change_units_json"]) if unit.get("id") == change_unit_id),
+        None,
+    )
+    if change_unit is None:
+        return {"error": f"unknown change_unit_id: {change_unit_id}"}
+    validation = change_unit.get("validation")
+    if not isinstance(validation, list) or not 0 <= check_index < len(validation):
+        return {"error": "check_index must identify a persisted validation check"}
+    manual_validation_results_repo.record_result(
+        conn, int(match.group(1)), change_unit_id, check_index, status,
+    )
+    return {"ok": True, "status": status}
 
 
 def _measure_plan_response(response: dict) -> TokenMeasurement:
@@ -2169,10 +2230,33 @@ def describe_change_unit(conn: sqlite3.Connection, plan_id: str, change_unit_id:
         "change_unit": change_unit,
         "minimal_reading": _minimal_unit_reading(change_unit),
         "validation": change_unit["validation"],
+        "validation_status": _change_unit_validation_status(conn, int(match.group(1)), change_unit),
     }
     if (evidence_follow_up := _evidence_follow_up(change_unit)) is not None:
         response["evidence_follow_up"] = evidence_follow_up
     return response
+
+
+def _change_unit_validation_status(conn: sqlite3.Connection, plan_id: int, change_unit: dict) -> dict:
+    """Project current structured statuses without duplicating persisted check text."""
+    results = {
+        result["check_index"]: result["status"]
+        for result in manual_validation_results_repo.list_results(conn, plan_id)
+        if result["change_unit_id"] == change_unit["id"]
+    }
+    checks = [
+        {"index": index, "status": results.get(index, "pending")}
+        for index, _check in enumerate(change_unit["validation"])
+    ]
+    return {
+        "summary": {
+            "total": len(checks),
+            "passed": sum(check["status"] == "passed" for check in checks),
+            "failed": sum(check["status"] == "failed" for check in checks),
+            "pending": sum(check["status"] == "pending" for check in checks),
+        },
+        "checks": checks,
+    }
 
 
 def validate_runtime_configuration_follow_up(
@@ -2341,7 +2425,15 @@ def review_change_closure(conn: sqlite3.Connection, plan_id: str, repository: st
     ci_validation = describe_change_validation_status(conn, plan_id, repository)
     if "error" in ci_validation:
         return ci_validation
-    closure = summarize_change_closure(assessment, ci_validation, MAX_CLOSURE_CHANGE_UNIT_IDS)
+    stored_plan = change_plans_repo.get_plan(conn, int(plan_id.removeprefix("cp_")))
+    if stored_plan is None:
+        return {"error": f"unknown plan_id: {plan_id}"}
+    manual_validation = _manual_validation_summary(
+        conn, int(plan_id.removeprefix("cp_")), json.loads(stored_plan["change_units_json"]),
+    )
+    closure = summarize_change_closure(
+        assessment, ci_validation, manual_validation, MAX_CLOSURE_CHANGE_UNIT_IDS,
+    )
     return {
         "plan_id": plan_id,
         "repository": repository,

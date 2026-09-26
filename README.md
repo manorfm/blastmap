@@ -114,7 +114,8 @@ Start broad, then narrow the request.
 | Inspect feature-flag reads | `describe_feature_flags` | `describe_entrypoint`, `list_security_findings` |
 | Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
 | Inspect indexed CI validation commands | `describe_ci_commands` | `plan_change`, `assess_working_change` |
-| Review reported plan validation | `describe_change_validation_status` | `record_ci_validation_result` |
+| Report a persisted unit check | `describe_change_unit` | `record_change_unit_validation_result` |
+| Review reported plan validation | `describe_change_validation_status` | `record_ci_validation_result`, `record_change_unit_validation_result` |
 | Review advisory plan closure | `review_change_closure` | `describe_change_unit`, `assess_working_change` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |
 | Compare runtime and static paths | `describe_runtime_divergence` | `describe_entrypoint` |
@@ -164,7 +165,8 @@ an LLM, then returns source-bounded contract units for the selected event strate
 finalized decision is immutable within that plan.
 The validation hint never executes commands and deliberately excludes migrations and
 client generation; use `describe_ci_commands` when those need review.
-`describe_change_unit` exposes one accepted unit with its validation and the smallest
+`describe_change_unit` exposes one accepted unit with its validation, compact status
+for each zero-based validation-check index, and the smallest
 producer/consumer contract queries needed before editing. Deployment reviews direct
 the agent to indexed cloud dependencies and IaC declarations rather than unrelated
 message contracts. Entrypoint reviews direct it to the indexed endpoint contract and
@@ -410,9 +412,15 @@ assessment returns the matching compact result.
 `describe_change_validation_status` then summarizes at most three indexed test/build
 commands as `pending`, `failed`, or `reported_passed`. It is a compact agent report,
 not release approval or proof that manual change-unit checks are complete.
+For each preplanned manual check, an agent can call
+`record_change_unit_validation_result` with only the plan unit ID, its zero-based
+check index and `passed`/`failed`. It cannot submit a new check, free-form note,
+command output or source content. The unit detail projects that result without
+duplicating the check text.
 `review_change_closure` combines that report with one bounded Git assessment. It uses
-`needs_attention` for a failed reported validation, a confirmed public-error-contract
-break or an omitted source-backed plan unit; `needs_review` for remaining uncertainty;
+`needs_attention` for a failed reported validation (including a persisted manual
+check), a confirmed public-error-contract break or an omitted source-backed plan unit;
+`needs_review` for remaining uncertainty or pending persisted manual checks;
 and `ready_for_manual_review` only when its bounded checks are clear. It never approves
 a deployment or infers runtime behavior.
 
