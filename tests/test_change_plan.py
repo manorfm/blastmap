@@ -15,6 +15,7 @@ from orbitkb.analysis.models import (
 )
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import change_plans
+from orbitkb.db.repositories import ci_commands as ci_commands_repo
 from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import (
     kubernetes_configuration as kubernetes_configuration_repo,
@@ -80,6 +81,7 @@ def test_plan_change_wraps_the_indexed_surface_in_a_stable_initial_contract(tmp_
     }]
     assert result["decision_points"] == []
     assert result["change_units"] == []
+    assert result["ci_validation_commands"] == []
     assert result["budget"]["requested_tokens"] == 2200
     assert result["budget"]["estimated_tokens"] > 0
     assert result["budget"]["measurement"] == "byte_estimate"
@@ -93,6 +95,46 @@ def test_plan_change_wraps_the_indexed_surface_in_a_stable_initial_contract(tmp_
     assert plan["estimated_tokens"] == result["budget"]["estimated_tokens"]
     assert plan["token_measurement"] == result["budget"]["measurement"]
     assert plan["truncated"] == 0
+
+
+def test_plan_change_recommends_deduplicated_safe_ci_validation_commands_for_the_selected_repository(tmp_path):
+    conn = _build_pix_fixture(tmp_path / "plan-ci-commands.db")
+    repository_id = repositories_repo.ensure_repository(conn, "checkout-repo", "/tmp/checkout-repo")
+    conn.execute("UPDATE services SET repository_id = ?", (repository_id,))
+    conn.commit()
+    ci_commands_repo.replace_ci_commands(conn, repository_id, [
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "test", "command": "npm test",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 5, "end_line": 5},
+        },
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "build", "command": "npm run build",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 6, "end_line": 6},
+        },
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "test", "command": "npm test",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 7, "end_line": 7},
+        },
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "migration", "command": "npm run migrate",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 8, "end_line": 8},
+        },
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "client_generation", "command": "npm run generate",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 9, "end_line": 9},
+        },
+    ])
+
+    result = queries.plan_change(conn, FakeBackend({
+        "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
+        "secondary": [], "no_change": [],
+    }), "Add a payment method", repository="checkout-repo")
+
+    assert result["ci_validation_commands"] == [
+        {"kind": "test", "command": "npm test", "workflow_path": ".github/workflows/ci.yml"},
+        {"kind": "build", "command": "npm run build", "workflow_path": ".github/workflows/ci.yml"},
+    ]
+    validate(result, load_schema("plan_change"))
 
 
 def test_plan_change_persists_the_tokenizer_measurement_when_available(tmp_path, monkeypatch):

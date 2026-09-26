@@ -6,6 +6,7 @@
     "surface",
     "decision_points",
     "change_units",
+    "ci_validation_commands",
     "unknowns",
     "budget"
   ],
@@ -46,6 +47,20 @@
       }
     },
     "change_units": {"type": "array", "items": {"type": "object"}},
+    "ci_validation_commands": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["kind", "command", "workflow_path"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"type": "string", "enum": ["test", "build"]},
+          "command": {"type": "string", "minLength": 1},
+          "workflow_path": {"type": "string", "minLength": 1}
+        }
+      }
+    },
     "unknowns": {"type": "array", "items": {"type": "object"}},
     "budget": {
       "type": "object",

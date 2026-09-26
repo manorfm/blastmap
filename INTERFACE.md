@@ -44,8 +44,9 @@ reanalyzes the service.
 1. Call `plan_change(task, repository?, token_budget?)` for the stable planning
    envelope, `get_change_context(task, repository?, max_services?, epic_type?)` for a
    compact implementation briefing, or `find_change_surface(task, repository?)` when
-   only impact inference is needed. All require the repository whenever the KB reports
-   duplicate service identities.
+   only impact inference is needed. For an explicit repository, the plan includes up
+   to three deduplicated, indexed `test`/`build` commands as a non-executing validation
+   hint. All require the repository whenever the KB reports duplicate service identities.
 2. When `plan_change` returns `needs_decision`, call
    `refine_change_plan(plan_id, decisions)` with exactly one declared option for every
    pending decision. This updates the existing plan without rerunning retrieval.
@@ -55,18 +56,18 @@ reanalyzes the service.
    to compare the ready plan with a bounded Git diff. It is advisory only.
 5. Call `describe_ci_commands(repository)` when validation, migration or generated
    clients may change; it returns only safe, literal GitHub Actions commands.
-5. Call `list_services(repository?)`; use its repository field to qualify
+6. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
-6. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, gRPC, message, CLI or
+7. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, gRPC, message, CLI or
    job entrypoint. A `grpc` entrypoint sourced from Protobuf describes only its declared
    wire signature; handler and client linkage remain unknown until separately proven.
-7. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
+8. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
    reachable deterministic flow evidence. For an exact AST-proven HTTP route, its
    `contract.formal_contract` can also expose a matching conventional OpenAPI/Swagger
    operation's ID, response statuses, request-body requirement, security state and
    file/line evidence. Referenced request bodies are `null` until a future parser can
    resolve them safely; ambiguous operations from multiple specifications are omitted.
-8. Call `describe_error_flow(service, kind, method, name)` only when a selected HTTP
+9. Call `describe_error_flow(service, kind, method, name)` only when a selected HTTP
    flow crosses an indexed internal HTTP client boundary and its error semantics matter.
    It needs a literal call, a reachable downstream HTTP contract and a matching reachable
    caller mapping; otherwise it returns explicit unknowns rather than inventing a failure.
@@ -93,10 +94,10 @@ reanalyzes the service.
    global formatters remain unknown. A direct first argument such as `error.message`
    is additionally recorded only as an internal-detail exposure boolean; wrapped or
    sanitized values remain unknown.
-9. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_runtime_configuration`, `describe_feature_flags`, `describe_messages`,
+10. Use `describe_api`, `describe_persistence`, `describe_configuration`, `describe_runtime_configuration`, `describe_feature_flags`, `describe_messages`,
    `describe_cloud_dependencies` or `get_relationships` only when the selected flow
    requires them.
-10. Call `list_security_findings(service)` before changing credentials,
+11. Call `list_security_findings(service)` before changing credentials,
    configuration or an external integration; it returns locations and remediation,
    never source excerpts or secret values.
 

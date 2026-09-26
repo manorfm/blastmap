@@ -95,6 +95,7 @@ DEFAULT_FLOW_EDGE_LIMIT = 50
 MAX_FLOW_EDGE_LIMIT = 200
 DEFAULT_PLAN_TOKEN_BUDGET = 2200
 MAX_PLAN_TOKEN_BUDGET = 2200
+MAX_PLAN_CI_VALIDATION_COMMANDS = 3
 _FLOW_KINDS = {"invokes", "injects", "validates", "reads", "writes", "publishes", "consumes"}
 _EPIC_TYPE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _RUNTIME_FILTER_DIMENSION_PRIORITY = {
@@ -1881,6 +1882,7 @@ def plan_change(
         },
         "decision_points": decision_points,
         "change_units": change_units,
+        "ci_validation_commands": _plan_ci_validation_commands(conn, repository_id),
         "unknowns": change_surface_result["unknowns"],
         "budget": {
             "requested_tokens": token_budget, "estimated_tokens": 0,
@@ -1893,6 +1895,29 @@ def plan_change(
         conn, plan_run_id, response["budget"]["estimated_tokens"], response["budget"]["truncated"], measurement.method,
     )
     return response
+
+
+def _plan_ci_validation_commands(conn: sqlite3.Connection, repository_id: int | None) -> list[dict]:
+    """Return a tiny, safe validation hint without expanding the plan into CI detail."""
+    if repository_id is None:
+        return []
+    commands: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for command in ci_commands_repo.list_ci_commands(conn, repository_id):
+        if command["kind"] not in {"test", "build"}:
+            continue
+        identity = (command["kind"], command["command"])
+        if identity in seen:
+            continue
+        seen.add(identity)
+        commands.append({
+            "kind": command["kind"],
+            "command": command["command"],
+            "workflow_path": command["workflow_path"],
+        })
+        if len(commands) == MAX_PLAN_CI_VALIDATION_COMMANDS:
+            break
+    return commands
 
 
 def _measure_plan_response(response: dict) -> TokenMeasurement:

@@ -150,7 +150,9 @@ Parameterized Liquibase values and YAML changelogs are intentionally not inferre
 These facts never claim that a migration has run or is safe for deployed data.
 
 `plan_change` is the stable entrypoint for the planning workflow. Its initial version
-returns the evidence-backed affected surface, explicit unknowns and a response budget;
+returns the evidence-backed affected surface, explicit unknowns, up to three distinct
+indexed CI `test`/`build` validation commands for an explicitly selected repository,
+and a response budget;
 it emits a blocking decision only when an indexed primary event producer has known
 consumers, and never guesses code-level change units from service-level matches. Each
 response has a durable plan ID with audit metadata; it links to an existing surface
@@ -158,6 +160,8 @@ run when available and does not duplicate the task text. `refine_change_plan` re
 one declared option for every pending decision without repeating retrieval or calling
 an LLM, then returns source-bounded contract units for the selected event strategy; a
 finalized decision is immutable within that plan.
+The validation hint never executes commands and deliberately excludes migrations and
+client generation; use `describe_ci_commands` when those need review.
 `describe_change_unit` exposes one accepted unit with its validation and the smallest
 producer/consumer contract queries needed before editing. Deployment reviews direct
 the agent to indexed cloud dependencies and IaC declarations rather than unrelated
