@@ -22,12 +22,13 @@
       "maxItems": 3,
       "items": {
         "type": "object",
-        "required": ["kind", "command", "workflow_path", "status", "duration_ms"],
+        "required": ["kind", "command", "workflow_path", "start_line", "status", "duration_ms"],
         "additionalProperties": false,
         "properties": {
           "kind": {"type": "string", "enum": ["test", "build"]},
           "command": {"type": "string", "minLength": 1},
           "workflow_path": {"type": "string", "minLength": 1},
+          "start_line": {"type": "integer", "minimum": 1},
           "status": {"type": "string", "enum": ["passed", "failed", "pending"]},
           "duration_ms": {"type": ["integer", "null"], "minimum": 0}
         }

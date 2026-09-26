@@ -53,15 +53,15 @@ def test_change_validation_status_summarizes_compact_current_results(tmp_path):
         "commands": [
             {
                 "kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml",
-                "status": "passed", "duration_ms": 800,
+                "start_line": 5, "status": "passed", "duration_ms": 800,
             },
             {
                 "kind": "build", "command": "npm run build", "workflow_path": ".github/workflows/ci.yml",
-                "status": "failed", "duration_ms": None,
+                "start_line": 6, "status": "failed", "duration_ms": None,
             },
             {
                 "kind": "test", "command": "pytest integration", "workflow_path": ".github/workflows/ci.yml",
-                "status": "pending", "duration_ms": None,
+                "start_line": 7, "status": "pending", "duration_ms": None,
             },
         ],
     }

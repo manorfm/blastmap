@@ -414,6 +414,8 @@ assessment returns the matching compact result.
 `describe_change_validation_status` then summarizes at most three indexed test/build
 commands as `pending`, `failed`, or `reported_passed`. It is a compact agent report,
 not release approval or proof that manual change-unit checks are complete.
+Each listed command includes its indexed workflow line, so the agent can report its
+result directly without another CI lookup.
 For each preplanned manual check, an agent can call
 `record_change_unit_validation_result` with only the plan unit ID, its zero-based
 check index and `passed`/`failed`. It cannot submit a new check, free-form note,

@@ -405,7 +405,7 @@ assessment includes a compact matching result.
 `describe_change_validation_status(plan_id, repository)` provides the same bounded
 commands with `pending`, `failed` or `reported_passed` aggregate state. It is an
 agent-reported CI summary, not a release gate or evidence that manual unit checks are
-complete.
+complete. Each command carries its indexed workflow line for direct result reporting.
 `record_change_unit_validation_result(plan_id, change_unit_id, check_index, status)`
 records `passed` or `failed` only for a zero-based check index already persisted on a
 ready plan unit. It never accepts new check text, notes, command output or source

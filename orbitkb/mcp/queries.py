@@ -2003,6 +2003,12 @@ def describe_change_validation_status(conn: sqlite3.Connection, plan_id: object,
     if repo is None:
         return {"error": f"unknown repository: {repository}"}
     commands = _compact_ci_validation_commands(conn, repo["id"])
+    start_lines: dict[tuple[str, str, str], int] = {}
+    for indexed_command in ci_commands_repo.list_ci_commands(conn, repo["id"]):
+        identity = (
+            indexed_command["kind"], indexed_command["command"], indexed_command["workflow_path"],
+        )
+        start_lines.setdefault(identity, indexed_command["start_line"])
     results_by_command = {
         (result["kind"], result["command"], result["workflow_path"]): result
         for result in _ci_validation_result_summaries(conn, int(match.group(1)), repo["id"], commands)
@@ -2012,6 +2018,7 @@ def describe_change_validation_status(conn: sqlite3.Connection, plan_id: object,
         result = results_by_command.get((command["kind"], command["command"], command["workflow_path"]))
         command_statuses.append({
             **command,
+            "start_line": start_lines[(command["kind"], command["command"], command["workflow_path"])],
             "status": result["status"] if result is not None else "pending",
             "duration_ms": result["duration_ms"] if result is not None else None,
         })
@@ -2533,19 +2540,10 @@ def review_change_closure(conn: sqlite3.Connection, plan_id: str, repository: st
     manual_validation, manual_outstanding = _manual_validation_breakdown(
         conn, int(plan_id.removeprefix("cp_")), json.loads(stored_plan["change_units_json"]),
     )
-    repo = repositories_repo.get_repository_by_name(conn, repository)
-    if repo is None:
-        return {"error": f"unknown repository: {repository}"}
-    start_lines: dict[tuple[str, str, str], int] = {}
-    for indexed_command in ci_commands_repo.list_ci_commands(conn, repo["id"]):
-        identity = (
-            indexed_command["kind"], indexed_command["command"], indexed_command["workflow_path"],
-        )
-        start_lines.setdefault(identity, indexed_command["start_line"])
     ci_outstanding = [
         {
             "workflow_path": command["workflow_path"],
-            "start_line": start_lines[(command["kind"], command["command"], command["workflow_path"])],
+            "start_line": command["start_line"],
             "kind": command["kind"],
             "status": command["status"],
         }
