@@ -163,6 +163,8 @@ client and endpoint reading path. A partial-write resilience review instead read
 local service boundary only, because the static call does not necessarily resolve a
 remote endpoint. A retry-policy review similarly reads the local service because its
 source-proven permanent error does not establish a message or remote contract.
+A retry-HTTP-idempotency review uses the same local service context because its target
+is a literal call boundary, not necessarily an indexed endpoint.
 When a primary service has a source-proven internal HTTP call whose remote method and
 route are indexed, `plan_change` also creates a contract-review unit for that boundary.
 It also adds an error-mapping review only for a high-confidence, source-proven local
@@ -181,6 +183,9 @@ For a primary service, a literal retry policy in the same symbol as a source-pro
 non-retryable local error creates a `retry-policy` review. It asks to verify that the
 retry predicate excludes the permanent error, without assuming the recorded branch is
 actually retried at runtime.
+For a primary service, a literal retry over an indexed `POST` or `PATCH` call creates a
+`retry-http-idempotency` review. It asks for an idempotency key or documented
+server-side de-duplication; the HTTP method alone does not claim a retry is unsafe.
 For a primary producer that writes, retries a literal message publication and reaches
 a state-writing consumer through the same literal channel, `plan_change` creates a
 `retry-delivery` review. It links the persistent consumers as dependencies and asks

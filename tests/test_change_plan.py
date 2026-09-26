@@ -35,6 +35,7 @@ from orbitkb.generation.change_plan import (
     derive_retry_consumer_delivery_review_units,
     derive_retry_delivery_review_units,
     derive_retry_downstream_error_review_units,
+    derive_retry_http_idempotency_review_units,
     derive_retry_policy_review_units,
     derive_retry_write_publish_review_units,
     derive_runtime_configuration_review_units,
@@ -1476,6 +1477,64 @@ def test_retry_delivery_units_exclude_low_confidence_findings():
             "detail": {},
         },
     ], {"orders-service"}) == []
+
+
+def test_retry_http_idempotency_units_include_literal_post_retries():
+    assert derive_retry_http_idempotency_review_units([
+        {
+            "kind": "possible_retry_on_non_idempotent_http_call",
+            "services": ["checkout-service"],
+            "reason": "CheckoutService.submit retries payments-service POST /payments; validate repeat safety.",
+            "confidence": 0.65,
+            "detail": {
+                "caller": {"service": "checkout-service", "symbol": "CheckoutService.submit"},
+                "target": {"service": "payments-service", "method": "POST", "path": "/payments"},
+                "retry_policies": [{"mechanism": "reactor.retry", "value": 3, "unit": "attempts"}],
+                "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+            },
+        },
+    ], {"checkout-service"}) == [{
+        "id": "retry-http-idempotency:checkout-service:CheckoutService.submit:payments-service:POST:/payments",
+        "service": "checkout-service",
+        "target": {
+            "role": "application_flow", "symbol": "CheckoutService.submit",
+            "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+        },
+        "action": "review",
+        "reason": "CheckoutService.submit retries payments-service POST /payments; validate repeat safety.",
+        "preconditions": [],
+        "related_contracts": ["POST /payments"],
+        "dependencies": ["payments-service"],
+        "validation": [
+            "verify POST /payments supports an idempotency key or documented server-side de-duplication before retrying in CheckoutService.submit",
+        ],
+        "confidence": 0.65,
+        "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+    }]
+
+
+def test_retry_http_idempotency_units_exclude_low_confidence_findings():
+    assert derive_retry_http_idempotency_review_units([
+        {
+            "kind": "possible_retry_on_non_idempotent_http_call",
+            "services": ["checkout-service"],
+            "confidence": 0.64,
+            "detail": {},
+        },
+    ], {"checkout-service"}) == []
+
+
+def test_retry_http_idempotency_review_units_read_the_local_http_boundary():
+    assert queries._minimal_unit_reading({
+        "id": "retry-http-idempotency:checkout-service:CheckoutService.submit:payments-service:POST:/payments",
+        "service": "checkout-service",
+        "target": {"role": "application_flow", "symbol": "CheckoutService.submit"},
+        "dependencies": ["payments-service"],
+    }) == [{
+        "service": "checkout-service",
+        "purpose": "confirm retry idempotency at the indexed outbound HTTP boundary",
+        "recommended_query": {"tool": "describe_service", "arguments": {"service": "checkout-service"}},
+    }]
 
 
 def test_retry_downstream_error_units_include_a_resolved_endpoint_contract():

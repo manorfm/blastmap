@@ -51,6 +51,7 @@ from orbitkb.generation.change_plan import (
     derive_retry_consumer_delivery_review_units,
     derive_retry_delivery_review_units,
     derive_retry_downstream_error_review_units,
+    derive_retry_http_idempotency_review_units,
     derive_retry_policy_review_units,
     derive_retry_write_publish_review_units,
     derive_runtime_configuration_mismatch_review_units,
@@ -1798,6 +1799,7 @@ def plan_change(
             *derive_cloud_dependency_iac_review_units(architecture_findings, error_mapping_services),
             *derive_error_mapping_review_units(architecture_findings, error_mapping_services),
             *derive_retry_policy_review_units(architecture_findings, error_mapping_services),
+            *derive_retry_http_idempotency_review_units(architecture_findings, error_mapping_services),
             *derive_retry_delivery_review_units(architecture_findings, error_mapping_services),
             *derive_retry_consumer_delivery_review_units(architecture_findings, error_mapping_services),
             *derive_retry_downstream_error_review_units(architecture_findings, error_mapping_services),
@@ -2132,6 +2134,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
         return [{
             "service": producer,
             "purpose": "confirm the indexed local retry policy and error flow",
+            "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
+        }]
+    if change_unit["id"].startswith("retry-http-idempotency:"):
+        return [{
+            "service": producer,
+            "purpose": "confirm retry idempotency at the indexed outbound HTTP boundary",
             "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
         }]
     if change_unit["target"]["role"] == "error_mapping":

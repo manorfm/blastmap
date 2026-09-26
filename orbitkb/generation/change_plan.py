@@ -538,6 +538,70 @@ def derive_retry_policy_review_units(findings: list[dict], primary_services: set
     return units
 
 
+def derive_retry_http_idempotency_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create local reviews for literal retries of POST/PATCH calls.
+
+    These methods are not proof that a retry is unsafe: the target may have an
+    idempotency key or server-side de-duplication. The unit therefore requires the
+    detector's source-backed call and policy facts, then asks for confirmation.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_on_non_idempotent_http_call":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.65
+        ):
+            continue
+        caller = detail.get("caller")
+        target = detail.get("target")
+        retry_policies = detail.get("retry_policies")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(caller, dict) or not isinstance(target, dict) or not isinstance(retry_policies, list)
+            or not retry_policies or not isinstance(evidence, list) or not evidence
+            or caller.get("service") != services[0] or not isinstance(caller.get("symbol"), str)
+            or not isinstance(target.get("service"), str) or target.get("method") not in {"POST", "PATCH"}
+            or not isinstance(target.get("path"), str) or not target["path"]
+            or not all(isinstance(policy, dict) and isinstance(policy.get("mechanism"), str) for policy in retry_policies)
+        ):
+            continue
+        service = services[0]
+        symbol = caller["symbol"]
+        dependency = target["service"]
+        method = target["method"]
+        path = target["path"]
+        key = service, symbol, dependency, method, path
+        if key in seen:
+            continue
+        seen.add(key)
+        contract = f"{method} {path}"
+        units.append({
+            "id": f"retry-http-idempotency:{service}:{symbol}:{dependency}:{method}:{path}",
+            "service": service,
+            "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review retry safety for the indexed HTTP mutation"),
+            "preconditions": [],
+            "related_contracts": [contract],
+            "dependencies": [dependency],
+            "validation": [
+                f"verify {contract} supports an idempotency key or documented server-side de-duplication "
+                f"before retrying in {symbol}",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_retry_delivery_review_units(findings: list[dict], primary_services: set[str]) -> list[dict]:
     """Create duplicate-effect reviews for retrying producers and persistent consumers.
 

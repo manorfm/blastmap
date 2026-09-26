@@ -185,6 +185,9 @@ dependency and asks for an explicit boundary translation review. A primary servi
 can receive a `retry-policy` review when a literal retry and a source-proven
 non-retryable local error share a symbol; it asks to validate the retry predicate and
 does not claim that the branch is retried at runtime. A primary service can receive a
+`retry-http-idempotency` review for a literal retried `POST` or `PATCH`; it asks for an
+idempotency key or documented server-side de-duplication without claiming that the
+HTTP method makes the retry unsafe. A primary service can receive a
 `retry-delivery` review when its retrying, state-writing publisher has a literal
 channel consumed by another source-proven state-writing service. The consumers are
 dependencies and validation asks for producer outbox/idempotency plus consumer
@@ -268,6 +271,8 @@ For a partial-write resilience review, the smallest context is the producer's
 necessarily resolve an indexed remote endpoint.
 For a retry-policy review, `describe_service` is likewise the smallest context because
 the source-proven permanent error is local to its selected application flow.
+For a retry-HTTP-idempotency review, it is also the smallest context because the
+literal target call does not necessarily resolve an indexed endpoint.
 Truncated scopes also report `evidence_total`.
 `describe_change_unit` adds `evidence_follow_up` only in that case, directing the
 agent to complete runtime-configuration context and listing the affected
