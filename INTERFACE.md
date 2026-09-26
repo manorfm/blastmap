@@ -421,7 +421,8 @@ covers reported CI or persisted manual-check failure, a confirmed public error-c
 break or an omitted source-backed plan unit; `needs_review` retains uncertainty and
 pending persisted checks. Even
 `ready_for_manual_review` is advisory and does not approve deployment or prove runtime
-behavior.
+behavior. Its bounded outstanding-unit lists include up to three manually pending and
+manually failed unit IDs, alongside omitted and unassessable units.
 The result also lists changed files outside services named by the plan and every
 remaining validation obligation. It is an advisory, read-only check, never an
 implementation gate.

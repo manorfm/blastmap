@@ -78,11 +78,13 @@
     },
     "outstanding_change_units": {
       "type": "object",
-      "required": ["omitted", "unassessable"],
+      "required": ["omitted", "unassessable", "manual_pending", "manual_failed"],
       "additionalProperties": false,
       "properties": {
         "omitted": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
-        "unassessable": {"type": "array", "maxItems": 3, "items": {"type": "string"}}
+        "unassessable": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+        "manual_pending": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+        "manual_failed": {"type": "array", "maxItems": 3, "items": {"type": "string"}}
       }
     }
   }

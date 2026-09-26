@@ -2038,16 +2038,32 @@ def describe_change_validation_status(conn: sqlite3.Connection, plan_id: object,
 
 def _manual_validation_summary(conn: sqlite3.Connection, plan_id: int, change_units: list[dict]) -> dict:
     """Summarize persisted unit checks without exposing or accepting result text."""
+    summary, _outstanding = _manual_validation_breakdown(conn, plan_id, change_units)
+    return summary
+
+
+def _manual_validation_breakdown(
+    conn: sqlite3.Connection, plan_id: int, change_units: list[dict],
+) -> tuple[dict, dict[str, list[str]]]:
+    """Return aggregate state plus only IDs of units still needing manual action."""
     results = {
         (result["change_unit_id"], result["check_index"]): result["status"]
         for result in manual_validation_results_repo.list_results(conn, plan_id)
     }
-    statuses = [
-        results.get((unit["id"], check_index), "pending")
+    statuses_by_unit = [
+        (unit["id"], [results.get((unit["id"], index), "pending") for index, _check in enumerate(unit.get("validation", []))])
         for unit in change_units
-        for check_index, _check in enumerate(unit.get("validation", []))
+        if isinstance(unit.get("validation", []), list) and unit.get("validation")
     ]
-    return _manual_validation_status(statuses)
+    summary = _manual_validation_status([
+        status for _unit_id, statuses in statuses_by_unit for status in statuses
+    ])
+    outstanding = {"pending": [], "failed": []}
+    for unit_id, statuses in statuses_by_unit:
+        unit_status = _manual_validation_status(statuses)["status"]
+        if unit_status in outstanding:
+            outstanding[unit_status].append(unit_id)
+    return summary, outstanding
 
 
 def _manual_validation_status(statuses: list[str]) -> dict:
@@ -2514,11 +2530,11 @@ def review_change_closure(conn: sqlite3.Connection, plan_id: str, repository: st
     stored_plan = change_plans_repo.get_plan(conn, int(plan_id.removeprefix("cp_")))
     if stored_plan is None:
         return {"error": f"unknown plan_id: {plan_id}"}
-    manual_validation = _manual_validation_summary(
+    manual_validation, manual_outstanding = _manual_validation_breakdown(
         conn, int(plan_id.removeprefix("cp_")), json.loads(stored_plan["change_units_json"]),
     )
     closure = summarize_change_closure(
-        assessment, ci_validation, manual_validation, MAX_CLOSURE_CHANGE_UNIT_IDS,
+        assessment, ci_validation, manual_validation, manual_outstanding, MAX_CLOSURE_CHANGE_UNIT_IDS,
     )
     return {
         "plan_id": plan_id,

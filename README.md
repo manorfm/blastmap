@@ -428,7 +428,9 @@ for the selected unit's check wording.
 check), a confirmed public-error-contract break or an omitted source-backed plan unit;
 `needs_review` for remaining uncertainty or pending persisted manual checks;
 and `ready_for_manual_review` only when its bounded checks are clear. It never approves
-a deployment or infers runtime behavior.
+a deployment or infers runtime behavior. Its bounded outstanding-unit lists identify
+up to three omitted, unassessable, manually pending or manually failed units without
+repeating their checklist text.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

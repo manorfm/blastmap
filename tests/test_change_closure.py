@@ -43,7 +43,9 @@ def test_review_change_closure_reports_ready_only_for_covered_plan_with_reported
             "status": "reported_passed",
             "summary": {"total": 1, "passed": 1, "failed": 0, "pending": 0},
         },
-        "outstanding_change_units": {"omitted": [], "unassessable": []},
+        "outstanding_change_units": {
+            "omitted": [], "unassessable": [], "manual_pending": [], "manual_failed": [],
+        },
     }
     validate(result, load_schema("change_closure"))
 
@@ -62,6 +64,8 @@ def test_review_change_closure_keeps_an_omitted_change_unit_as_needing_attention
     assert result["outstanding_change_units"] == {
         "omitted": ["http-contract:checkout-service:payments-service:POST:/authorizations"],
         "unassessable": [],
+        "manual_pending": ["http-contract:checkout-service:payments-service:POST:/authorizations"],
+        "manual_failed": [],
     }
 
 
@@ -84,3 +88,7 @@ def test_review_change_closure_keeps_pending_manual_checks_in_review(tmp_path):
         "status": "pending",
         "summary": {"total": 1, "passed": 0, "failed": 0, "pending": 1},
     }
+    assert result["outstanding_change_units"]["manual_pending"] == [
+        "http-contract:checkout-service:payments-service:POST:/authorizations",
+    ]
+    assert result["outstanding_change_units"]["manual_failed"] == []

@@ -76,7 +76,8 @@ def assess_change_units(
 
 
 def summarize_change_closure(
-    assessment: dict, ci_validation: dict, manual_validation: dict, max_unit_ids: int = 3,
+    assessment: dict, ci_validation: dict, manual_validation: dict, manual_outstanding: dict,
+    max_unit_ids: int = 3,
 ) -> dict:
     """Summarize advisory closure state without asserting deployment approval."""
     omitted_units = assessment["omitted_change_units"]
@@ -118,6 +119,8 @@ def summarize_change_closure(
         "outstanding_change_units": {
             "omitted": [unit["id"] for unit in omitted_units[:max_unit_ids]],
             "unassessable": [unit["id"] for unit in unassessable_units[:max_unit_ids]],
+            "manual_pending": manual_outstanding["pending"][:max_unit_ids],
+            "manual_failed": manual_outstanding["failed"][:max_unit_ids],
         },
     }
 
