@@ -30,6 +30,22 @@ CREATE TABLE IF NOT EXISTS services (
     UNIQUE(repository_id, name)
 );
 
+-- Literal validation commands declared by a repository GitHub Actions workflow.
+-- Dynamic, multiline and secret-bearing commands are filtered before persistence.
+CREATE TABLE IF NOT EXISTS ci_commands (
+    id            INTEGER PRIMARY KEY,
+    repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    workflow_path TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('test', 'build', 'migration', 'client_generation')),
+    command       TEXT NOT NULL,
+    file_path     TEXT NOT NULL,
+    start_line    INTEGER NOT NULL,
+    end_line      INTEGER NOT NULL,
+    updated_at    TEXT NOT NULL,
+    UNIQUE(repository_id, workflow_path, kind, command, start_line)
+);
+CREATE INDEX IF NOT EXISTS idx_ci_commands_repository ON ci_commands(repository_id);
+
 CREATE TABLE IF NOT EXISTS apis (
     id             INTEGER PRIMARY KEY,
     service_id     INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
