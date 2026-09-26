@@ -214,6 +214,9 @@ or documented external provisioning, without claiming the resource is unavailabl
 runtime. A primary service with an indexed SQS queue lacking local redrive evidence can
 receive a `cloud-dead-letter-queue` review. It asks to confirm a dead-letter queue or
 external configuration without claiming recovery is absent at runtime. A primary
+service with an indexed S3/SQS resource lacking local encryption evidence can receive a
+`cloud-encryption` review. It asks to confirm IaC or account/organization policy
+without claiming the resource is unencrypted at runtime. A primary
 caller can receive a `retry-downstream-error` review when a literal retry shares a
 source with a resolved downstream endpoint flow exposing 4xx. It asks to exclude that
 response unless its remote contract explicitly marks it transient; service-wide

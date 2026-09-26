@@ -29,6 +29,7 @@ from orbitkb.generation.change_plan import (
     derive_broad_timeout_handler_review_units,
     derive_cloud_dead_letter_queue_review_units,
     derive_cloud_dependency_iac_review_units,
+    derive_cloud_encryption_review_units,
     derive_error_mapping_review_units,
     derive_http_resilience_policy_review_units,
     derive_partial_write_resilience_review_units,
@@ -1751,6 +1752,49 @@ def test_cloud_dead_letter_queue_units_exclude_lower_confidence_findings():
             "kind": "possible_missing_dead_letter_queue",
             "services": ["orders-service"],
             "confidence": 0.44,
+            "detail": {},
+        },
+    ], {"orders-service"}) == []
+
+
+def test_cloud_encryption_units_include_resources_without_local_encryption_declaration():
+    assert derive_cloud_encryption_review_units([
+        {
+            "kind": "possible_unencrypted_cloud_resource",
+            "services": ["orders-service"],
+            "reason": "orders-service SQS queue 'orders' has no source-proven encryption.",
+            "confidence": 0.4,
+            "detail": {
+                "resource": "orders",
+                "evidence": [{"file": "infra/queues.tf", "start_line": 8, "end_line": 14}],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "cloud-encryption:orders-service:orders",
+        "service": "orders-service",
+        "target": {
+            "role": "deployment", "symbol": "cloud:encryption:orders",
+            "evidence": [{"file": "infra/queues.tf", "start_line": 8, "end_line": 14}],
+        },
+        "action": "review",
+        "reason": "orders-service SQS queue 'orders' has no source-proven encryption.",
+        "preconditions": [],
+        "related_contracts": ["cloud:encryption:orders"],
+        "dependencies": [],
+        "validation": [
+            "verify server-side encryption for orders is declared in IaC or covered by documented account or organization policy",
+        ],
+        "confidence": 0.4,
+        "evidence": [{"file": "infra/queues.tf", "start_line": 8, "end_line": 14}],
+    }]
+
+
+def test_cloud_encryption_units_exclude_lower_confidence_findings():
+    assert derive_cloud_encryption_review_units([
+        {
+            "kind": "possible_unencrypted_cloud_resource",
+            "services": ["orders-service"],
+            "confidence": 0.39,
             "detail": {},
         },
     ], {"orders-service"}) == []

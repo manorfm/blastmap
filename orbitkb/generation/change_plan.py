@@ -216,6 +216,56 @@ def derive_cloud_dead_letter_queue_review_units(
     return units
 
 
+def derive_cloud_encryption_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create deployment reviews for resources lacking local encryption evidence.
+
+    Account or organization defaults can enable encryption outside the indexed IaC.
+    This makes the unit a confirmation of the intended security control, not a
+    declaration that the resource is unencrypted at runtime.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_unencrypted_cloud_resource":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.4
+        ):
+            continue
+        resource = detail.get("resource")
+        evidence = detail.get("evidence")
+        if not isinstance(resource, str) or not resource or not isinstance(evidence, list) or not evidence:
+            continue
+        service = services[0]
+        key = service, resource
+        if key in seen:
+            continue
+        seen.add(key)
+        contract = f"cloud:encryption:{resource}"
+        units.append({
+            "id": f"cloud-encryption:{service}:{resource}",
+            "service": service,
+            "target": {"role": "deployment", "symbol": contract, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed cloud encryption declaration"),
+            "preconditions": [],
+            "related_contracts": [contract],
+            "dependencies": [],
+            "validation": [
+                f"verify server-side encryption for {resource} is declared in IaC or covered by documented account or organization policy",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_broad_timeout_handler_review_units(
     findings: list[dict], primary_services: set[str],
 ) -> list[dict]:
