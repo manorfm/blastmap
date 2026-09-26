@@ -131,8 +131,8 @@ def test_plan_change_recommends_deduplicated_safe_ci_validation_commands_for_the
     }), "Add a payment method", repository="checkout-repo")
 
     assert result["ci_validation_commands"] == [
-        {"kind": "test", "command": "npm test", "workflow_path": ".github/workflows/ci.yml"},
-        {"kind": "build", "command": "npm run build", "workflow_path": ".github/workflows/ci.yml"},
+        {"kind": "test", "command": "npm test", "workflow_path": ".github/workflows/ci.yml", "start_line": 5},
+        {"kind": "build", "command": "npm run build", "workflow_path": ".github/workflows/ci.yml", "start_line": 6},
     ]
     validate(result, load_schema("plan_change"))
 

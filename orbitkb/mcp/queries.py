@@ -1957,6 +1957,7 @@ def _compact_ci_validation_commands(conn: sqlite3.Connection, repository_id: int
             "kind": command["kind"],
             "command": command["command"],
             "workflow_path": command["workflow_path"],
+            "start_line": command["start_line"],
         })
         if len(commands) == MAX_PLAN_CI_VALIDATION_COMMANDS:
             break
@@ -1983,7 +1984,11 @@ def _ci_validation_result_summaries(
         result = results_by_location.get((command["workflow_path"], start_line))
         if result is not None:
             summaries.append({
-                **command, "status": result["status"], "duration_ms": result["duration_ms"],
+                "kind": command["kind"],
+                "command": command["command"],
+                "workflow_path": command["workflow_path"],
+                "status": result["status"],
+                "duration_ms": result["duration_ms"],
             })
     return summaries
 

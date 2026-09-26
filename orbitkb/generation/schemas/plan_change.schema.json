@@ -52,12 +52,13 @@
       "maxItems": 3,
       "items": {
         "type": "object",
-        "required": ["kind", "command", "workflow_path"],
+        "required": ["kind", "command", "workflow_path", "start_line"],
         "additionalProperties": false,
         "properties": {
           "kind": {"type": "string", "enum": ["test", "build"]},
           "command": {"type": "string", "minLength": 1},
-          "workflow_path": {"type": "string", "minLength": 1}
+          "workflow_path": {"type": "string", "minLength": 1},
+          "start_line": {"type": "integer", "minimum": 1}
         }
       }
     },

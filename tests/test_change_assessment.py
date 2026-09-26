@@ -134,8 +134,8 @@ def test_assess_working_change_recommends_indexed_ci_commands_for_changed_planne
     result = queries.assess_working_change(conn, plan["plan_id"], "commerce", since_commit)
 
     assert result["ci_validation_commands"] == [
-        {"kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml"},
-        {"kind": "build", "command": "npm run build", "workflow_path": ".github/workflows/ci.yml"},
+        {"kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml", "start_line": 5},
+        {"kind": "build", "command": "npm run build", "workflow_path": ".github/workflows/ci.yml", "start_line": 6},
     ]
     assert result["ci_validation_results"] == [{
         "kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml",

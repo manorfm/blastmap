@@ -397,6 +397,7 @@ When the diff reaches a service named by the plan, it also includes up to three
 deduplicated indexed `test`/`build` commands as a non-executing validation hint.
 Changes outside the planned service surface return no commands; migrations and client
 generation remain available through `describe_ci_commands`.
+Each hint includes the indexed workflow line used to report its outcome directly.
 After an agent runs one suggested command, `record_ci_validation_result` accepts its
 exact indexed workflow path and line, `passed`/`failed` status and optional duration.
 It records only the current status for that plan command: no command execution,
