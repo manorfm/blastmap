@@ -43,6 +43,7 @@ def test_review_change_closure_reports_ready_only_for_covered_plan_with_reported
             "status": "reported_passed",
             "summary": {"total": 1, "passed": 1, "failed": 0, "pending": 0},
         },
+        "outstanding_ci_validation": [],
         "outstanding_change_units": {
             "omitted": [], "unassessable": [], "manual_pending": [], "manual_failed": [],
         },
@@ -92,3 +93,19 @@ def test_review_change_closure_keeps_pending_manual_checks_in_review(tmp_path):
         "http-contract:checkout-service:payments-service:POST:/authorizations",
     ]
     assert result["outstanding_change_units"]["manual_failed"] == []
+
+
+def test_review_change_closure_identifies_pending_indexed_ci_validation(tmp_path):
+    conn, plan, since_commit = _plan_with_a_resolved_http_unit(tmp_path / "repository")
+    repository_id = repositories_repo.get_repository_by_name(conn, "commerce")["id"]
+    ci_commands_repo.replace_ci_commands(conn, repository_id, [{
+        "workflow_path": ".github/workflows/ci.yml", "kind": "test", "command": "pytest -q",
+        "evidence": {"file": ".github/workflows/ci.yml", "start_line": 5, "end_line": 5},
+    }])
+    (tmp_path / "repository" / "checkout-service" / "client.py").write_text("changed\n")
+
+    result = queries.review_change_closure(conn, plan["plan_id"], "commerce", since_commit)
+
+    assert result["outstanding_ci_validation"] == [{
+        "workflow_path": ".github/workflows/ci.yml", "start_line": 5, "kind": "test", "status": "pending",
+    }]

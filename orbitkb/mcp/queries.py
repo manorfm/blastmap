@@ -2533,8 +2533,28 @@ def review_change_closure(conn: sqlite3.Connection, plan_id: str, repository: st
     manual_validation, manual_outstanding = _manual_validation_breakdown(
         conn, int(plan_id.removeprefix("cp_")), json.loads(stored_plan["change_units_json"]),
     )
+    repo = repositories_repo.get_repository_by_name(conn, repository)
+    if repo is None:
+        return {"error": f"unknown repository: {repository}"}
+    start_lines: dict[tuple[str, str, str], int] = {}
+    for indexed_command in ci_commands_repo.list_ci_commands(conn, repo["id"]):
+        identity = (
+            indexed_command["kind"], indexed_command["command"], indexed_command["workflow_path"],
+        )
+        start_lines.setdefault(identity, indexed_command["start_line"])
+    ci_outstanding = [
+        {
+            "workflow_path": command["workflow_path"],
+            "start_line": start_lines[(command["kind"], command["command"], command["workflow_path"])],
+            "kind": command["kind"],
+            "status": command["status"],
+        }
+        for command in ci_validation["commands"]
+        if command["status"] != "passed"
+    ]
     closure = summarize_change_closure(
-        assessment, ci_validation, manual_validation, manual_outstanding, MAX_CLOSURE_CHANGE_UNIT_IDS,
+        assessment, ci_validation, manual_validation, manual_outstanding, ci_outstanding,
+        MAX_CLOSURE_CHANGE_UNIT_IDS,
     )
     return {
         "plan_id": plan_id,

@@ -423,6 +423,8 @@ pending persisted checks. Even
 `ready_for_manual_review` is advisory and does not approve deployment or prove runtime
 behavior. Its bounded outstanding-unit lists include up to three manually pending and
 manually failed unit IDs, alongside omitted and unassessable units.
+It also returns up to three pending or failed indexed CI references (workflow path,
+line and kind), never command output or execution logs.
 The result also lists changed files outside services named by the plan and every
 remaining validation obligation. It is an advisory, read-only check, never an
 implementation gate.

@@ -9,6 +9,7 @@
     "risks",
     "ci_validation",
     "manual_validation",
+    "outstanding_ci_validation",
     "outstanding_change_units"
   ],
   "additionalProperties": false,
@@ -73,6 +74,21 @@
             "failed": {"type": "integer", "minimum": 0},
             "pending": {"type": "integer", "minimum": 0}
           }
+        }
+      }
+    },
+    "outstanding_ci_validation": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["workflow_path", "start_line", "kind", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "workflow_path": {"type": "string", "minLength": 1},
+          "start_line": {"type": "integer", "minimum": 1},
+          "kind": {"type": "string", "enum": ["test", "build"]},
+          "status": {"type": "string", "enum": ["pending", "failed"]}
         }
       }
     },

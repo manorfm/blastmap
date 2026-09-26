@@ -430,7 +430,8 @@ check), a confirmed public-error-contract break or an omitted source-backed plan
 and `ready_for_manual_review` only when its bounded checks are clear. It never approves
 a deployment or infers runtime behavior. Its bounded outstanding-unit lists identify
 up to three omitted, unassessable, manually pending or manually failed units without
-repeating their checklist text.
+repeating their checklist text. It also identifies up to three pending or failed
+indexed CI checks by workflow path, line and kind, without exposing command output.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in
