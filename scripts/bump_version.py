@@ -61,7 +61,10 @@ def main() -> int:
         print(f"usage: bump_version.py <{'|'.join(_KINDS)}>", file=sys.stderr)
         return 1
     current, new_version = bump(PYPROJECT, INIT_FILE, sys.argv[1])
-    print(f"bump_version: {current} -> {new_version}")
+    # Human summary on stderr, bare version alone on stdout: a caller can capture the
+    # result with plain shell command substitution without parsing a log line.
+    print(f"bump_version: {current} -> {new_version}", file=sys.stderr)
+    print(new_version)
     return 0
 
 

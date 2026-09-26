@@ -72,4 +72,9 @@ def test_main_bumps_the_real_configured_paths(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["bump_version.py", "patch"])
 
     assert bump_version.main() == 0
-    assert "0.1.0 -> 0.1.1" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    # stdout carries only the bare new version, so a caller can capture it with plain
+    # shell command substitution (`new_version=$(bump_version.py patch)`) without
+    # parsing a log line. The human-readable "from -> to" summary goes to stderr instead.
+    assert captured.out.strip() == "0.1.1"
+    assert "0.1.0 -> 0.1.1" in captured.err
