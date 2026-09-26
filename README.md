@@ -227,6 +227,11 @@ HTTP call, `plan_change` creates a `partial-write-resilience` review. It asks fo
 ordering, idempotency and recovery validation without assuming the execution order or
 whether a transaction, outbox, compensation, or retry-safe contract already protects
 the flow.
+For a primary delegated service method that writes state and publishes a literal event
+without a source-proven transaction boundary, `plan_change` creates one
+`non-atomic-service-publish` review per channel. It asks for transactional
+outbox/equivalent recovery and compensation or duplicate-delivery handling, without
+assuming execution order; a retry-specific review supersedes the same method/channel.
 For a primary producer that writes and retries a literal event publication without a
 more specific indexed consumer finding, `plan_change` creates one
 `retry-write-publish` review per channel. It asks for outbox/idempotency and

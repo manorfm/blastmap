@@ -1270,6 +1270,86 @@ def _retry_publish_channels_with_consumers(findings: list[dict]) -> set[tuple[st
     return covered
 
 
+def _retry_write_publish_channels(findings: list[dict]) -> set[tuple[str, str, str]]:
+    """Identify producer channels already covered by a retry-specific review."""
+    covered: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_retry_on_write_publish_flow":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        if not isinstance(services, list) or len(services) != 1 or not isinstance(detail, dict):
+            continue
+        flow = detail.get("flow")
+        publishes = detail.get("publishes")
+        if not isinstance(flow, dict) or not isinstance(flow.get("symbol"), str) or not isinstance(publishes, list):
+            continue
+        for publish in publishes:
+            if isinstance(publish, dict) and isinstance(publish.get("target"), str):
+                covered.add((services[0], flow["symbol"], publish["target"]))
+    return covered
+
+
+def derive_non_atomic_service_publish_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create outbox reviews for delegated state-writing publication flows.
+
+    The absence of a local transaction boundary does not establish operation order or
+    the absence of an externally managed outbox or compensation. The unit is therefore
+    a channel-scoped review, and yields to the stronger retry-specific review.
+    """
+    retry_covered = _retry_write_publish_channels(findings)
+    units: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_non_atomic_service_publish":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.5
+        ):
+            continue
+        flow = detail.get("flow")
+        writes = detail.get("writes")
+        publishes = detail.get("publishes")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(flow, dict) or not isinstance(flow.get("symbol"), str) or not isinstance(writes, list)
+            or not writes or not isinstance(publishes, list) or not publishes or not isinstance(evidence, list)
+            or not evidence or not all(isinstance(publish, dict) and isinstance(publish.get("target"), str) for publish in publishes)
+        ):
+            continue
+        service = services[0]
+        symbol = flow["symbol"]
+        for channel in sorted({publish["target"] for publish in publishes}):
+            key = service, symbol, channel
+            if key in seen or key in retry_covered:
+                continue
+            seen.add(key)
+            units.append({
+                "id": f"non-atomic-service-publish:{service}:{symbol}:{channel}",
+                "service": service,
+                "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+                "action": "review",
+                "reason": finding.get("reason", "review the indexed write and publication recovery boundary"),
+                "preconditions": [],
+                "related_contracts": [f"message:{channel}"],
+                "dependencies": [],
+                "validation": [
+                    f"verify {symbol} uses a transactional outbox or equivalent recovery before publishing {channel}",
+                    f"verify compensation and duplicate-delivery handling for {channel} when the write and publication "
+                    "cannot share a transaction",
+                ],
+                "confidence": float(confidence),
+                "evidence": evidence,
+            })
+    return units
+
+
 def derive_retry_downstream_error_review_units(
     findings: list[dict], primary_services: set[str],
 ) -> list[dict]:

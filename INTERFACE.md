@@ -238,7 +238,11 @@ contracts are excluded. A primary service can receive a `partial-write-resilienc
 review when local writes, a literal timeout/retry policy, and a static HTTP call share
 one symbol. It asks for ordering, idempotency and recovery validation without claiming
 operation order or absence of transaction/outbox/compensation protection. A primary
-service can receive a
+delegated service method with local writes and literal event publication but no
+source-proven transaction boundary can receive one `non-atomic-service-publish` review
+per channel. It requests transactional outbox/equivalent recovery and compensation or
+duplicate-delivery validation without assuming execution order; a retry-specific review
+supersedes the same method/channel. A primary service can receive a
 `broad-error-handler` review for an explicit broad exception mapping; it preserves the
 handler as a potential final fallback and asks whether expected client/domain errors
 have specific mappings. A primary service can receive a `timeout-error-mapping`

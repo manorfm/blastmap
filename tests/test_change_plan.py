@@ -34,6 +34,7 @@ from orbitkb.generation.change_plan import (
     derive_error_mapping_review_units,
     derive_http_resilience_policy_review_units,
     derive_message_consumer_recovery_review_units,
+    derive_non_atomic_service_publish_review_units,
     derive_partial_write_resilience_review_units,
     derive_persistence_migration_review_units,
     derive_public_object_storage_review_units,
@@ -1616,6 +1617,78 @@ def test_message_consumer_recovery_units_yield_to_selected_producer_flow_review(
 
     assert derive_message_consumer_recovery_review_units(
         [consumer_finding, producer_finding], {"orders-service", "billing-service"},
+    ) == []
+
+
+def test_non_atomic_service_publish_units_include_each_literal_channel():
+    assert derive_non_atomic_service_publish_review_units([
+        {
+            "kind": "possible_non_atomic_service_publish",
+            "services": ["orders-service"],
+            "reason": "Service symbol OrderService.create writes local state and publishes an event without a source-proven transaction boundary; review outbox or equivalent recovery.",
+            "confidence": 0.5,
+            "detail": {
+                "flow": {"symbol": "OrderService.create"},
+                "writes": [{"target": "OrderRepository.save"}], "write_count": 1,
+                "publishes": [{"target": "order.created"}], "publish_count": 1,
+                "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 22}],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "non-atomic-service-publish:orders-service:OrderService.create:order.created",
+        "service": "orders-service",
+        "target": {
+            "role": "application_flow", "symbol": "OrderService.create",
+            "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 22}],
+        },
+        "action": "review",
+        "reason": "Service symbol OrderService.create writes local state and publishes an event without a source-proven transaction boundary; review outbox or equivalent recovery.",
+        "preconditions": [],
+        "related_contracts": ["message:order.created"],
+        "dependencies": [],
+        "validation": [
+            "verify OrderService.create uses a transactional outbox or equivalent recovery before publishing order.created",
+            "verify compensation and duplicate-delivery handling for order.created when the write and publication cannot share a transaction",
+        ],
+        "confidence": 0.5,
+        "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 22}],
+    }]
+
+
+def test_non_atomic_service_publish_units_exclude_lower_confidence_findings():
+    assert derive_non_atomic_service_publish_review_units([
+        {
+            "kind": "possible_non_atomic_service_publish",
+            "services": ["orders-service"],
+            "confidence": 0.49,
+            "detail": {},
+        },
+    ], {"orders-service"}) == []
+
+
+def test_non_atomic_service_publish_units_yield_to_retry_specific_review():
+    non_atomic_finding = {
+        "kind": "possible_non_atomic_service_publish",
+        "services": ["orders-service"],
+        "confidence": 0.5,
+        "detail": {
+            "flow": {"symbol": "OrderService.create"},
+            "writes": [{"target": "OrderRepository.save"}],
+            "publishes": [{"target": "order.created"}],
+            "evidence": [{"file": "OrderService.java", "start_line": 18, "end_line": 22}],
+        },
+    }
+    retry_finding = {
+        "kind": "possible_retry_on_write_publish_flow",
+        "services": ["orders-service"],
+        "detail": {
+            "flow": {"symbol": "OrderService.create"},
+            "publishes": [{"target": "order.created"}],
+        },
+    }
+
+    assert derive_non_atomic_service_publish_review_units(
+        [non_atomic_finding, retry_finding], {"orders-service"},
     ) == []
 
 
