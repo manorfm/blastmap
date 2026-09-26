@@ -110,6 +110,29 @@ MAX_PLAN_VALIDATION_UNIT_LIMIT = 50
 MAX_CLOSURE_CHANGE_UNIT_IDS = 3
 _FLOW_KINDS = {"invokes", "injects", "validates", "reads", "writes", "publishes", "consumes"}
 _EPIC_TYPE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+_INDEXING_CAPABILITIES = [
+    {
+        "stack": "node-ts",
+        "languages": ["javascript", "typescript"],
+        "entrypoint_kinds": ["http", "graphql"],
+        "error_contract_protocols": ["http", "graphql"],
+        "known_unknowns": ["dynamic_routes", "global_error_middleware"],
+    },
+    {
+        "stack": "jvm-spring",
+        "languages": ["java", "kotlin"],
+        "entrypoint_kinds": ["http", "grpc"],
+        "error_contract_protocols": ["http"],
+        "known_unknowns": ["dynamic_configuration", "framework_global_error_boundaries"],
+    },
+    {
+        "stack": "go",
+        "languages": ["go"],
+        "entrypoint_kinds": ["http", "grpc"],
+        "error_contract_protocols": ["http"],
+        "known_unknowns": ["dynamic_statuses", "custom_response_writers"],
+    },
+]
 _RUNTIME_FILTER_DIMENSION_PRIORITY = {
     "binding_evidence_ranges": 0,
     "source_import_evidence_ranges": 0,
@@ -224,6 +247,14 @@ def _resolve_static_service_call_target(
             }
     cache[key] = resolution
     return resolution
+
+
+def describe_indexing_capabilities() -> dict:
+    """Return the conservative, initial static-analysis capability contract."""
+    return {
+        "capabilities": _INDEXING_CAPABILITIES,
+        "guarantee": "listed facts are deterministic; unlisted behavior remains unknown",
+    }
 
 
 def list_repositories(conn: sqlite3.Connection) -> dict:

@@ -105,6 +105,7 @@ Start broad, then narrow the request.
 | Need | Start with | Follow with |
 | --- | --- | --- |
 | Start a change plan | `plan_change` | `refine_change_plan`, `describe_change_unit`, `assess_working_change` |
+| Check supported static coverage | `describe_indexing_capabilities` | index the selected service |
 | Plan an epic | `get_change_context` | `describe_service`, `describe_entrypoint` |
 | Find likely impact | `find_change_surface` | `get_relationships`, `describe_api` |
 | Understand a request path or its static error mapping | `list_entrypoints` | `describe_entrypoint` |
@@ -432,6 +433,11 @@ a deployment or infers runtime behavior.
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in
 [INTERFACE.md](INTERFACE.md).
+
+`describe_indexing_capabilities` is the compact capability matrix for the initial
+Node/TypeScript, Java/Kotlin Spring and Go coverage. It lists only deterministic
+entrypoint and error-contract protocols and makes dynamic or framework-global paths
+explicitly unknown; it does not inspect a repository or call an LLM.
 
 Node JavaScript/TypeScript REST indexing currently recognizes literal Express app/router routes
 that point to a named function/arrow handler in the same file or to an inline handler.

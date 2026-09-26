@@ -26,6 +26,16 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
         return open_db(db_path)
 
     @mcp.tool()
+    def describe_indexing_capabilities() -> dict:
+        """Return conservative static-analysis coverage for the initial stacks.
+
+        Consult this before planning an unfamiliar stack or framework. Listed facts
+        are deterministic; dynamic behavior and unlisted framework paths remain
+        unknown rather than being inferred from source shape.
+        """
+        return queries.describe_indexing_capabilities()
+
+    @mcp.tool()
     def list_repositories() -> dict:
         """Call this to see what's been cumulatively indexed so far, at the
         repository level — name, root path and how many services came from it.

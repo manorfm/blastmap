@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "required": ["capabilities", "guarantee"],
+  "additionalProperties": false,
+  "properties": {
+    "capabilities": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["stack", "languages", "entrypoint_kinds", "error_contract_protocols", "known_unknowns"],
+        "additionalProperties": false,
+        "properties": {
+          "stack": {"type": "string", "enum": ["node-ts", "jvm-spring", "go"]},
+          "languages": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "entrypoint_kinds": {"type": "array", "minItems": 1, "items": {"type": "string", "enum": ["http", "graphql", "grpc"]}},
+          "error_contract_protocols": {"type": "array", "minItems": 1, "items": {"type": "string", "enum": ["http", "graphql"]}},
+          "known_unknowns": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "guarantee": {"const": "listed facts are deterministic; unlisted behavior remains unknown"}
+  }
+}

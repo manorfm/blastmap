@@ -58,16 +58,20 @@ reanalyzes the service.
    clients may change; it returns only safe, literal GitHub Actions commands.
 6. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
-7. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, gRPC, message, CLI or
+7. Call `describe_indexing_capabilities()` before planning an unfamiliar stack. It is
+   the compact initial capability matrix for Node/TypeScript, Java/Kotlin Spring and
+   Go; only listed facts are deterministic and dynamic/framework-global paths remain
+   unknown.
+8. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, gRPC, message, CLI or
    job entrypoint. A `grpc` entrypoint sourced from Protobuf describes only its declared
    wire signature; handler and client linkage remain unknown until separately proven.
-8. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
+9. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
    reachable deterministic flow evidence. For an exact AST-proven HTTP route, its
    `contract.formal_contract` can also expose a matching conventional OpenAPI/Swagger
    operation's ID, response statuses, request-body requirement, security state and
    file/line evidence. Referenced request bodies are `null` until a future parser can
    resolve them safely; ambiguous operations from multiple specifications are omitted.
-9. Call `describe_error_flow(service, kind, method, name)` only when a selected HTTP
+10. Call `describe_error_flow(service, kind, method, name)` only when a selected HTTP
    flow crosses an indexed internal HTTP client boundary and its error semantics matter.
    It needs a literal call, a reachable downstream HTTP contract and a matching reachable
    caller mapping; otherwise it returns explicit unknowns rather than inventing a failure.
