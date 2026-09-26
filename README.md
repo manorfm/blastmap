@@ -165,6 +165,8 @@ remote endpoint. A retry-policy review similarly reads the local service because
 source-proven permanent error does not establish a message or remote contract.
 A retry-HTTP-idempotency review uses the same local service context because its target
 is a literal call boundary, not necessarily an indexed endpoint.
+A timeout-local-fallback review also uses local service context: the static absence is
+only within the selected symbol, while a global handler or gateway remains unknown.
 When a primary service has a source-proven internal HTTP call whose remote method and
 route are indexed, `plan_change` also creates a contract-review unit for that boundary.
 It also adds an error-mapping review only for a high-confidence, source-proven local
@@ -186,6 +188,10 @@ actually retried at runtime.
 For a primary service, a literal retry over an indexed `POST` or `PATCH` call creates a
 `retry-http-idempotency` review. It asks for an idempotency key or documented
 server-side de-duplication; the HTTP method alone does not claim a retry is unsafe.
+For a primary service, a literal timeout policy and HTTP call without a typed local
+fallback create a `timeout-local-fallback` review. It asks whether a local fallback or
+documented timeout propagation exists, without treating external/global handling as
+absent.
 For a primary producer that writes, retries a literal message publication and reaches
 a state-writing consumer through the same literal channel, `plan_change` creates a
 `retry-delivery` review. It links the persistent consumers as dependencies and asks

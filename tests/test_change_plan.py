@@ -41,6 +41,7 @@ from orbitkb.generation.change_plan import (
     derive_runtime_configuration_review_units,
     derive_runtime_configuration_source_import_unknown_review_units,
     derive_timeout_fallback_review_units,
+    derive_timeout_local_fallback_review_units,
 )
 from orbitkb.generation.llm_harness import load_schema
 from orbitkb.generation.token_budget import TokenMeasurement
@@ -1533,6 +1534,64 @@ def test_retry_http_idempotency_review_units_read_the_local_http_boundary():
     }) == [{
         "service": "checkout-service",
         "purpose": "confirm retry idempotency at the indexed outbound HTTP boundary",
+        "recommended_query": {"tool": "describe_service", "arguments": {"service": "checkout-service"}},
+    }]
+
+
+def test_timeout_local_fallback_units_include_literal_timeout_boundaries():
+    assert derive_timeout_local_fallback_review_units([
+        {
+            "kind": "possible_timeout_without_local_fallback",
+            "services": ["checkout-service"],
+            "reason": "CheckoutService.reserve times out on inventory-service GET /stock without a local fallback.",
+            "confidence": 0.55,
+            "detail": {
+                "caller": {"service": "checkout-service", "symbol": "CheckoutService.reserve"},
+                "target": {"service": "inventory-service", "method": "GET", "path": "/stock"},
+                "timeout_policies": [{"mechanism": "reactor.timeout", "value": 2, "unit": "seconds"}],
+                "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+            },
+        },
+    ], {"checkout-service"}) == [{
+        "id": "timeout-local-fallback:checkout-service:CheckoutService.reserve:inventory-service:GET:/stock",
+        "service": "checkout-service",
+        "target": {
+            "role": "application_flow", "symbol": "CheckoutService.reserve",
+            "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+        },
+        "action": "review",
+        "reason": "CheckoutService.reserve times out on inventory-service GET /stock without a local fallback.",
+        "preconditions": [],
+        "related_contracts": ["GET /stock"],
+        "dependencies": ["inventory-service"],
+        "validation": [
+            "verify timeout in CheckoutService.reserve has a local fallback or deliberately propagates a documented timeout contract",
+        ],
+        "confidence": 0.55,
+        "evidence": [{"file": "CheckoutService.java", "start_line": 18, "end_line": 18}],
+    }]
+
+
+def test_timeout_local_fallback_units_exclude_low_confidence_findings():
+    assert derive_timeout_local_fallback_review_units([
+        {
+            "kind": "possible_timeout_without_local_fallback",
+            "services": ["checkout-service"],
+            "confidence": 0.54,
+            "detail": {},
+        },
+    ], {"checkout-service"}) == []
+
+
+def test_timeout_local_fallback_review_units_read_the_local_timeout_boundary():
+    assert queries._minimal_unit_reading({
+        "id": "timeout-local-fallback:checkout-service:CheckoutService.reserve:inventory-service:GET:/stock",
+        "service": "checkout-service",
+        "target": {"role": "application_flow", "symbol": "CheckoutService.reserve"},
+        "dependencies": ["inventory-service"],
+    }) == [{
+        "service": "checkout-service",
+        "purpose": "confirm the indexed timeout boundary and local fallback coverage",
         "recommended_query": {"tool": "describe_service", "arguments": {"service": "checkout-service"}},
     }]
 

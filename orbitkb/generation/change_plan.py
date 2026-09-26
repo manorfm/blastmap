@@ -1012,6 +1012,68 @@ def derive_timeout_fallback_review_units(findings: list[dict], primary_services:
     return units
 
 
+def derive_timeout_local_fallback_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create bounded reviews for timeout boundaries without local typed handling.
+
+    A global handler, gateway or client factory may still handle the timeout. This
+    preserves that uncertainty by asking for confirmation rather than asserting the
+    endpoint fails without a fallback.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_timeout_without_local_fallback":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.55
+        ):
+            continue
+        caller = detail.get("caller")
+        target = detail.get("target")
+        timeout_policies = detail.get("timeout_policies")
+        evidence = detail.get("evidence")
+        if (
+            not isinstance(caller, dict) or not isinstance(target, dict) or not isinstance(timeout_policies, list)
+            or not timeout_policies or not isinstance(evidence, list) or not evidence
+            or caller.get("service") != services[0] or not isinstance(caller.get("symbol"), str)
+            or not isinstance(target.get("service"), str) or not isinstance(target.get("method"), str)
+            or not isinstance(target.get("path"), str) or not target["path"]
+            or not all(isinstance(policy, dict) and isinstance(policy.get("mechanism"), str) for policy in timeout_policies)
+        ):
+            continue
+        service = services[0]
+        symbol = caller["symbol"]
+        dependency = target["service"]
+        method = target["method"]
+        path = target["path"]
+        key = service, symbol, dependency, method, path
+        if key in seen:
+            continue
+        seen.add(key)
+        units.append({
+            "id": f"timeout-local-fallback:{service}:{symbol}:{dependency}:{method}:{path}",
+            "service": service,
+            "target": {"role": "application_flow", "symbol": symbol, "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed timeout boundary without local fallback evidence"),
+            "preconditions": [],
+            "related_contracts": [f"{method} {path}"],
+            "dependencies": [dependency],
+            "validation": [
+                f"verify timeout in {symbol} has a local fallback or deliberately propagates a documented timeout contract",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_read_entrypoint_side_effect_review_units(
     findings: list[dict], primary_services: set[str],
 ) -> list[dict]:

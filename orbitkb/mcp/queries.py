@@ -59,6 +59,7 @@ from orbitkb.generation.change_plan import (
     derive_runtime_configuration_source_import_unknown_review_units,
     derive_runtime_configuration_source_unknown_review_units,
     derive_timeout_fallback_review_units,
+    derive_timeout_local_fallback_review_units,
     validate_decision_selections,
 )
 from orbitkb.generation.freshness import compute_freshness
@@ -1805,6 +1806,7 @@ def plan_change(
             *derive_retry_downstream_error_review_units(architecture_findings, error_mapping_services),
             *derive_retry_write_publish_review_units(architecture_findings, error_mapping_services),
             *derive_partial_write_resilience_review_units(architecture_findings, error_mapping_services),
+            *derive_timeout_local_fallback_review_units(architecture_findings, error_mapping_services),
             *derive_timeout_fallback_review_units(architecture_findings, error_mapping_services),
             *derive_read_entrypoint_side_effect_review_units(architecture_findings, error_mapping_services),
             *derive_public_object_storage_review_units(architecture_findings, error_mapping_services),
@@ -2140,6 +2142,12 @@ def _minimal_unit_reading(change_unit: dict) -> list[dict]:
         return [{
             "service": producer,
             "purpose": "confirm retry idempotency at the indexed outbound HTTP boundary",
+            "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
+        }]
+    if change_unit["id"].startswith("timeout-local-fallback:"):
+        return [{
+            "service": producer,
+            "purpose": "confirm the indexed timeout boundary and local fallback coverage",
             "recommended_query": {"tool": "describe_service", "arguments": {"service": producer}},
         }]
     if change_unit["target"]["role"] == "error_mapping":

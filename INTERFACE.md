@@ -273,6 +273,8 @@ For a retry-policy review, `describe_service` is likewise the smallest context b
 the source-proven permanent error is local to its selected application flow.
 For a retry-HTTP-idempotency review, it is also the smallest context because the
 literal target call does not necessarily resolve an indexed endpoint.
+For a timeout-local-fallback review, `describe_service` similarly scopes inspection to
+the selected symbol; a global handler, gateway or client factory remains unknown.
 Truncated scopes also report `evidence_total`.
 `describe_change_unit` adds `evidence_follow_up` only in that case, directing the
 agent to complete runtime-configuration context and listing the affected
