@@ -10,6 +10,7 @@ def assess_change_units(
     change_units: list[dict],
     service_roots: dict[str, Path],
     public_error_contracts: list[dict],
+    current_public_error_contracts: list[dict],
 ) -> dict:
     """Classify unit coverage only from source evidence; never infer semantic coverage."""
     normalized_changes = sorted(set(changed_files))
@@ -67,6 +68,9 @@ def assess_change_units(
         "pending_validation": pending_validation,
         "public_error_contracts_at_risk": _public_error_contracts_at_risk(
             normalized_changes, public_error_contracts, relative_roots,
+        ),
+        "public_error_contract_breaks": _public_error_contract_breaks(
+            normalized_changes, public_error_contracts, current_public_error_contracts, relative_roots,
         ),
     }
 
@@ -155,3 +159,109 @@ def _public_error_contracts_at_risk(
             item["public_code"] or "", item["changed_file"],
         ),
     )
+
+
+def _public_error_contract_breaks(
+    changed_files: list[str],
+    previous_contracts: list[dict],
+    current_contracts: list[dict],
+    relative_roots: dict[str, str | None],
+) -> list[dict]:
+    """Compare source-proven public error contracts in changed service files.
+
+    A group must contain one indexed and one current contract for the same source,
+    role and protocol. Multiple mappings are deliberately left at risk rather than
+    paired heuristically, and removed mappings remain at risk because static absence
+    could be unsupported syntax rather than a deliberate contract removal.
+    """
+    previous_groups = _public_contract_groups(previous_contracts)
+    current_groups = _public_contract_groups(current_contracts)
+    changed = set(changed_files)
+    breaks: list[dict] = []
+    for key in sorted(set(previous_groups) & set(current_groups)):
+        previous = previous_groups[key]
+        current = current_groups[key]
+        if len(previous) != 1 or len(current) != 1:
+            continue
+        previous_contract = previous[0]
+        current_contract = current[0]
+        changed_file = _changed_contract_file(previous_contract, changed, relative_roots)
+        if changed_file is None or _changed_contract_file(current_contract, changed, relative_roots) is None:
+            continue
+        previous_values = _public_contract_values(previous_contract)
+        current_values = _public_contract_values(current_contract)
+        if previous_values == current_values:
+            continue
+        evidence = _contract_evidence(previous_contract) + _contract_evidence(current_contract)
+        breaks.append({
+            "service": previous_contract["service"],
+            "symbol": previous_contract["source"],
+            "protocol": previous_contract["protocol"],
+            "previous": previous_values,
+            "current": current_values,
+            "changed_file": changed_file,
+            "evidence": _distinct_evidence(evidence),
+        })
+    return breaks
+
+
+def _public_contract_groups(contracts: list[dict]) -> dict[tuple[str, str, str, str], list[dict]]:
+    groups: dict[tuple[str, str, str, str], list[dict]] = {}
+    for contract in contracts:
+        if not _is_public_contract(contract):
+            continue
+        key = contract["service"], contract["source"], contract["role"], contract["protocol"]
+        groups.setdefault(key, []).append(contract)
+    return groups
+
+
+def _is_public_contract(contract: dict) -> bool:
+    return (
+        isinstance(contract.get("service"), str) and isinstance(contract.get("source"), str)
+        and contract.get("protocol") in {"http", "grpc", "graphql"}
+        and contract.get("role") in {"handles", "maps", "raises"}
+        and (isinstance(contract.get("transport_code"), str) or isinstance(contract.get("public_code"), str))
+        and isinstance(contract.get("file_path"), str)
+    )
+
+
+def _changed_contract_file(
+    contract: dict, changed_files: set[str], relative_roots: dict[str, str | None],
+) -> str | None:
+    service = contract.get("service")
+    file_path = contract.get("file_path")
+    relative_root = relative_roots.get(service)
+    if not isinstance(file_path, str) or relative_root is None:
+        return None
+    relative_file = PurePosixPath(file_path)
+    if relative_file.is_absolute() or ".." in relative_file.parts:
+        return None
+    changed_file = (PurePosixPath(relative_root) / relative_file).as_posix()
+    return changed_file if changed_file in changed_files else None
+
+
+def _public_contract_values(contract: dict) -> dict:
+    return {
+        "transport_code": contract.get("transport_code"),
+        "public_code": contract.get("public_code"),
+    }
+
+
+def _contract_evidence(contract: dict) -> list[dict]:
+    file_path = contract.get("file_path")
+    start_line = contract.get("start_line")
+    end_line = contract.get("end_line")
+    if not isinstance(file_path, str) or not isinstance(start_line, int) or not isinstance(end_line, int):
+        return []
+    return [{"file": file_path, "start_line": start_line, "end_line": end_line}]
+
+
+def _distinct_evidence(evidence: list[dict]) -> list[dict]:
+    seen: set[tuple[str, int, int]] = set()
+    result: list[dict] = []
+    for item in evidence:
+        key = item["file"], item["start_line"], item["end_line"]
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result

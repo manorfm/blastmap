@@ -31,7 +31,7 @@ def _plan_with_a_resolved_http_unit(root: Path):
     checkout_root.mkdir()
     payments_root.mkdir()
     (checkout_root / "client.py").write_text("request_authorization()\n")
-    (payments_root / "controller.py").write_text("authorize()\n")
+    (payments_root / "controller.ts").write_text("authorize()\n")
     (root / "README.md").write_text("before\n")
     subprocess.run(["git", "add", "."], cwd=root, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
@@ -45,10 +45,10 @@ def _plan_with_a_resolved_http_unit(root: Path):
         conn, "checkout-service", str(checkout_root), "python", repository_id=repository_id,
     )
     payments_id = services_repo.ensure_service(
-        conn, "payments-service", str(payments_root), "python", repository_id=repository_id,
+        conn, "payments-service", str(payments_root), "node-ts", repository_id=repository_id,
     )
     evidence = Evidence("client.py", 1, 1)
-    controller_evidence = Evidence("controller.py", 1, 1)
+    controller_evidence = Evidence("controller.ts", 1, 1)
     flows_repo.replace_analysis(conn, checkout_id, AnalysisResult(static_service_calls=[
         StaticServiceCall(
             source="CheckoutClient.authorize", target_service="payments-service", protocol="http",
@@ -59,7 +59,7 @@ def _plan_with_a_resolved_http_unit(root: Path):
         EntryPoint("http", "POST", "/authorizations", "PaymentsController.authorize", controller_evidence),
     ], error_contracts=[
         ErrorContract(
-            source="PaymentsController.authorize", role="maps", error_kind="conflict",
+            source="controller.authorize", role="maps", error_kind="conflict",
             internal_type="AuthorizationDeclined", protocol="http", transport_code="409",
             public_code="AUTHORIZATION_DECLINED", exposes_internal_detail=False,
             retryability="not_retryable", evidence=controller_evidence,
@@ -123,17 +123,46 @@ def test_assess_working_change_never_labels_a_unit_without_source_evidence_as_om
 def test_assess_working_change_flags_changed_public_error_contract_evidence(tmp_path: Path):
     conn, plan, since_commit = _plan_with_a_resolved_http_unit(tmp_path / "repository")
     repository_root = tmp_path / "repository"
-    (repository_root / "payments-service" / "controller.py").write_text("authorize_v2()\n")
+    (repository_root / "payments-service" / "controller.ts").write_text("authorize_v2()\n")
 
     result = queries.assess_working_change(conn, plan["plan_id"], "commerce", since_commit)
 
     assert result["public_error_contracts_at_risk"] == [{
         "service": "payments-service",
-        "symbol": "PaymentsController.authorize",
+        "symbol": "controller.authorize",
         "protocol": "http",
         "transport_code": "409",
         "public_code": "AUTHORIZATION_DECLINED",
-        "changed_file": "payments-service/controller.py",
-        "evidence": [{"file": "controller.py", "start_line": 1, "end_line": 1}],
+        "changed_file": "payments-service/controller.ts",
+        "evidence": [{"file": "controller.ts", "start_line": 1, "end_line": 1}],
+    }]
+    validate(result, load_schema("assess_working_change"))
+
+
+def test_assess_working_change_detects_a_changed_public_error_status(tmp_path: Path):
+    conn, plan, since_commit = _plan_with_a_resolved_http_unit(tmp_path / "repository")
+    repository_root = tmp_path / "repository"
+    (repository_root / "payments-service" / "controller.ts").write_text(
+        '''import express from "express";
+const app = express();
+function authorize(req: Request, res: Response) { return res.status(422).json({}); }
+app.post("/authorizations", authorize);
+''',
+        encoding="utf-8",
+    )
+
+    result = queries.assess_working_change(conn, plan["plan_id"], "commerce", since_commit)
+
+    assert result["public_error_contract_breaks"] == [{
+        "service": "payments-service",
+        "symbol": "controller.authorize",
+        "protocol": "http",
+        "previous": {"transport_code": "409", "public_code": "AUTHORIZATION_DECLINED"},
+        "current": {"transport_code": "422", "public_code": None},
+        "changed_file": "payments-service/controller.ts",
+        "evidence": [
+            {"file": "controller.ts", "start_line": 1, "end_line": 1},
+            {"file": "controller.ts", "start_line": 3, "end_line": 3},
+        ],
     }]
     validate(result, load_schema("assess_working_change"))

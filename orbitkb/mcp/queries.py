@@ -11,6 +11,7 @@ import sqlite3
 from collections import deque
 from pathlib import Path
 
+from orbitkb.analysis.engine import StaticAnalysisEngine
 from orbitkb.analysis.smells import find_entrypoint_smells
 from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import architecture as architecture_repo
@@ -2114,21 +2115,67 @@ def assess_working_change(
         for service in [unit.get("service"), *unit.get("dependencies", [])]
         if isinstance(service, str)
     }
-    service_roots = {
-        name: Path(service["root_path"])
+    service_rows = {
+        name: service
         for name in service_names
         if (service := services_repo.get_service_by_name(conn, name, repository_id=repo["id"])) is not None
     }
+    service_roots = {name: Path(service["root_path"]) for name, service in service_rows.items()}
     public_error_contracts = [
         {**dict(contract), "service": service_name}
-        for service_name in sorted(service_names)
-        if (service := services_repo.get_service_by_name(conn, service_name, repository_id=repo["id"])) is not None
+        for service_name, service in sorted(service_rows.items())
         for contract in flows_repo.list_static_error_contracts(conn, service["id"])
     ]
+    current_public_error_contracts = _current_public_error_contracts_for_changed_services(
+        Path(repo["root_path"]), changed_files, service_rows,
+    )
     assessment = assess_change_units(
         Path(repo["root_path"]), changed_files, change_units, service_roots, public_error_contracts,
+        current_public_error_contracts,
     )
     return {"plan_id": plan_id, "repository": repository, "since_commit": since_commit, **assessment}
+
+
+def _current_public_error_contracts_for_changed_services(
+    repository_root: Path, changed_files: list[str], service_rows: dict[str, sqlite3.Row],
+) -> list[dict]:
+    """Analyze only changed planned services for an advisory public-contract diff."""
+    current_contracts: list[dict] = []
+    for service_name, service in service_rows.items():
+        service_root = Path(service["root_path"])
+        if not _service_has_changed_file(repository_root, service_root, changed_files):
+            continue
+        if not isinstance(service["stack"], str):
+            continue
+        try:
+            analysis = StaticAnalysisEngine().analyze(service_root, service["stack"])
+        except Exception:
+            logger.warning("could not analyze changed service for public error contract assessment: %s", service_name)
+            continue
+        current_contracts.extend({
+            "service": service_name,
+            "source": contract.source,
+            "role": contract.role,
+            "error_kind": contract.error_kind,
+            "internal_type": contract.internal_type,
+            "protocol": contract.protocol,
+            "transport_code": contract.transport_code,
+            "public_code": contract.public_code,
+            "file_path": contract.evidence.file_path,
+            "start_line": contract.evidence.start_line,
+            "end_line": contract.evidence.end_line,
+        } for contract in analysis.error_contracts)
+    return current_contracts
+
+
+def _service_has_changed_file(repository_root: Path, service_root: Path, changed_files: list[str]) -> bool:
+    try:
+        relative_root = service_root.resolve().relative_to(repository_root.resolve()).as_posix()
+    except ValueError:
+        return False
+    if relative_root == ".":
+        return bool(changed_files)
+    return any(path == relative_root or path.startswith(f"{relative_root}/") for path in changed_files)
 
 
 def _minimal_unit_reading(change_unit: dict) -> list[dict]:

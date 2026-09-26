@@ -381,6 +381,10 @@ unassessable. A changed source file for an indexed public HTTP, gRPC or GraphQL 
 contract is returned in `public_error_contracts_at_risk` so the agent can reindex and
 validate compatibility. This is advisory file-level evidence, not a claim that the
 status or public code changed.
+For a changed planned service, OrbitKB compares indexed and current local AST facts
+without an LLM. `public_error_contract_breaks` is emitted only when one public handler
+maps unambiguously to a different status or public code; ambiguous or removed mappings
+remain at risk instead of being paired heuristically.
 The result also lists changed files outside services named by the plan and every
 remaining validation obligation. It is an advisory, read-only check, never an
 implementation gate.

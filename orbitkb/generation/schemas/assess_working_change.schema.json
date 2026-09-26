@@ -11,7 +11,8 @@
     "unassessable_change_units",
     "files_outside_planned_surface",
     "pending_validation",
-    "public_error_contracts_at_risk"
+    "public_error_contracts_at_risk",
+    "public_error_contract_breaks"
   ],
   "additionalProperties": false,
   "properties": {
@@ -90,6 +91,51 @@
           "protocol": {"enum": ["http", "grpc", "graphql"]},
           "transport_code": {"type": ["string", "null"]},
           "public_code": {"type": ["string", "null"]},
+          "changed_file": {"type": "string"},
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["file", "start_line", "end_line"],
+              "additionalProperties": false,
+              "properties": {
+                "file": {"type": "string"},
+                "start_line": {"type": "integer"},
+                "end_line": {"type": "integer"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "public_error_contract_breaks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["service", "symbol", "protocol", "previous", "current", "changed_file", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "service": {"type": "string"},
+          "symbol": {"type": "string"},
+          "protocol": {"enum": ["http", "grpc", "graphql"]},
+          "previous": {
+            "type": "object",
+            "required": ["transport_code", "public_code"],
+            "additionalProperties": false,
+            "properties": {
+              "transport_code": {"type": ["string", "null"]},
+              "public_code": {"type": ["string", "null"]}
+            }
+          },
+          "current": {
+            "type": "object",
+            "required": ["transport_code", "public_code"],
+            "additionalProperties": false,
+            "properties": {
+              "transport_code": {"type": ["string", "null"]},
+              "public_code": {"type": ["string", "null"]}
+            }
+          },
           "changed_file": {"type": "string"},
           "evidence": {
             "type": "array",

@@ -383,6 +383,10 @@ as unassessable. When a changed file is the indexed source of a public HTTP, gRP
 GraphQL error contract, it also reports that contract in
 `public_error_contracts_at_risk` for reindexing and compatibility validation. File-level
 Git evidence does not claim that a status or public code actually changed.
+For a changed planned service, OrbitKB also performs a local AST comparison without an
+LLM. When one source-proven public handler maps unambiguously to a different status or
+public code, `public_error_contract_breaks` reports the prior and current values.
+Ambiguous or removed mappings remain only at risk rather than being paired by guesswork.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in
