@@ -167,6 +167,55 @@ def derive_cloud_dependency_iac_review_units(findings: list[dict], primary_servi
     return units
 
 
+def derive_cloud_dead_letter_queue_review_units(
+    findings: list[dict], primary_services: set[str],
+) -> list[dict]:
+    """Create deployment reviews for SQS queues lacking local redrive evidence.
+
+    A dead-letter configuration can be attached outside the indexed resource, so this
+    stays an advisory confirmation of the delivery boundary rather than a claim that
+    messages have no recovery path.
+    """
+    units: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for finding in findings:
+        if finding.get("kind") != "possible_missing_dead_letter_queue":
+            continue
+        services = finding.get("services")
+        detail = finding.get("detail")
+        confidence = finding.get("confidence")
+        if (
+            not isinstance(services, list) or len(services) != 1 or services[0] not in primary_services
+            or not isinstance(detail, dict) or not isinstance(confidence, (int, float)) or confidence < 0.45
+        ):
+            continue
+        queue = detail.get("queue")
+        evidence = detail.get("evidence")
+        if not isinstance(queue, str) or not queue or not isinstance(evidence, list) or not evidence:
+            continue
+        service = services[0]
+        key = service, queue
+        if key in seen:
+            continue
+        seen.add(key)
+        units.append({
+            "id": f"cloud-dead-letter-queue:{service}:{queue}",
+            "service": service,
+            "target": {"role": "deployment", "symbol": f"queue:{queue}", "evidence": evidence},
+            "action": "review",
+            "reason": finding.get("reason", "review the indexed queue recovery policy"),
+            "preconditions": [],
+            "related_contracts": [f"cloud:queue:{queue}"],
+            "dependencies": [],
+            "validation": [
+                f"verify SQS queue {queue} has a dead-letter queue and redrive policy, or document external configuration",
+            ],
+            "confidence": float(confidence),
+            "evidence": evidence,
+        })
+    return units
+
+
 def derive_broad_timeout_handler_review_units(
     findings: list[dict], primary_services: set[str],
 ) -> list[dict]:

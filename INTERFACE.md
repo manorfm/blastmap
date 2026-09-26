@@ -211,7 +211,9 @@ replication/read-model contract; multiple primary candidates remain an explicit 
 decision. A primary service whose code names a cloud resource without matching local
 IaC can receive a `cloud-dependency-iac` review. It asks to confirm an IaC declaration
 or documented external provisioning, without claiming the resource is unavailable at
-runtime. A primary
+runtime. A primary service with an indexed SQS queue lacking local redrive evidence can
+receive a `cloud-dead-letter-queue` review. It asks to confirm a dead-letter queue or
+external configuration without claiming recovery is absent at runtime. A primary
 caller can receive a `retry-downstream-error` review when a literal retry shares a
 source with a resolved downstream endpoint flow exposing 4xx. It asks to exclude that
 response unless its remote contract explicitly marks it transient; service-wide

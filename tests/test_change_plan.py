@@ -27,6 +27,7 @@ from orbitkb.generation.architecture import recompute_architecture_view
 from orbitkb.generation.change_plan import (
     derive_aggregate_ownership_review_units,
     derive_broad_timeout_handler_review_units,
+    derive_cloud_dead_letter_queue_review_units,
     derive_cloud_dependency_iac_review_units,
     derive_error_mapping_review_units,
     derive_http_resilience_policy_review_units,
@@ -1710,6 +1711,49 @@ def test_broad_timeout_handler_units_exclude_low_confidence_findings():
             "detail": {},
         },
     ], {"checkout-service"}) == []
+
+
+def test_cloud_dead_letter_queue_units_include_source_proven_queue_declarations():
+    assert derive_cloud_dead_letter_queue_review_units([
+        {
+            "kind": "possible_missing_dead_letter_queue",
+            "services": ["orders-service"],
+            "reason": "orders-service SQS queue 'orders' has no local redrive policy.",
+            "confidence": 0.45,
+            "detail": {
+                "queue": "orders",
+                "evidence": [{"file": "infra/queues.tf", "start_line": 8, "end_line": 14}],
+            },
+        },
+    ], {"orders-service"}) == [{
+        "id": "cloud-dead-letter-queue:orders-service:orders",
+        "service": "orders-service",
+        "target": {
+            "role": "deployment", "symbol": "queue:orders",
+            "evidence": [{"file": "infra/queues.tf", "start_line": 8, "end_line": 14}],
+        },
+        "action": "review",
+        "reason": "orders-service SQS queue 'orders' has no local redrive policy.",
+        "preconditions": [],
+        "related_contracts": ["cloud:queue:orders"],
+        "dependencies": [],
+        "validation": [
+            "verify SQS queue orders has a dead-letter queue and redrive policy, or document external configuration",
+        ],
+        "confidence": 0.45,
+        "evidence": [{"file": "infra/queues.tf", "start_line": 8, "end_line": 14}],
+    }]
+
+
+def test_cloud_dead_letter_queue_units_exclude_lower_confidence_findings():
+    assert derive_cloud_dead_letter_queue_review_units([
+        {
+            "kind": "possible_missing_dead_letter_queue",
+            "services": ["orders-service"],
+            "confidence": 0.44,
+            "detail": {},
+        },
+    ], {"orders-service"}) == []
 
 
 def test_retry_downstream_error_units_include_a_resolved_endpoint_contract():

@@ -232,6 +232,10 @@ For a primary service whose code names a cloud resource without matching local I
 `plan_change` creates a `cloud-dependency-iac` review. It asks to confirm an IaC
 declaration or documented external provisioning, without assuming the resource is
 missing at runtime.
+For a primary service with an indexed SQS queue lacking a local redrive policy,
+`plan_change` creates a `cloud-dead-letter-queue` review. It asks to confirm a
+dead-letter queue or external configuration, without claiming recovery is absent at
+runtime.
 For a primary service, an explicit mapping of a broad exception type creates a
 `broad-error-handler` review. It preserves the generic handler as a possible safe
 fallback and asks only whether expected client and domain errors have specific
