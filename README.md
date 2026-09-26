@@ -927,13 +927,16 @@ and reconstruction when that digest is unchanged. It still reads those inputs to
 calculate the digest. `--force`, external depth enrichment, or a source change during
 analysis bypasses or withholds snapshot reuse, preserving correctness over speed.
 
-Architecture rules have fact-mutation tests for cycles, fan-out, shared storage,
+Architecture rules have fact-mutation tests for cycles and fan-out (both at
+service level and their intra-service component analog), shared storage,
 read-entrypoint side effects, RabbitMQ recovery-policy hypotheses, cloud
 dependencies undeclared in IaC (or declared but unreferenced in code), and cloud
 security/misconfiguration smells (missing dead-letter queue, public object
-storage, missing encryption or bucket versioning). Static and change-surface
-evaluations are deterministic regression checks; they do not claim to measure an
-LLM's judgment on arbitrary codebases.
+storage, missing encryption or bucket versioning). A component-level cycle or
+fan-in/fan-out finding is scoped to one service's traced entrypoint-to-boundary
+`flow_edges`, never a claim about that service's whole code graph. Static and
+change-surface evaluations are deterministic regression checks; they do not
+claim to measure an LLM's judgment on arbitrary codebases.
 
 ## Further reading
 
