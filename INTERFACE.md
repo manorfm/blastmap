@@ -249,7 +249,8 @@ choice is rejected, requiring a new plan and an explicit impact reassessment.
 `describe_change_unit` returns one persisted change unit, its validation checklist and
 the smallest producer/consumer `describe_messages` queries needed to verify an event
 contract, or the client `describe_service` and remote `list_entrypoints` queries for a
-resolved HTTP boundary, `describe_persistence` for a schema/migration review, or
+resolved HTTP boundary (including a retry against a resolved downstream HTTP error),
+`describe_persistence` for a schema/migration review, or
 `describe_feature_flags` for a source-proven feature-flag review, or
 `describe_cloud_dependencies` for a deployment review, or
 `list_entrypoints` for an entrypoint review, or

@@ -2105,7 +2105,10 @@ def assess_working_change(
 
 def _minimal_unit_reading(change_unit: dict) -> list[dict]:
     producer = change_unit["service"]
-    if change_unit["target"]["role"] == "integration":
+    if (
+        change_unit["target"]["role"] == "integration"
+        or change_unit["id"].startswith("retry-downstream-error:")
+    ):
         target_service = change_unit["dependencies"][0]
         return [
             {

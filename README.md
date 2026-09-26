@@ -157,7 +157,9 @@ finalized decision is immutable within that plan.
 producer/consumer contract queries needed before editing. Deployment reviews direct
 the agent to indexed cloud dependencies and IaC declarations rather than unrelated
 message contracts. Entrypoint reviews direct it to the indexed endpoint contract and
-reachable flow rather than treating HTTP dependencies as message consumers.
+reachable flow rather than treating HTTP dependencies as message consumers. A
+source-proven retry against a resolved downstream HTTP error follows the same bounded
+client and endpoint reading path.
 When a primary service has a source-proven internal HTTP call whose remote method and
 route are indexed, `plan_change` also creates a contract-review unit for that boundary.
 It also adds an error-mapping review only for a high-confidence, source-proven local

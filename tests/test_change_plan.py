@@ -1844,6 +1844,26 @@ def test_entrypoint_review_units_read_indexed_entrypoints():
     }]
 
 
+def test_downstream_retry_review_units_read_the_resolved_http_boundary():
+    assert queries._minimal_unit_reading({
+        "id": "retry-downstream-error:checkout-service:CheckoutService.submit:inventory-service:InsufficientStock:409",
+        "service": "checkout-service",
+        "target": {"role": "application_flow", "symbol": "CheckoutService.submit"},
+        "dependencies": ["inventory-service"],
+    }) == [
+        {
+            "service": "checkout-service",
+            "purpose": "confirm the literal outbound HTTP client",
+            "recommended_query": {"tool": "describe_service", "arguments": {"service": "checkout-service"}},
+        },
+        {
+            "service": "inventory-service",
+            "purpose": "confirm the resolved target endpoint contract",
+            "recommended_query": {"tool": "list_entrypoints", "arguments": {"service": "inventory-service"}},
+        },
+    ]
+
+
 def test_runtime_configuration_units_require_an_exact_environment_key_match():
     assert derive_runtime_configuration_review_units(
         {"checkout-service": [{
