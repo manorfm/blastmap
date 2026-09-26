@@ -160,6 +160,64 @@ def find_fan_imbalance(conn: sqlite3.Connection) -> list[dict]:
     return findings
 
 
+def _owner(symbol: str) -> str:
+    """The class/receiver identity a flow_edges endpoint belongs to — everything
+    before the first '.', with a leading 'this.' stripped first (same normalization
+    resolution.py already applies). A symbol with no '.' (a free function call) is
+    its own owner."""
+    return symbol.removeprefix("this.").split(".", 1)[0]
+
+
+def _internal_component_edges(conn: sqlite3.Connection) -> dict[int, list[tuple[str, str]]]:
+    """(owner_from, owner_to) pairs per service_id, restricted to invokes/injects
+    edges between two "local" owners — an owner that never appears as the source of
+    an edge in this service is a boundary (a DB client, a cloud SDK receiver, an
+    unresolved receiver), not another component, and is dropped without needing an
+    exclusion list. A self-loop (an owner calling itself) is not coupling and is
+    dropped too."""
+    rows = conn.execute(
+        "SELECT service_id, from_symbol, to_symbol FROM flow_edges WHERE kind IN ('invokes', 'injects')"
+    ).fetchall()
+    pairs_by_service: dict[int, list[tuple[str, str]]] = defaultdict(list)
+    for row in rows:
+        pairs_by_service[row["service_id"]].append((_owner(row["from_symbol"]), _owner(row["to_symbol"])))
+    result: dict[int, list[tuple[str, str]]] = {}
+    for service_id, pairs in pairs_by_service.items():
+        local_owners = {owner_from for owner_from, _ in pairs}
+        result[service_id] = [
+            (owner_from, owner_to) for owner_from, owner_to in pairs
+            if owner_from != owner_to and owner_from in local_owners and owner_to in local_owners
+        ]
+    return result
+
+
+def find_component_cycles(conn: sqlite3.Connection) -> list[dict]:
+    """The intra-service analog of find_cycles: a circular dependency between
+    components of the SAME service, found only within traced entrypoint-to-boundary
+    flows (flow_edges), never a claim about the service's whole code graph."""
+    names = _service_names(conn)
+    findings = []
+    for service_id, pairs in _internal_component_edges(conn).items():
+        service_name = names.get(service_id)
+        if service_name is None:
+            continue
+        owners = sorted({owner for pair in pairs for owner in pair})
+        owner_ids = {owner: index for index, owner in enumerate(owners)}
+        edges = [(owner_ids[owner_from], owner_ids[owner_to]) for owner_from, owner_to in pairs]
+        for component in _tarjan_scc(edges):
+            cycle_names = sorted(owners[index] for index in component)
+            findings.append({
+                "kind": "component_cycle", "severity": "warning", "services": [service_name],
+                "reason": (
+                    f"Within {service_name}, {' -> '.join(cycle_names)} -> {cycle_names[0]} form a circular "
+                    "dependency inside traced entrypoint-to-boundary flows — not a full code graph, but a "
+                    "real cycle among the paths this index has proof for."
+                ),
+                "detail": {"components": cycle_names},
+            })
+    return findings
+
+
 def find_shared_database(conn: sqlite3.Connection) -> list[dict]:
     names = _service_names(conn)
     rows = conn.execute(

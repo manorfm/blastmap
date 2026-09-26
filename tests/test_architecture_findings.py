@@ -24,6 +24,7 @@ from orbitkb.db.repositories import services as services_repo
 from orbitkb.generation.architecture import (
     diff_architecture_runs,
     find_aggregate_ownership_overlap,
+    find_component_cycles,
     find_cycles,
     find_duplicate_external_integrations,
     find_fan_imbalance,
@@ -325,6 +326,57 @@ def test_find_fan_imbalance_does_not_flag_below_threshold(tmp_path: Path):
     service_calls_repo.reconcile_service_call_targets(conn)
 
     assert find_fan_imbalance(conn) == []
+
+
+def test_find_component_cycles_detects_a_cycle_within_one_service(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "python")
+    evidence = Evidence("checkout.py", 10, 10)
+    flows_repo.replace_analysis(
+        conn, service_id,
+        AnalysisResult(edges=[
+            FlowEdge("A.run", "B.process", "invokes", evidence),
+            FlowEdge("B.process", "C.finish", "invokes", evidence),
+            FlowEdge("C.finish", "A.run", "invokes", evidence),
+        ]),
+    )
+
+    findings = find_component_cycles(conn)
+
+    assert len(findings) == 1
+    assert findings[0]["kind"] == "component_cycle"
+    assert findings[0]["services"] == ["checkout"]
+    assert set(findings[0]["detail"]["components"]) == {"A", "B", "C"}
+
+
+def test_find_component_cycles_ignores_a_simple_chain_within_one_service(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    service_id = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "python")
+    evidence = Evidence("checkout.py", 10, 10)
+    flows_repo.replace_analysis(
+        conn, service_id,
+        AnalysisResult(edges=[
+            FlowEdge("A.run", "B.process", "invokes", evidence),
+            FlowEdge("B.process", "C.finish", "invokes", evidence),
+        ]),
+    )
+
+    assert find_component_cycles(conn) == []
+
+
+def test_find_component_cycles_ignores_cross_service_edges(tmp_path: Path):
+    conn = open_db(tmp_path / "test.db")
+    a = services_repo.ensure_service(conn, "checkout", "/tmp/checkout", "python")
+    b = services_repo.ensure_service(conn, "billing", "/tmp/billing", "python")
+    evidence = Evidence("checkout.py", 10, 10)
+    flows_repo.replace_analysis(conn, a, AnalysisResult(edges=[
+        FlowEdge("A.run", "B.process", "invokes", evidence),
+    ]))
+    flows_repo.replace_analysis(conn, b, AnalysisResult(edges=[
+        FlowEdge("B.process", "A.run", "invokes", evidence),
+    ]))
+
+    assert find_component_cycles(conn) == []
 
 
 def test_find_shared_database_flags_same_entity_on_same_engine(tmp_path: Path):
