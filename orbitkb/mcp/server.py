@@ -47,6 +47,17 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.list_services(conn, repository)
 
     @mcp.tool()
+    def describe_ci_commands(
+        repository: str, limit: int = queries.DEFAULT_LIST_LIMIT, offset: int = 0,
+    ) -> dict:
+        """List safe literal test, build, migration and client-generation commands
+        indexed from GitHub Actions workflows. Commands are evidence only: this tool
+        never executes them. Dynamic, multiline and secret-bearing workflow steps are
+        intentionally excluded. Use this before changing validation or delivery code."""
+        with closing(_conn()) as conn:
+            return queries.describe_ci_commands(conn, repository, limit, offset)
+
+    @mcp.tool()
     def describe_service(
         service: str,
         limit: int = queries.DEFAULT_LIST_LIMIT,

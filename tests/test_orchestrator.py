@@ -10,6 +10,7 @@ import pytest
 
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import ci_commands as ci_commands_repo
 from orbitkb.db.repositories import components as components_repo
 from orbitkb.db.repositories import embeddings as embeddings_repo
 from orbitkb.db.repositories import (
@@ -198,6 +199,27 @@ def test_repository_is_created_and_linked_to_all_services(tmp_path: Path):
     for svc in services_repo.list_services(conn):
         row = services_repo.get_service_by_name(conn, svc["name"])
         assert row["repository_id"] == repos[0]["id"]
+
+
+def test_index_path_persists_safe_github_actions_commands(tmp_path: Path):
+    root = tmp_path / "sample-project"
+    shutil.copytree(SAMPLE_ROOT, root)
+    workflow = root / ".github" / "workflows" / "ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("jobs:\n  verify:\n    steps:\n      - run: npm test\n", encoding="utf-8")
+    conn = open_db(tmp_path / "ci-commands.db")
+
+    index_path(conn, root, FakeOrchestratorBackend())
+
+    repository = repositories_repo.get_repository_by_name(conn, root.name)
+    assert [dict(command) for command in ci_commands_repo.list_ci_commands(conn, repository["id"])] == [{
+        "workflow_path": ".github/workflows/ci.yml",
+        "kind": "test",
+        "command": "npm test",
+        "file_path": ".github/workflows/ci.yml",
+        "start_line": 4,
+        "end_line": 4,
+    }]
 
 
 def test_reindexing_unchanged_files_skips_generation(tmp_path: Path):

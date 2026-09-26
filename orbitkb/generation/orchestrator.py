@@ -8,7 +8,9 @@ from typing import Protocol
 
 from orbitkb.analysis.depth import DepthProvider, NoopDepthProvider
 from orbitkb.analysis.engine import STATIC_ANALYSIS_INPUT_VERSION, StaticAnalysisEngine
+from orbitkb.ci.scanner import scan_github_actions_commands
 from orbitkb.db.repositories import apis as apis_repo
+from orbitkb.db.repositories import ci_commands as ci_commands_repo
 from orbitkb.db.repositories import cloud_iac as cloud_iac_repo
 from orbitkb.db.repositories import components as components_repo
 from orbitkb.db.repositories import embeddings as embeddings_repo
@@ -718,6 +720,7 @@ def index_path(
     # IaC commonly lives outside any single service's own root, so this can't
     # be folded into index_service's per-service pass.
     iac_facts = scan_repository_facts(resolved_path, candidates)
+    ci_commands_repo.replace_ci_commands(conn, repository_id, scan_github_actions_commands(resolved_path))
     cloud_iac_repo.replace_iac_resources(conn, repository_id, iac_facts.resources)
     kubernetes_configuration_repo.replace_kubernetes_configuration_bindings(
         conn, repository_id, iac_facts.configuration_bindings,

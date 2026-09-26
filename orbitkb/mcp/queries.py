@@ -17,6 +17,7 @@ from orbitkb.db.repositories import apis as apis_repo
 from orbitkb.db.repositories import architecture as architecture_repo
 from orbitkb.db.repositories import change_plans as change_plans_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
+from orbitkb.db.repositories import ci_commands as ci_commands_repo
 from orbitkb.db.repositories import cloud_iac as cloud_iac_repo
 from orbitkb.db.repositories import components as components_repo
 from orbitkb.db.repositories import context_telemetry as context_telemetry_repo
@@ -301,6 +302,29 @@ def list_apis(
     return {
         "service": row["name"], "repository": row["repository_name"],
         "apis": [{"method": a["method"], "path": a["path"], "summary": a["summary"]} for a in apis],
+        **page,
+    }
+
+
+def describe_ci_commands(conn: sqlite3.Connection, repository: str, limit: int = DEFAULT_LIST_LIMIT, offset: int = 0) -> dict:
+    """Return bounded, source-proven validation commands indexed from GitHub Actions."""
+    error = _validate_pagination(limit, offset)
+    if error:
+        return {"error": error}
+    repo = repositories_repo.get_repository_by_name(conn, repository)
+    if repo is None:
+        return {"error": f"unknown repository: {repository}"}
+    commands, page = _paginate(ci_commands_repo.list_ci_commands(conn, repo["id"]), limit, offset)
+    return {
+        "repository": repository,
+        "commands": [{
+            "workflow_path": command["workflow_path"],
+            "kind": command["kind"],
+            "command": command["command"],
+            "evidence": {
+                "file": command["file_path"], "start_line": command["start_line"], "end_line": command["end_line"],
+            },
+        } for command in commands],
         **page,
     }
 

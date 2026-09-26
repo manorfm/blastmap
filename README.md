@@ -113,6 +113,7 @@ Start broad, then narrow the request.
 | Inspect Kubernetes configuration sources | `describe_runtime_configuration` | `describe_configuration`, `describe_entrypoint` |
 | Inspect feature-flag reads | `describe_feature_flags` | `describe_entrypoint`, `list_security_findings` |
 | Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
+| Inspect indexed CI validation commands | `describe_ci_commands` | `plan_change`, `assess_working_change` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |
 | Compare runtime and static paths | `describe_runtime_divergence` | `describe_entrypoint` |
 
@@ -136,6 +137,10 @@ With the optional local semantic backend installed, semantic and keyword/graph
 candidates are blended before that synthesis, so a broad lexical match does not hide a
 relevant meaning-based candidate. This stays within the normal candidate budget and
 does not call an LLM for retrieval.
+
+`describe_ci_commands` returns paginated, source-proven test, build, migration and
+client-generation commands from literal GitHub Actions `run:` steps. It never executes
+them and excludes multiline, dynamic and secret-bearing steps.
 
 `describe_persistence` also exposes bounded, source-proven migration facts from SQL
 files (including Prisma migrations) and Liquibase XML change sets in conventional

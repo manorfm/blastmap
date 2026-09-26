@@ -53,6 +53,8 @@ reanalyzes the service.
    its smallest suggested follow-up context.
 4. After implementation, call `assess_working_change(plan_id, repository, since_commit)`
    to compare the ready plan with a bounded Git diff. It is advisory only.
+5. Call `describe_ci_commands(repository)` when validation, migration or generated
+   clients may change; it returns only safe, literal GitHub Actions commands.
 5. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
 6. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, gRPC, message, CLI or
