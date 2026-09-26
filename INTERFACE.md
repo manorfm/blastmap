@@ -55,7 +55,8 @@ reanalyzes the service.
 4. After implementation, call `assess_working_change(plan_id, repository, since_commit)`
    to compare the ready plan with a bounded Git diff. It is advisory only.
 5. Call `describe_ci_commands(repository)` when validation, migration or generated
-   clients may change; it returns only safe, literal GitHub Actions commands.
+   clients may change; it returns paginated, source-proven literal GitHub Actions
+   `run:` commands only, excluding multiline, dynamic and secret-bearing steps.
 6. Call `list_services(repository?)`; use its repository field to qualify
    `describe_service` whenever the same service name exists in more than one repository.
 7. Call `describe_indexing_capabilities()` before planning an unfamiliar stack. It is
@@ -64,7 +65,8 @@ reanalyzes the service.
    unknown.
 8. Call `list_entrypoints(service)` to choose an HTTP, GraphQL, gRPC, message, CLI or
    job entrypoint. A `grpc` entrypoint sourced from Protobuf describes only its declared
-   wire signature; handler and client linkage remain unknown until separately proven.
+   wire signature; handler and client linkage is resolved only under the specific
+   conditions in "gRPC entrypoint linking" below.
 9. Call `describe_entrypoint(service, kind, method, name)` for the bounded,
    reachable deterministic flow evidence. For an exact AST-proven HTTP route, its
    `contract.formal_contract` can also expose a matching conventional OpenAPI/Swagger
@@ -77,7 +79,10 @@ reanalyzes the service.
    caller mapping; otherwise it returns explicit unknowns rather than inventing a failure.
    Node REST mappings currently require a literal 4xx/5xx Express/Fastify reply through
    `res`, `response` or `reply`; unsupported global middleware, throws and dynamic
-   statuses remain unknown.
+   statuses remain unknown. A direct reply body containing `err`, `error` or
+   `exception`'s `message`, `stack` or `cause` is additionally recorded only as an
+   internal-detail exposure boolean and source location; the potentially sensitive
+   value itself is never retained.
    A named Express error middleware is included only with a literal `app.use(handler)`
    registration on a proven receiver and the conventional `(error, req, res, next)`
    signature; dynamic registration remains unknown.
@@ -199,6 +204,13 @@ does not claim that the branch is retried at runtime. A primary service can rece
 `retry-http-idempotency` review for a literal retried `POST` or `PATCH`; it asks for an
 idempotency key or documented server-side de-duplication without claiming that the
 HTTP method makes the retry unsafe. A primary service can receive a
+`timeout-local-fallback` review when a literal timeout policy and HTTP call share a
+symbol without a typed local fallback; it asks whether a local fallback or documented
+timeout propagation exists, without treating external/global handling as absent. A
+primary service can receive an `http-resilience-policy` review for an indexed
+internal HTTP call with no literal timeout or retry policy; it asks for a documented
+timeout policy and repeat-safety before retries, while preserving defaults and
+factories as unknown. A primary service can receive a
 `retry-delivery` review when its retrying, state-writing publisher has a literal
 channel consumed by another source-proven state-writing service. The consumers are
 dependencies and validation asks for producer outbox/idempotency plus consumer
@@ -274,6 +286,21 @@ A `persistence` migration-review unit is created only for an affected, evidenced
 table whose name exactly matches a source-proven migration fact in the same primary
 service. Destructive migration facts add deployment, backup and rollback validation;
 the unit is advisory and does not claim that any migration must execute.
+
+A primary service with a source-proven feature-flag read can receive one review unit
+per provider/key, grouping the read locations; it asks for targeting, default-behavior
+and rollout confirmation only when the guarded behavior changes, never that the flag
+itself must change. A primary service with an exact source-proven environment-key
+match to an attributed Kubernetes workload can receive one configuration review unit
+per key, verifying compatibility and rollout references without assuming a ConfigMap,
+Secret or deployed value must change. A separate configuration review is added when an
+indexed Kubernetes reference has a source-proven missing key in its single local
+declaration; it requires confirmation before rollout without choosing whether the
+source or workload must change. A primary service referencing a Kubernetes source not
+declared locally can receive a low-confidence ownership review asking which
+repository, chart, controller or delivery process owns that source, never assuming it
+must be created in the indexed repository; the same review is created once per
+unresolved `envFrom` source, grouping references across differing prefixes.
 
 `refine_change_plan` accepts only the pending plan's declared IDs and options. It
 requires one selection per decision, persists the selections, then returns `ready`
@@ -540,6 +567,35 @@ method decorator imported from `@nestjs/common`. It combines those paths and exp
 the controller method as the entrypoint symbol; dynamic decorator arguments and
 unrecognized decorator imports remain unknown.
 
+## gRPC entrypoint linking
+
+Literal Protobuf service RPC signatures are exposed as `grpc` entrypoints with
+package, request/response types, streaming flags, imports and source evidence,
+describing only the declared wire contract. When one uniquely declared RPC has one
+Nest `@GrpcMethod("Service", "Method")` handler imported from `@nestjs/microservices`,
+the entrypoint flow links to that method; this is code-level intent, not proof of a
+server, generated stub or runtime registration. The same link is available for Java
+classes imported from `net.devh.boot.grpc.server.service.GrpcService` that extend a
+generated `ServiceGrpc.*ImplBase` and implement one `@Override` method, and for
+Kotlin classes with the same import that extend `ServiceGrpcKt.*CoroutineImplBase` or
+`ServiceGrpc.*ImplBase` and override one method. A Nest `ClientGrpc` imported from the
+same package can also link a direct `this.client.getService<T>("Service")` assignment
+and its subsequent literal RPC method call to one unique declared RPC. Java calls
+through a direct generated `ServiceGrpc.*Stub` field, and Kotlin calls through a
+direct generated `ServiceGrpcKt.*Stub` or `ServiceGrpc.*Stub` property (including a
+primary-constructor property), receive the same link; a direct, unqualified local
+superclass can also expose one uniquely typed stub property to its subclass. Host,
+channel, token, stub generation, dynamic bindings, inheritance chains and non-unique
+service/RPC names remain unknown. An exact RPC method name has high confidence; a
+unique case-only match such as `ReserveStock` → `reserveStock` has medium confidence.
+Duplicate declarations or handlers are omitted rather than arbitrarily selecting one.
+Go methods on a struct that embeds exactly one generated `Unimplemented<Service>Server`
+receive the same handler link — this identifies source intent only; `grpc.Server`
+registration, interceptors and runtime exposure remain unknown. A Go client call is
+linked only when a struct field typed as `package.ServiceClient` is initialized by
+the matching `package.NewServiceClient(...)` in a struct literal; dynamic construction
+and local client variables remain unknown.
+
 ## Entrypoint response
 
 ```json
@@ -600,7 +656,35 @@ Reactor `.retry(N)`, and Reactor
 Each item reports its source, mechanism, numeric `value`, `unit`, and evidence.
 It describes declared source limits, never a runtime retry or timeout guarantee;
 dynamic values, property-backed policies, `retryWhen`, and external client
-configuration are omitted. The optional `smells` list contains explicit hypotheses, never a
+configuration are omitted.
+For Node/TypeScript, the same response returns Nest- and Express/Fastify-specific
+contract fields on their reachable entrypoint. `contract.route_middlewares` lists
+direct identifiers registered as Express middleware before the handler on that exact
+route, even when handlers are reused; factories, inline/computed middleware and
+whether a middleware performs authorization or validation remain unknown.
+`contract.route_guards` lists direct identifiers registered through Nest's imported
+`@UseGuards`, at controller or handler scope; factories, expressions, global guards
+and guard policy remain unknown, as do dynamic decorator arguments.
+`contract.request` reports exactly one imported `@Body()` parameter with a direct
+nominal DTO type; DTO fields, validation pipes, property reads such as
+`@Body("field")`, generics and multiple body parameters remain unknown rather than
+being expanded or selected arbitrarily. `contract.parameters` includes direct
+`@Param("name")`, `@Query("name")` and `@Headers("name")` bindings with a literal
+name and simple TypeScript type; aggregate bindings, dynamic names and composite
+types remain unknown. `contract.validation_pipes` records direct identifiers
+registered through imported `@UsePipes`, at controller or handler scope; pipe
+instances, factories, options and the validation rules they enforce remain unknown.
+Cache and rate-limit context is returned only for direct decorators imported from
+`@nestjs/cache-manager` (`CacheKey`, `CacheTTL`) or `@nestjs/throttler` (`Throttle`),
+again at controller or handler scope; their arguments, global policy and runtime
+behavior remain unknown, and same-named local decorators are not classified.
+For Nest controllers and `@Injectable()` services, direct typed constructor members
+declared `private`, `protected` or `public` are indexed as dependencies; a call
+through `this.member` resolves to a locally indexed class method only on one exact
+type/method match, including chains between services. Injection tokens, factories,
+undecorated classes, generic/compound types and ordinary constructor locals remain
+unresolved.
+The optional `smells` list contains explicit hypotheses, never a
 conclusive architecture classification; for example, a GraphQL mutation that directly
 writes state is flagged
 optional `smells` list contains explicit hypotheses, never a conclusive architecture
