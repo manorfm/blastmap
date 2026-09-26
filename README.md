@@ -411,7 +411,7 @@ After an agent runs one suggested command, it can call `record_ci_validation_res
 with the exact indexed workflow path and line, `passed`/`failed` status, and optional
 duration. OrbitKB records only the latest status for that plan command; it never runs
 the command or stores stdout, stderr, notes, source content or secrets. A later
-assessment returns the matching compact result.
+assessment returns the matching compact result with the same workflow line.
 `describe_change_validation_status` then summarizes at most three indexed test/build
 commands as `pending`, `failed`, or `reported_passed`. It is a compact agent report,
 not release approval or proof that manual change-unit checks are complete.

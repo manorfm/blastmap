@@ -139,7 +139,7 @@ def test_assess_working_change_recommends_indexed_ci_commands_for_changed_planne
     ]
     assert result["ci_validation_results"] == [{
         "kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml",
-        "status": "passed", "duration_ms": 900,
+        "start_line": 5, "status": "passed", "duration_ms": 900,
     }]
     validate(result, load_schema("assess_working_change"))
 

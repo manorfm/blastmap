@@ -402,7 +402,7 @@ After an agent runs one suggested command, `record_ci_validation_result` accepts
 exact indexed workflow path and line, `passed`/`failed` status and optional duration.
 It records only the current status for that plan command: no command execution,
 stdout, stderr, note, source content or secret is accepted or retained. The next
-assessment includes a compact matching result.
+assessment includes a compact matching result with the same workflow line.
 `describe_change_validation_status(plan_id, repository)` provides the same bounded
 commands with `pending`, `failed` or `reported_passed` aggregate state. It is an
 agent-reported CI summary, not a release gate or evidence that manual unit checks are

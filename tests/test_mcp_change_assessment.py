@@ -113,5 +113,5 @@ async def test_assess_working_change_over_stdio(tmp_path: Path):
     assert result["omitted_change_units"] == []
     assert result["ci_validation_results"] == [{
         "kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml",
-        "status": "passed", "duration_ms": 42,
+        "start_line": 5, "status": "passed", "duration_ms": 42,
     }]

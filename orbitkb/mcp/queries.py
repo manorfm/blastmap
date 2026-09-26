@@ -1987,6 +1987,7 @@ def _ci_validation_result_summaries(
                 "kind": command["kind"],
                 "command": command["command"],
                 "workflow_path": command["workflow_path"],
+                "start_line": start_line,
                 "status": result["status"],
                 "duration_ms": result["duration_ms"],
             })
