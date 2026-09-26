@@ -2119,7 +2119,15 @@ def assess_working_change(
         for name in service_names
         if (service := services_repo.get_service_by_name(conn, name, repository_id=repo["id"])) is not None
     }
-    assessment = assess_change_units(Path(repo["root_path"]), changed_files, change_units, service_roots)
+    public_error_contracts = [
+        {**dict(contract), "service": service_name}
+        for service_name in sorted(service_names)
+        if (service := services_repo.get_service_by_name(conn, service_name, repository_id=repo["id"])) is not None
+        for contract in flows_repo.list_static_error_contracts(conn, service["id"])
+    ]
+    assessment = assess_change_units(
+        Path(repo["root_path"]), changed_files, change_units, service_roots, public_error_contracts,
+    )
     return {"plan_id": plan_id, "repository": repository, "since_commit": since_commit, **assessment}
 
 

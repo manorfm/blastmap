@@ -377,9 +377,13 @@ remain consistent; the evaluated offset must be a multiple of that limit.
 uses only the Git diff from that base (including local tracked and untracked files)
 and persisted source evidence: an evidence-backed unit is covered only when its file
 changed; otherwise it is reported as omitted. Units with no source evidence are
-explicitly unassessable. The result also lists changed files outside services named by
-the plan and every remaining validation obligation. It is an advisory, read-only check,
-never an implementation gate.
+unassessable. A changed source file for an indexed public HTTP, gRPC or GraphQL error
+contract is returned in `public_error_contracts_at_risk` so the agent can reindex and
+validate compatibility. This is advisory file-level evidence, not a claim that the
+status or public code changed.
+The result also lists changed files outside services named by the plan and every
+remaining validation obligation. It is an advisory, read-only check, never an
+implementation gate.
 
 ## Compact change context
 

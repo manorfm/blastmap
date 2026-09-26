@@ -10,7 +10,8 @@
     "omitted_change_units",
     "unassessable_change_units",
     "files_outside_planned_surface",
-    "pending_validation"
+    "pending_validation",
+    "public_error_contracts_at_risk"
   ],
   "additionalProperties": false,
   "properties": {
@@ -66,6 +67,43 @@
           "contracts": {"type": "array", "items": {"type": "string"}},
           "dependencies": {"type": "array", "items": {"type": "string"}},
           "checks": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "public_error_contracts_at_risk": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "service",
+          "symbol",
+          "protocol",
+          "transport_code",
+          "public_code",
+          "changed_file",
+          "evidence"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "service": {"type": "string"},
+          "symbol": {"type": "string"},
+          "protocol": {"enum": ["http", "grpc", "graphql"]},
+          "transport_code": {"type": ["string", "null"]},
+          "public_code": {"type": ["string", "null"]},
+          "changed_file": {"type": "string"},
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["file", "start_line", "end_line"],
+              "additionalProperties": false,
+              "properties": {
+                "file": {"type": "string"},
+                "start_line": {"type": "integer"},
+                "end_line": {"type": "integer"}
+              }
+            }
+          }
         }
       }
     }

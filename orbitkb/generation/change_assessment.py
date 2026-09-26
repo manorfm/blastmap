@@ -9,6 +9,7 @@ def assess_change_units(
     changed_files: list[str],
     change_units: list[dict],
     service_roots: dict[str, Path],
+    public_error_contracts: list[dict],
 ) -> dict:
     """Classify unit coverage only from source evidence; never infer semantic coverage."""
     normalized_changes = sorted(set(changed_files))
@@ -64,6 +65,9 @@ def assess_change_units(
             path for path in normalized_changes if not any(_is_within(path, root) for root in planned_roots)
         ],
         "pending_validation": pending_validation,
+        "public_error_contracts_at_risk": _public_error_contracts_at_risk(
+            normalized_changes, public_error_contracts, relative_roots,
+        ),
     }
 
 
@@ -91,3 +95,63 @@ def _unit_evidence_files(unit: dict, relative_service_root: str | None) -> list[
 
 def _is_within(path: str, root: str) -> bool:
     return path == root or path.startswith(f"{root}/")
+
+
+def _public_error_contracts_at_risk(
+    changed_files: list[str], public_error_contracts: list[dict], relative_roots: dict[str, str | None],
+) -> list[dict]:
+    """Return indexed public contracts whose source file changed in the Git diff.
+
+    File-level Git evidence cannot establish whether a status or public code itself
+    changed. These are intentionally advisory candidates for reindexing and
+    compatibility validation, not asserted contract breaks.
+    """
+    changed = set(changed_files)
+    at_risk: list[dict] = []
+    seen: set[tuple[str, str, str, str | None, str | None, str]] = set()
+    for contract in public_error_contracts:
+        service = contract.get("service")
+        source = contract.get("source")
+        protocol = contract.get("protocol")
+        role = contract.get("role")
+        transport_code = contract.get("transport_code")
+        public_code = contract.get("public_code")
+        file_path = contract.get("file_path")
+        relative_root = relative_roots.get(service)
+        if (
+            not isinstance(service, str) or not isinstance(source, str)
+            or protocol not in {"http", "grpc", "graphql"} or role not in {"handles", "maps", "raises"}
+            or not isinstance(file_path, str) or relative_root is None
+            or not isinstance(transport_code, str) and not isinstance(public_code, str)
+        ):
+            continue
+        relative_file = PurePosixPath(file_path)
+        if relative_file.is_absolute() or ".." in relative_file.parts:
+            continue
+        changed_file = (PurePosixPath(relative_root) / relative_file).as_posix()
+        if changed_file not in changed:
+            continue
+        key = service, source, protocol, transport_code, public_code, changed_file
+        if key in seen:
+            continue
+        seen.add(key)
+        at_risk.append({
+            "service": service,
+            "symbol": source,
+            "protocol": protocol,
+            "transport_code": transport_code,
+            "public_code": public_code,
+            "changed_file": changed_file,
+            "evidence": [{
+                "file": file_path,
+                "start_line": contract.get("start_line"),
+                "end_line": contract.get("end_line"),
+            }],
+        })
+    return sorted(
+        at_risk,
+        key=lambda item: (
+            item["service"], item["symbol"], item["protocol"], item["transport_code"] or "",
+            item["public_code"] or "", item["changed_file"],
+        ),
+    )

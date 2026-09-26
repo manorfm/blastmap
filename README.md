@@ -379,7 +379,10 @@ After implementation, `assess_working_change` compares a ready plan with a Git d
 from a supplied base commit, including local tracked and untracked files. It is
 advisory: it reports evidence-backed units not touched, files outside the planned
 service surface, and validation still required; it labels units without source evidence
-as unassessable rather than guessing coverage.
+as unassessable. When a changed file is the indexed source of a public HTTP, gRPC or
+GraphQL error contract, it also reports that contract in
+`public_error_contracts_at_risk` for reindexing and compatibility validation. File-level
+Git evidence does not claim that a status or public code actually changed.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

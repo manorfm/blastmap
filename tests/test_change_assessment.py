@@ -7,6 +7,7 @@ from jsonschema import validate
 from orbitkb.analysis.models import (
     AnalysisResult,
     EntryPoint,
+    ErrorContract,
     Evidence,
     StaticServiceCall,
 )
@@ -47,6 +48,7 @@ def _plan_with_a_resolved_http_unit(root: Path):
         conn, "payments-service", str(payments_root), "python", repository_id=repository_id,
     )
     evidence = Evidence("client.py", 1, 1)
+    controller_evidence = Evidence("controller.py", 1, 1)
     flows_repo.replace_analysis(conn, checkout_id, AnalysisResult(static_service_calls=[
         StaticServiceCall(
             source="CheckoutClient.authorize", target_service="payments-service", protocol="http",
@@ -54,7 +56,14 @@ def _plan_with_a_resolved_http_unit(root: Path):
         ),
     ]))
     flows_repo.replace_analysis(conn, payments_id, AnalysisResult(entrypoints=[
-        EntryPoint("http", "POST", "/authorizations", "PaymentsController.authorize", evidence),
+        EntryPoint("http", "POST", "/authorizations", "PaymentsController.authorize", controller_evidence),
+    ], error_contracts=[
+        ErrorContract(
+            source="PaymentsController.authorize", role="maps", error_kind="conflict",
+            internal_type="AuthorizationDeclined", protocol="http", transport_code="409",
+            public_code="AUTHORIZATION_DECLINED", exposes_internal_detail=False,
+            retryability="not_retryable", evidence=controller_evidence,
+        ),
     ]))
     plan = queries.plan_change(conn, FakeBackend({
         "primary": [{"service": "checkout-service", "reason": "owns checkout", "confidence": 0.9}],
@@ -109,3 +118,22 @@ def test_assess_working_change_never_labels_a_unit_without_source_evidence_as_om
         "id": "event-contract:checkout-service:payment_authorized",
         "reason": "the change unit has no source evidence file",
     }]
+
+
+def test_assess_working_change_flags_changed_public_error_contract_evidence(tmp_path: Path):
+    conn, plan, since_commit = _plan_with_a_resolved_http_unit(tmp_path / "repository")
+    repository_root = tmp_path / "repository"
+    (repository_root / "payments-service" / "controller.py").write_text("authorize_v2()\n")
+
+    result = queries.assess_working_change(conn, plan["plan_id"], "commerce", since_commit)
+
+    assert result["public_error_contracts_at_risk"] == [{
+        "service": "payments-service",
+        "symbol": "PaymentsController.authorize",
+        "protocol": "http",
+        "transport_code": "409",
+        "public_code": "AUTHORIZATION_DECLINED",
+        "changed_file": "payments-service/controller.py",
+        "evidence": [{"file": "controller.py", "start_line": 1, "end_line": 1}],
+    }]
+    validate(result, load_schema("assess_working_change"))
