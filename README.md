@@ -115,6 +115,7 @@ Start broad, then narrow the request.
 | Inspect cloud/infra dependencies | `describe_cloud_dependencies` | `find_architecture_smells` |
 | Inspect indexed CI validation commands | `describe_ci_commands` | `plan_change`, `assess_working_change` |
 | Report a persisted unit check | `describe_change_unit` | `record_change_unit_validation_result` |
+| Find manual checks needing attention | `describe_change_plan_validation_status` | `describe_change_unit` |
 | Review reported plan validation | `describe_change_validation_status` | `record_ci_validation_result`, `record_change_unit_validation_result` |
 | Review advisory plan closure | `review_change_closure` | `describe_change_unit`, `assess_working_change` |
 | Find architectural risks | `find_architecture_smells` | evidence and remediation in the finding |
@@ -417,6 +418,10 @@ For each preplanned manual check, an agent can call
 check index and `passed`/`failed`. It cannot submit a new check, free-form note,
 command output or source content. The unit detail projects that result without
 duplicating the check text.
+`describe_change_plan_validation_status` lists up to 20 units at once (up to 50 on
+request), with IDs and aggregate statuses only. It lets an agent find pending or
+failed checks without retrieving every checklist; use `describe_change_unit` only
+for the selected unit's check wording.
 `review_change_closure` combines that report with one bounded Git assessment. It uses
 `needs_attention` for a failed reported validation (including a persisted manual
 check), a confirmed public-error-contract break or an omitted source-backed plan unit;

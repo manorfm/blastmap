@@ -557,6 +557,21 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             )
 
     @mcp.tool()
+    def describe_change_plan_validation_status(
+        plan_id: str,
+        limit: int = queries.DEFAULT_PLAN_VALIDATION_UNIT_LIMIT,
+        offset: int = 0,
+    ) -> dict:
+        """List bounded manual-validation state for a ready plan without check text.
+
+        Use this to find pending or failed units without requesting every unit's
+        checklist. It returns only unit IDs, counts and statuses; describe_change_unit
+        remains the narrow follow-up for a specific check and its wording.
+        """
+        with closing(_conn()) as conn:
+            return queries.describe_change_plan_validation_status(conn, plan_id, limit, offset)
+
+    @mcp.tool()
     def describe_change_validation_status(plan_id: str, repository: str) -> dict:
         """Summarize current agent-reported CI validation for one ready change plan.
 

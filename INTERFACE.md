@@ -407,6 +407,10 @@ records `passed` or `failed` only for a zero-based check index already persisted
 ready plan unit. It never accepts new check text, notes, command output or source
 content. A pending persisted check keeps the closure in review; a failed one needs
 attention.
+`describe_change_plan_validation_status(plan_id, limit?, offset?)` lists only bounded
+unit IDs and aggregate manual-check state (default 20, maximum 50). It intentionally
+omits checklist text, so an agent can identify a pending or failed unit before using
+`describe_change_unit` for its narrow follow-up.
 `review_change_closure(plan_id, repository, since_commit)` combines this compact
 validation state with a fresh bounded Git assessment. Its `needs_attention` status
 covers reported CI or persisted manual-check failure, a confirmed public error-contract

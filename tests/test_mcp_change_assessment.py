@@ -78,6 +78,9 @@ async def test_assess_working_change_over_stdio(tmp_path: Path):
                 "check_index": 0,
                 "status": "passed",
             }))
+            manual_validation_status = content_json(await session.call_tool("describe_change_plan_validation_status", {
+                "plan_id": plan_id,
+            }))
             validation_status = content_json(await session.call_tool("describe_change_validation_status", {
                 "plan_id": plan_id, "repository": "commerce",
             }))
@@ -90,6 +93,17 @@ async def test_assess_working_change_over_stdio(tmp_path: Path):
 
     assert recorded == {"ok": True, "status": "passed", "duration_ms": 42}
     assert manual_recorded == {"ok": True, "status": "passed"}
+    assert manual_validation_status == {
+        "plan_id": plan_id,
+        "status": "reported_passed",
+        "summary": {"total": 1, "passed": 1, "failed": 0, "pending": 0},
+        "units": [{
+            "id": "unit-1",
+            "status": "reported_passed",
+            "summary": {"total": 1, "passed": 1, "failed": 0, "pending": 0},
+        }],
+        "pagination": {"limit": 20, "offset": 0, "total": 1, "truncated": False, "next_offset": None},
+    }
     assert validation_status["status"] == "reported_passed"
     assert validation_status["summary"] == {"total": 1, "passed": 1, "failed": 0, "pending": 0}
     assert closure["status"] == "ready_for_manual_review"

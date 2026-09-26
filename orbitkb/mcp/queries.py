@@ -105,6 +105,8 @@ DEFAULT_PLAN_TOKEN_BUDGET = 2200
 MAX_PLAN_TOKEN_BUDGET = 2200
 MAX_PLAN_CI_VALIDATION_COMMANDS = 3
 MAX_CI_VALIDATION_DURATION_MS = 86_400_000
+DEFAULT_PLAN_VALIDATION_UNIT_LIMIT = 20
+MAX_PLAN_VALIDATION_UNIT_LIMIT = 50
 MAX_CLOSURE_CHANGE_UNIT_IDS = 3
 _FLOW_KINDS = {"invokes", "injects", "validates", "reads", "writes", "publishes", "consumes"}
 _EPIC_TYPE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
@@ -2014,6 +2016,11 @@ def _manual_validation_summary(conn: sqlite3.Connection, plan_id: int, change_un
         for unit in change_units
         for check_index, _check in enumerate(unit.get("validation", []))
     ]
+    return _manual_validation_status(statuses)
+
+
+def _manual_validation_status(statuses: list[str]) -> dict:
+    """Return one compact status for a fixed set of persisted check positions."""
     summary = {
         "total": len(statuses),
         "passed": sum(status == "passed" for status in statuses),
@@ -2027,6 +2034,54 @@ def _manual_validation_summary(conn: sqlite3.Connection, plan_id: int, change_un
         else "reported_passed"
     )
     return {"status": status, "summary": summary}
+
+
+def describe_change_plan_validation_status(
+    conn: sqlite3.Connection,
+    plan_id: object,
+    limit: object = DEFAULT_PLAN_VALIDATION_UNIT_LIMIT,
+    offset: object = 0,
+) -> dict:
+    """List bounded manual-validation state without repeating checklist text."""
+    if not isinstance(plan_id, str) or (match := re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)) is None:
+        return {"error": "plan_id must have the form cp_<positive integer>"}
+    stored_plan = change_plans_repo.get_plan(conn, int(match.group(1)))
+    if stored_plan is None:
+        return {"error": f"unknown plan_id: {plan_id}"}
+    if stored_plan["status"] != "ready":
+        return {"error": f"plan must be ready before reviewing validation (status: {stored_plan['status']})"}
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_PLAN_VALIDATION_UNIT_LIMIT:
+        return {"error": f"limit must be an integer between 1 and {MAX_PLAN_VALIDATION_UNIT_LIMIT}"}
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        return {"error": "offset must be a non-negative integer"}
+    change_units = json.loads(stored_plan["change_units_json"])
+    results = {
+        (result["change_unit_id"], result["check_index"]): result["status"]
+        for result in manual_validation_results_repo.list_results(conn, int(match.group(1)))
+    }
+    units = []
+    all_statuses: list[str] = []
+    for unit in change_units:
+        checks = unit.get("validation", [])
+        if not isinstance(checks, list) or not checks:
+            continue
+        statuses = [results.get((unit["id"], index), "pending") for index, _check in enumerate(checks)]
+        all_statuses.extend(statuses)
+        units.append({"id": unit["id"], **_manual_validation_status(statuses)})
+    page = units[offset:offset + limit]
+    total = len(units)
+    return {
+        "plan_id": plan_id,
+        **_manual_validation_status(all_statuses),
+        "units": page,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "truncated": offset + len(page) < total,
+            "next_offset": offset + len(page) if offset + len(page) < total else None,
+        },
+    }
 
 
 def record_ci_validation_result(
