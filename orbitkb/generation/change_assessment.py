@@ -82,6 +82,24 @@ def _relative_service_root(repository_root: Path, service_root: Path) -> str | N
         return None
 
 
+def changed_files_touch_service_roots(
+    repository_root: Path, changed_files: list[str], service_roots: dict[str, Path],
+) -> bool:
+    """Return whether a Git diff reaches any indexed service root in a plan."""
+    relative_roots = {
+        root
+        for service_root in service_roots.values()
+        if (root := _relative_service_root(repository_root, service_root)) is not None
+    }
+    if "." in relative_roots:
+        return bool(changed_files)
+    return any(
+        changed_file == root or changed_file.startswith(f"{root}/")
+        for changed_file in changed_files
+        for root in relative_roots
+    )
+
+
 def _unit_evidence_files(unit: dict, relative_service_root: str | None) -> list[str]:
     if relative_service_root is None:
         return []

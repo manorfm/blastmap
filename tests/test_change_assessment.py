@@ -13,12 +13,23 @@ from orbitkb.analysis.models import (
 )
 from orbitkb.db.connection import open_db
 from orbitkb.db.repositories import change_plans
+from orbitkb.db.repositories import ci_commands as ci_commands_repo
 from orbitkb.db.repositories import flows as flows_repo
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
+from orbitkb.generation.change_assessment import changed_files_touch_service_roots
 from orbitkb.generation.llm_harness import load_schema
 from orbitkb.mcp import queries
 from tests.test_change_surface import FakeBackend
+
+
+def test_assessment_recognizes_a_changed_file_in_a_repository_root_service(tmp_path: Path):
+    repository_root = tmp_path / "repository"
+    repository_root.mkdir()
+
+    assert changed_files_touch_service_roots(
+        repository_root, ["src/checkout.py"], {"checkout-service": repository_root},
+    ) is True
 
 
 def _plan_with_a_resolved_http_unit(root: Path):
@@ -86,12 +97,42 @@ def test_assess_working_change_reports_an_omitted_evidence_backed_unit(tmp_path:
         "evidence_files": ["checkout-service/client.py"],
     }]
     assert result["files_outside_planned_surface"] == ["README.md"]
+    assert result["ci_validation_commands"] == []
     assert result["pending_validation"] == [{
         "change_unit_id": unit_id,
         "contracts": ["POST /authorizations"],
         "dependencies": ["payments-service"],
         "checks": ["verify client and payments-service agree on POST /authorizations"],
     }]
+    validate(result, load_schema("assess_working_change"))
+
+
+def test_assess_working_change_recommends_indexed_ci_commands_for_changed_planned_services(tmp_path: Path):
+    conn, plan, since_commit = _plan_with_a_resolved_http_unit(tmp_path / "repository")
+    repository_id = repositories_repo.get_repository_by_name(conn, "commerce")["id"]
+    ci_commands_repo.replace_ci_commands(conn, repository_id, [
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "test", "command": "pytest -q",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 5, "end_line": 5},
+        },
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "build", "command": "npm run build",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 6, "end_line": 6},
+        },
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "migration", "command": "npm run migrate",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 7, "end_line": 7},
+        },
+    ])
+    repository_root = tmp_path / "repository"
+    (repository_root / "checkout-service" / "client.py").write_text("request_authorization_v2()\n")
+
+    result = queries.assess_working_change(conn, plan["plan_id"], "commerce", since_commit)
+
+    assert result["ci_validation_commands"] == [
+        {"kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml"},
+        {"kind": "build", "command": "npm run build", "workflow_path": ".github/workflows/ci.yml"},
+    ]
     validate(result, load_schema("assess_working_change"))
 
 

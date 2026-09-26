@@ -37,7 +37,10 @@ from orbitkb.discovery.hashing import git_working_changed_files_with_status
 from orbitkb.generation import change_surface
 from orbitkb.generation.architecture import diff_architecture_runs
 from orbitkb.generation.backend_base import LLMBackend
-from orbitkb.generation.change_assessment import assess_change_units
+from orbitkb.generation.change_assessment import (
+    assess_change_units,
+    changed_files_touch_service_roots,
+)
 from orbitkb.generation.change_context import MAX_CONTEXT_SERVICES, build_change_context
 from orbitkb.generation.change_plan import (
     derive_aggregate_ownership_review_units,
@@ -1882,7 +1885,7 @@ def plan_change(
         },
         "decision_points": decision_points,
         "change_units": change_units,
-        "ci_validation_commands": _plan_ci_validation_commands(conn, repository_id),
+        "ci_validation_commands": _compact_ci_validation_commands(conn, repository_id),
         "unknowns": change_surface_result["unknowns"],
         "budget": {
             "requested_tokens": token_budget, "estimated_tokens": 0,
@@ -1897,8 +1900,8 @@ def plan_change(
     return response
 
 
-def _plan_ci_validation_commands(conn: sqlite3.Connection, repository_id: int | None) -> list[dict]:
-    """Return a tiny, safe validation hint without expanding the plan into CI detail."""
+def _compact_ci_validation_commands(conn: sqlite3.Connection, repository_id: int | None) -> list[dict]:
+    """Return a tiny, safe validation hint without expanding CI details."""
     if repository_id is None:
         return []
     commands: list[dict] = []
@@ -2182,7 +2185,18 @@ def assess_working_change(
         Path(repo["root_path"]), changed_files, change_units, service_roots, public_error_contracts,
         current_public_error_contracts,
     )
-    return {"plan_id": plan_id, "repository": repository, "since_commit": since_commit, **assessment}
+    ci_validation_commands = (
+        _compact_ci_validation_commands(conn, repo["id"])
+        if changed_files_touch_service_roots(Path(repo["root_path"]), changed_files, service_roots)
+        else []
+    )
+    return {
+        "plan_id": plan_id,
+        "repository": repository,
+        "since_commit": since_commit,
+        "ci_validation_commands": ci_validation_commands,
+        **assessment,
+    }
 
 
 def _current_public_error_contracts_for_changed_services(

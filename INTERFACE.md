@@ -388,6 +388,10 @@ For a changed planned service, OrbitKB compares indexed and current local AST fa
 without an LLM. `public_error_contract_breaks` is emitted only when one public handler
 maps unambiguously to a different status or public code; ambiguous or removed mappings
 remain at risk instead of being paired heuristically.
+When the diff reaches a service named by the plan, it also includes up to three
+deduplicated indexed `test`/`build` commands as a non-executing validation hint.
+Changes outside the planned service surface return no commands; migrations and client
+generation remain available through `describe_ci_commands`.
 The result also lists changed files outside services named by the plan and every
 remaining validation obligation. It is an advisory, read-only check, never an
 implementation gate.

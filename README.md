@@ -396,6 +396,10 @@ For a changed planned service, OrbitKB also performs a local AST comparison with
 LLM. When one source-proven public handler maps unambiguously to a different status or
 public code, `public_error_contract_breaks` reports the prior and current values.
 Ambiguous or removed mappings remain only at risk rather than being paired by guesswork.
+When the diff reaches a service named by the plan, the assessment also returns up to
+three indexed CI `test`/`build` commands as a non-executing validation hint. Changes
+outside that service surface receive no command recommendation; migrations and client
+generation remain available only through `describe_ci_commands`.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in

@@ -513,7 +513,9 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
 
         This read-only, deterministic advisory marks a unit covered only when a
         source-evidence file changed. It reports unassessable units rather than
-        guessing, and never calls an LLM or blocks an implementation.
+        guessing, and never calls an LLM or blocks an implementation. When the diff
+        reaches a planned service, it also returns safe indexed test/build hints
+        without executing them.
         """
         with closing(_conn()) as conn:
             return queries.assess_working_change(conn, plan_id, repository, since_commit)
