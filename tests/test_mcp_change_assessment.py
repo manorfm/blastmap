@@ -7,7 +7,7 @@ from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
 from orbitkb.db.connection import open_db
-from orbitkb.db.repositories import change_plans
+from orbitkb.db.repositories import change_plans, ci_commands
 from orbitkb.db.repositories import repositories as repositories_repo
 from orbitkb.db.repositories import services as services_repo
 from tests.mcp_test_helpers import content_json, server_params
@@ -43,6 +43,10 @@ def _build_fixture(root: Path, db_path: Path) -> tuple[str, str]:
         "confidence": 1.0,
         "evidence": [{"file": "client.py", "start_line": 1, "end_line": 1}],
     }])
+    ci_commands.replace_ci_commands(conn, repository_id, [{
+        "workflow_path": ".github/workflows/ci.yml", "kind": "test", "command": "pytest -q",
+        "evidence": {"file": ".github/workflows/ci.yml", "start_line": 5, "end_line": 5},
+    }])
     conn.close()
 
     (service_root / "client.py").write_text("after\n")
@@ -60,11 +64,24 @@ async def test_assess_working_change_over_stdio(tmp_path: Path):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
+            recorded = content_json(await session.call_tool("record_ci_validation_result", {
+                "plan_id": plan_id,
+                "repository": "commerce",
+                "workflow_path": ".github/workflows/ci.yml",
+                "start_line": 5,
+                "status": "passed",
+                "duration_ms": 42,
+            }))
             result = content_json(await session.call_tool("assess_working_change", {
                 "plan_id": plan_id, "repository": "commerce", "since_commit": since_commit,
             }))
 
+    assert recorded == {"ok": True, "status": "passed", "duration_ms": 42}
     assert result["covered_change_units"] == [{
         "id": "unit-1", "changed_files": ["checkout-service/client.py"],
     }]
     assert result["omitted_change_units"] == []
+    assert result["ci_validation_results"] == [{
+        "kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml",
+        "status": "passed", "duration_ms": 42,
+    }]

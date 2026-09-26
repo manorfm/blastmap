@@ -98,6 +98,7 @@ def test_assess_working_change_reports_an_omitted_evidence_backed_unit(tmp_path:
     }]
     assert result["files_outside_planned_surface"] == ["README.md"]
     assert result["ci_validation_commands"] == []
+    assert result["ci_validation_results"] == []
     assert result["pending_validation"] == [{
         "change_unit_id": unit_id,
         "contracts": ["POST /authorizations"],
@@ -126,6 +127,9 @@ def test_assess_working_change_recommends_indexed_ci_commands_for_changed_planne
     ])
     repository_root = tmp_path / "repository"
     (repository_root / "checkout-service" / "client.py").write_text("request_authorization_v2()\n")
+    assert queries.record_ci_validation_result(
+        conn, plan["plan_id"], "commerce", ".github/workflows/ci.yml", 5, "passed", 900,
+    ) == {"ok": True, "status": "passed", "duration_ms": 900}
 
     result = queries.assess_working_change(conn, plan["plan_id"], "commerce", since_commit)
 
@@ -133,7 +137,62 @@ def test_assess_working_change_recommends_indexed_ci_commands_for_changed_planne
         {"kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml"},
         {"kind": "build", "command": "npm run build", "workflow_path": ".github/workflows/ci.yml"},
     ]
+    assert result["ci_validation_results"] == [{
+        "kind": "test", "command": "pytest -q", "workflow_path": ".github/workflows/ci.yml",
+        "status": "passed", "duration_ms": 900,
+    }]
     validate(result, load_schema("assess_working_change"))
+
+
+def test_record_ci_validation_result_accepts_only_an_indexed_safe_test_or_build_command(tmp_path: Path):
+    conn, plan, _since_commit = _plan_with_a_resolved_http_unit(tmp_path / "repository")
+    repository_id = repositories_repo.get_repository_by_name(conn, "commerce")["id"]
+    ci_commands_repo.replace_ci_commands(conn, repository_id, [
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "test", "command": "pytest -q",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 5, "end_line": 5},
+        },
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "migration", "command": "npm run migrate",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 6, "end_line": 6},
+        },
+    ])
+
+    assert queries.record_ci_validation_result(
+        conn, plan["plan_id"], "commerce", ".github/workflows/ci.yml", 5, "passed", 900,
+    ) == {"ok": True, "status": "passed", "duration_ms": 900}
+    assert queries.record_ci_validation_result(
+        conn, plan["plan_id"], "commerce", ".github/workflows/ci.yml", 6, "passed",
+    ) == {"error": "indexed command is not a test or build validation"}
+    assert queries.record_ci_validation_result(
+        conn, plan["plan_id"], "commerce", ".github/workflows/ci.yml", 5, "skipped",
+    ) == {"error": "status must be 'passed' or 'failed'"}
+    assert queries.record_ci_validation_result(
+        conn, plan["plan_id"], "commerce", ".github/workflows/ci.yml", 5, "passed", -1,
+    ) == {"error": "duration_ms must be an integer between 0 and 86400000"}
+
+
+def test_assessment_does_not_match_a_result_from_a_deduplicated_command_at_another_line(tmp_path: Path):
+    conn, plan, since_commit = _plan_with_a_resolved_http_unit(tmp_path / "repository")
+    repository_id = repositories_repo.get_repository_by_name(conn, "commerce")["id"]
+    ci_commands_repo.replace_ci_commands(conn, repository_id, [
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "test", "command": "pytest -q",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 5, "end_line": 5},
+        },
+        {
+            "workflow_path": ".github/workflows/ci.yml", "kind": "test", "command": "pytest -q",
+            "evidence": {"file": ".github/workflows/ci.yml", "start_line": 6, "end_line": 6},
+        },
+    ])
+    assert queries.record_ci_validation_result(
+        conn, plan["plan_id"], "commerce", ".github/workflows/ci.yml", 6, "passed",
+    ) == {"ok": True, "status": "passed", "duration_ms": None}
+    (tmp_path / "repository" / "checkout-service" / "client.py").write_text("changed\n")
+
+    result = queries.assess_working_change(conn, plan["plan_id"], "commerce", since_commit)
+
+    assert result["ci_validation_results"] == []
 
 
 def test_assess_working_change_never_labels_a_unit_without_source_evidence_as_omitted(tmp_path: Path):

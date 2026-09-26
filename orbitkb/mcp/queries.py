@@ -18,6 +18,7 @@ from orbitkb.db.repositories import architecture as architecture_repo
 from orbitkb.db.repositories import change_plans as change_plans_repo
 from orbitkb.db.repositories import change_surface as change_surface_repo
 from orbitkb.db.repositories import ci_commands as ci_commands_repo
+from orbitkb.db.repositories import ci_validation_results as ci_validation_results_repo
 from orbitkb.db.repositories import cloud_iac as cloud_iac_repo
 from orbitkb.db.repositories import components as components_repo
 from orbitkb.db.repositories import context_telemetry as context_telemetry_repo
@@ -99,6 +100,7 @@ MAX_FLOW_EDGE_LIMIT = 200
 DEFAULT_PLAN_TOKEN_BUDGET = 2200
 MAX_PLAN_TOKEN_BUDGET = 2200
 MAX_PLAN_CI_VALIDATION_COMMANDS = 3
+MAX_CI_VALIDATION_DURATION_MS = 86_400_000
 _FLOW_KINDS = {"invokes", "injects", "validates", "reads", "writes", "publishes", "consumes"}
 _EPIC_TYPE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _RUNTIME_FILTER_DIMENSION_PRIORITY = {
@@ -1923,6 +1925,84 @@ def _compact_ci_validation_commands(conn: sqlite3.Connection, repository_id: int
     return commands
 
 
+def _ci_validation_result_summaries(
+    conn: sqlite3.Connection, plan_id: int, repository_id: int, commands: list[dict],
+) -> list[dict]:
+    locations_by_command: dict[tuple[str, str, str], int] = {}
+    for indexed_command in ci_commands_repo.list_ci_commands(conn, repository_id):
+        identity = (
+            indexed_command["kind"], indexed_command["command"], indexed_command["workflow_path"],
+        )
+        locations_by_command.setdefault(identity, indexed_command["start_line"])
+    results_by_location = {
+        (result["workflow_path"], result["start_line"]): result
+        for result in ci_validation_results_repo.list_results(conn, plan_id, repository_id)
+    }
+    summaries: list[dict] = []
+    for command in commands:
+        identity = (command["kind"], command["command"], command["workflow_path"])
+        start_line = locations_by_command.get(identity)
+        result = results_by_location.get((command["workflow_path"], start_line))
+        if result is not None:
+            summaries.append({
+                **command, "status": result["status"], "duration_ms": result["duration_ms"],
+            })
+    return summaries
+
+
+def record_ci_validation_result(
+    conn: sqlite3.Connection,
+    plan_id: object,
+    repository: object,
+    workflow_path: object,
+    start_line: object,
+    status: object,
+    duration_ms: object = None,
+) -> dict:
+    """Persist one agent-reported result for an indexed safe CI validation command."""
+    if not isinstance(plan_id, str) or (match := re.fullmatch(r"cp_([1-9][0-9]*)", plan_id)) is None:
+        return {"error": "plan_id must have the form cp_<positive integer>"}
+    stored_plan = change_plans_repo.get_plan(conn, int(match.group(1)))
+    if stored_plan is None:
+        return {"error": f"unknown plan_id: {plan_id}"}
+    if stored_plan["status"] != "ready":
+        return {"error": f"plan must be ready before recording validation (status: {stored_plan['status']})"}
+    if not isinstance(repository, str) or not repository:
+        return {"error": "repository must be a non-empty string"}
+    repo = repositories_repo.get_repository_by_name(conn, repository)
+    if repo is None:
+        return {"error": f"unknown repository: {repository}"}
+    if not isinstance(workflow_path, str) or not workflow_path:
+        return {"error": "workflow_path must be a non-empty string"}
+    if not isinstance(start_line, int) or isinstance(start_line, bool) or start_line < 1:
+        return {"error": "start_line must be a positive integer"}
+    if status not in {"passed", "failed"}:
+        return {"error": "status must be 'passed' or 'failed'"}
+    if duration_ms is not None and (
+        not isinstance(duration_ms, int)
+        or isinstance(duration_ms, bool)
+        or not 0 <= duration_ms <= MAX_CI_VALIDATION_DURATION_MS
+    ):
+        return {"error": f"duration_ms must be an integer between 0 and {MAX_CI_VALIDATION_DURATION_MS}"}
+    commands = ci_commands_repo.list_ci_commands_at_location(conn, repo["id"], workflow_path, start_line)
+    if not commands:
+        return {"error": "unknown indexed CI command"}
+    if len(commands) != 1:
+        return {"error": "ambiguous indexed CI command"}
+    command = commands[0]
+    if command["kind"] not in {"test", "build"}:
+        return {"error": "indexed command is not a test or build validation"}
+    ci_validation_results_repo.record_result(conn, int(match.group(1)), repo["id"], {
+        "workflow_path": command["workflow_path"],
+        "kind": command["kind"],
+        "command": command["command"],
+        "start_line": command["start_line"],
+        "status": status,
+        "duration_ms": duration_ms,
+    })
+    return {"ok": True, "status": status, "duration_ms": duration_ms}
+
+
 def _measure_plan_response(response: dict) -> TokenMeasurement:
     """Stabilize the count after the budget fields themselves enter the JSON."""
     budget = response["budget"]
@@ -2190,11 +2270,15 @@ def assess_working_change(
         if changed_files_touch_service_roots(Path(repo["root_path"]), changed_files, service_roots)
         else []
     )
+    ci_validation_results = _ci_validation_result_summaries(
+        conn, int(match.group(1)), repo["id"], ci_validation_commands,
+    )
     return {
         "plan_id": plan_id,
         "repository": repository,
         "since_commit": since_commit,
         "ci_validation_commands": ci_validation_commands,
+        "ci_validation_results": ci_validation_results,
         **assessment,
     }
 

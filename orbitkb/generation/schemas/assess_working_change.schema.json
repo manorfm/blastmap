@@ -12,6 +12,7 @@
     "files_outside_planned_surface",
     "pending_validation",
     "ci_validation_commands",
+    "ci_validation_results",
     "public_error_contracts_at_risk",
     "public_error_contract_breaks"
   ],
@@ -83,6 +84,22 @@
           "kind": {"type": "string", "enum": ["test", "build"]},
           "command": {"type": "string", "minLength": 1},
           "workflow_path": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "ci_validation_results": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["kind", "command", "workflow_path", "status", "duration_ms"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"type": "string", "enum": ["test", "build"]},
+          "command": {"type": "string", "minLength": 1},
+          "workflow_path": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "enum": ["passed", "failed"]},
+          "duration_ms": {"type": ["integer", "null"], "minimum": 0}
         }
       }
     },

@@ -521,6 +521,27 @@ def build_server(db_path: Path | None = None, backend: LLMBackend | None = None)
             return queries.assess_working_change(conn, plan_id, repository, since_commit)
 
     @mcp.tool()
+    def record_ci_validation_result(
+        plan_id: str,
+        repository: str,
+        workflow_path: str,
+        start_line: int,
+        status: str,
+        duration_ms: int | None = None,
+    ) -> dict:
+        """Record an agent-reported result for one indexed CI test/build command.
+
+        This never runs a command and accepts only the exact workflow path and line
+        of an indexed safe test/build command. It stores the latest passed/failed
+        state and optional duration, never stdout, stderr, notes or source content.
+        Call assess_working_change afterwards to see the compact result in context.
+        """
+        with closing(_conn()) as conn:
+            return queries.record_ci_validation_result(
+                conn, plan_id, repository, workflow_path, start_line, status, duration_ms,
+            )
+
+    @mcp.tool()
     def record_change_context_feedback(
         run_id: int,
         outcome: str,

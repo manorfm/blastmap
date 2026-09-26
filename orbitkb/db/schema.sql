@@ -605,6 +605,25 @@ CREATE TABLE IF NOT EXISTS change_plan_runs (
 
 CREATE INDEX IF NOT EXISTS idx_change_plan_runs_surface ON change_plan_runs(change_surface_run_id);
 
+-- Agent-reported status for a safe CI command already indexed from GitHub Actions.
+-- The command is copied as a source-proven audit reference because reindexing replaces
+-- ci_commands. No stdout, stderr, arguments, notes or source content is retained.
+CREATE TABLE IF NOT EXISTS change_plan_ci_validation_results (
+    id            INTEGER PRIMARY KEY,
+    plan_id       INTEGER NOT NULL REFERENCES change_plan_runs(id) ON DELETE CASCADE,
+    repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    workflow_path TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('test', 'build')),
+    command       TEXT NOT NULL,
+    start_line    INTEGER NOT NULL CHECK (start_line > 0),
+    status        TEXT NOT NULL CHECK (status IN ('passed', 'failed')),
+    duration_ms   INTEGER CHECK (duration_ms IS NULL OR duration_ms BETWEEN 0 AND 86400000),
+    recorded_at   TEXT NOT NULL,
+    UNIQUE(plan_id, repository_id, workflow_path, start_line)
+);
+CREATE INDEX IF NOT EXISTS idx_change_plan_ci_validation_results_plan
+    ON change_plan_ci_validation_results(plan_id, repository_id);
+
 -- A static snapshot is valid only for the exact analyzer input digest and parser
 -- version. It stores no source content and is invalidated by external depth facts.
 CREATE TABLE IF NOT EXISTS static_analysis_snapshots (

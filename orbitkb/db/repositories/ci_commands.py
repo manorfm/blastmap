@@ -38,3 +38,16 @@ def list_ci_commands(conn: sqlite3.Connection, repository_id: int) -> list[sqlit
            ORDER BY workflow_path, start_line, kind, command""",
         (repository_id,),
     ).fetchall()
+
+
+def list_ci_commands_at_location(
+    conn: sqlite3.Connection, repository_id: int, workflow_path: str, start_line: int,
+) -> list[sqlite3.Row]:
+    """Return commands at one exact workflow location for a safe result reference."""
+    return conn.execute(
+        """SELECT workflow_path, kind, command, file_path, start_line, end_line
+           FROM ci_commands
+           WHERE repository_id = ? AND workflow_path = ? AND start_line = ?
+           ORDER BY kind, command""",
+        (repository_id, workflow_path, start_line),
+    ).fetchall()

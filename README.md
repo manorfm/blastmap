@@ -400,6 +400,11 @@ When the diff reaches a service named by the plan, the assessment also returns u
 three indexed CI `test`/`build` commands as a non-executing validation hint. Changes
 outside that service surface receive no command recommendation; migrations and client
 generation remain available only through `describe_ci_commands`.
+After an agent runs one suggested command, it can call `record_ci_validation_result`
+with the exact indexed workflow path and line, `passed`/`failed` status, and optional
+duration. OrbitKB records only the latest status for that plan command; it never runs
+the command or stores stdout, stderr, notes, source content or secrets. A later
+assessment returns the matching compact result.
 
 All MCP responses are structured JSON and use progressive disclosure. The detailed
 tool contract, pagination, response examples and ambiguity rules are in
